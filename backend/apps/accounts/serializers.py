@@ -1,0 +1,94 @@
+from rest_framework import serializers
+from django.contrib.auth import authenticate
+from apps.accounts.models import User, Session, MFADevice
+
+
+class UserSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = [
+            "id",
+            "email",
+            "full_name",
+            "wrapped_master_key",
+            "kdf_salt",
+            "kdf_params",
+            "public_key",
+            "wrapped_private_key",
+            "recovery_wrapped_master_key",
+            "email_verified_at",
+            "mfa_enabled",
+            "created_at",
+        ]
+        read_only_fields = ["id", "email_verified_at", "mfa_enabled", "created_at"]
+
+
+class RegisterSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    password = serializers.CharField(write_only=True, min_length=10)
+    full_name = serializers.CharField(required=False, allow_blank=True, default="")
+    wrapped_master_key = serializers.CharField()
+    kdf_salt = serializers.CharField()
+    kdf_params = serializers.JSONField()
+    public_key = serializers.CharField()
+    wrapped_private_key = serializers.CharField()
+    recovery_wrapped_master_key = serializers.CharField()
+
+    def validate_email(self, value):
+        email = value.lower().strip()
+        if User.objects.filter(email=email).exists():
+            raise serializers.ValidationError("An account with this email address already exists.")
+        return email
+
+
+class LoginSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    password = serializers.CharField(write_only=True)
+    totp_code = serializers.CharField(required=False, allow_blank=True)
+
+    def validate(self, attrs):
+        email = attrs.get("email", "").lower().strip()
+        password = attrs.get("password", "")
+
+        user = authenticate(username=email, password=password)
+        if not user:
+            raise serializers.ValidationError("Invalid email or password.")
+        if not user.is_active:
+            raise serializers.ValidationError("Account is inactive.")
+
+        attrs["user"] = user
+        return attrs
+
+
+class SessionSerializer(serializers.ModelSerializer):
+    is_active = serializers.BooleanField(read_only=True)
+
+    class Meta:
+        model = Session
+        fields = [
+            "id",
+            "device_label",
+            "ip_address",
+            "user_agent",
+            "last_seen",
+            "created_at",
+            "is_active",
+        ]
+        read_only_fields = fields
+
+
+class ChangePasswordSerializer(serializers.Serializer):
+    current_password = serializers.CharField(write_only=True)
+    new_password = serializers.CharField(write_only=True, min_length=10)
+    new_wrapped_master_key = serializers.CharField()
+    new_kdf_salt = serializers.CharField()
+    new_kdf_params = serializers.JSONField()
+
+
+class RecoverySerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    recovery_token_or_phrase = serializers.CharField()
+    new_password = serializers.CharField(write_only=True, min_length=10)
+    new_wrapped_master_key = serializers.CharField()
+    new_kdf_salt = serializers.CharField()
+    new_kdf_params = serializers.JSONField()
