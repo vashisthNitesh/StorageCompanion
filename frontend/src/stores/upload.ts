@@ -143,7 +143,7 @@ export const useUploadStore = defineStore("upload", () => {
 
           // Find presigned URL
           const presignedUrl = initData.presigned_urls.find(
-            (p) => p.part_number === partNumber
+            (p: { part_number: number; url: string }) => p.part_number === partNumber
           )?.url;
 
           if (!presignedUrl) {
