@@ -96,10 +96,20 @@ TEMPLATES = [
 WSGI_APPLICATION = "config.wsgi.application"
 ASGI_APPLICATION = "config.asgi.application"
 
-# Database
+# Database (Supports PostgreSQL / Neon DB / SQLite)
 DATABASES = {
     "default": env.db("DATABASE_URL", default="sqlite:///db.sqlite3")
 }
+
+# Neon Serverless Postgres auto-configuration
+db_host = DATABASES["default"].get("HOST", "")
+db_url = env.str("DATABASE_URL", default="")
+if "neon.tech" in db_host or "neon.tech" in db_url:
+    DATABASES["default"].setdefault("OPTIONS", {})["sslmode"] = "require"
+    # Keep connections non-persistent or short-lived for Neon serverless pooler
+    DATABASES["default"]["CONN_MAX_AGE"] = env.int("CONN_MAX_AGE", default=0)
+else:
+    DATABASES["default"]["CONN_MAX_AGE"] = env.int("CONN_MAX_AGE", default=60)
 
 # Password validation & Argon2id hasher
 PASSWORD_HASHERS = [

@@ -34,14 +34,19 @@ Under the **Environment Variables** section in Render, add:
 | `SECRET_KEY` | *(Click "Generate")* | 64-char random string |
 | `ALLOWED_HOSTS` | `.onrender.com,localhost,127.0.0.1` | Permits your `.onrender.com` domain |
 | `CSRF_TRUSTED_ORIGINS` | `https://*.onrender.com` | Prevents CSRF errors |
+| `DATABASE_URL` | `postgresql://user:pass@ep-***-pooler.neon.tech/neondb?sslmode=require` | **Your Neon DB connection string** |
 | `PAYMENT_PROVIDER` | `razorpay` | Razorpay gateway |
 | `DEFAULT_CURRENCY` | `INR` | Indian Rupees |
 | `RAZORPAY_KEY_ID` | `rzp_test_sample` | Replace with live key when ready |
 | `RAZORPAY_KEY_SECRET` | `sample_secret_key` | |
-| `DATABASE_URL` | *(Optional)* | Link a free Render Postgres or Neon/Supabase URL |
 
 > [!TIP]
-> If you do not provide a `DATABASE_URL`, SpeedCloud will automatically fall back to an internal SQLite database (`db.sqlite3`) so your app boots up immediately without errors!
+> **Connecting Neon DB**:
+> In your [Neon Console](https://console.neon.tech):
+> 1. Copy your connection string (select **Pooled connection** for serverless scaling).
+> 2. Paste it directly as the `DATABASE_URL` environment variable in Render.
+> 3. SpeedCloud automatically enables `sslmode=require` and configures `CONN_MAX_AGE=0` for optimal Neon connection pooling.
+> 4. When your Render service starts up, `python manage.py migrate` and `python manage.py seed_demo` will run automatically against Neon!
 
 ### Step 4: Click "Deploy Web Service"
 What happens automatically:
