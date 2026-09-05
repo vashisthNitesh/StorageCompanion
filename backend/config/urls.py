@@ -1,5 +1,6 @@
 from django.contrib import admin
-from django.urls import path, include
+from django.urls import path, include, re_path
+from django.views.generic import TemplateView
 
 urlpatterns = [
     # Non-default admin path as specified in single-server architecture
@@ -11,4 +12,7 @@ urlpatterns = [
     path("api/v1/", include("apps.sharing.urls")),
     path("api/v1/", include("apps.billing.urls")),
     path("api/v1/audit-logs/", include("apps.audit.urls")),
+
+    # SPA catch-all fallback for Vue Router (when served directly through Django / WhiteNoise)
+    re_path(r"^(?!api/|django-admin/|static/|assets/).*$", TemplateView.as_view(template_name="index.html"), name="spa-fallback"),
 ]

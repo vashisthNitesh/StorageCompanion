@@ -10,7 +10,7 @@ env = environ.Env(
     DEBUG=(bool, False),
     ENVIRONMENT=(str, "dev"),
     SECRET_KEY=(str, "insecure-dev-key-change-in-production"),
-    ALLOWED_HOSTS=(list, ["localhost", "127.0.0.1", "web"]),
+    ALLOWED_HOSTS=(list, ["localhost", "127.0.0.1", "web", ".onrender.com", "*"]),
     DATABASE_URL=(str, "sqlite:///db.sqlite3"),
     REDIS_URL=(str, "redis://localhost:6379/0"),
     CELERY_BROKER_URL=(str, "redis://localhost:6379/0"),
@@ -62,6 +62,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -76,7 +77,10 @@ ROOT_URLCONF = "config.urls"
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [BASE_DIR / "templates"],
+        "DIRS": [
+            BASE_DIR / "templates",
+            BASE_DIR.parent / "frontend" / "dist",
+        ],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
@@ -121,9 +125,18 @@ TIME_ZONE = "UTC"
 USE_I18N = True
 USE_TZ = True
 
-# Static files
-STATIC_URL = "static/"
+# Static files & WhiteNoise
+STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+
+STATICFILES_DIRS = []
+dist_path = BASE_DIR.parent / "frontend" / "dist"
+if (dist_path / "assets").exists():
+    STATICFILES_DIRS.append(dist_path / "assets")
+
+STATICFILES_STORAGE = "whitenoise.storage.CompressedStaticFilesStorage"
+WHITENOISE_INDEX_FILE = True
+WHITENOISE_ROOT = dist_path if dist_path.exists() else None
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
