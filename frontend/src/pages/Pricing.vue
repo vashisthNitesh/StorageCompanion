@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { ref, computed } from "vue";
 import { useRouter } from "vue-router";
-import { Cloud, CheckCircle2, Zap, ArrowLeft } from "lucide-vue-next";
+import { Lock, CheckCircle2, ArrowLeft, ArrowRight, ShieldCheck } from "lucide-vue-next";
 
 const router = useRouter();
 const interval = ref<"monthly" | "yearly">("monthly");
-const storageNeededGB = ref<number>(500);
+const storageNeededGB = ref<number>(200);
 
 const recommendedPlan = computed(() => {
   return storageNeededGB.value <= 200 ? "personal" : "business";
@@ -17,65 +17,67 @@ function selectPlan(planCode: string) {
 </script>
 
 <template>
-  <div class="min-h-screen bg-[#070D1A] text-slate-100 flex flex-col">
+  <div class="min-h-screen bg-surface-ground text-slate-100 flex flex-col selection:bg-brand-600 selection:text-white">
     <!-- Top Nav -->
-    <header class="border-b border-slate-800/80 bg-[#070D1A]/80 sticky top-0 z-30">
-      <div class="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
-        <router-link to="/" class="flex items-center space-x-2 text-slate-300 hover:text-white text-sm font-medium">
+    <header class="border-b border-surface-border bg-surface-ground/90 sticky top-0 z-30 backdrop-blur-md">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+        <router-link to="/" class="flex items-center space-x-2 text-slate-400 hover:text-white text-xs font-medium transition-colors">
           <ArrowLeft class="w-4 h-4" />
-          <span>Back to Home</span>
+          <span>Back to SpeedCloud</span>
         </router-link>
+
         <div class="flex items-center space-x-2">
-          <div class="w-8 h-8 rounded-lg bg-brand-600 flex items-center justify-center">
-            <Cloud class="w-5 h-5 text-white" />
+          <div class="w-7 h-7 rounded-lg bg-brand-600 flex items-center justify-center text-white">
+            <Lock class="w-3.5 h-3.5" />
           </div>
-          <span class="font-bold text-white tracking-tight">SpeedCloud Pricing</span>
+          <span class="font-bold text-white text-sm tracking-tight">SpeedCloud Pricing</span>
         </div>
-        <router-link to="/login" class="text-sm font-semibold text-brand-400 hover:text-brand-300">
-          Login
+
+        <router-link to="/login" class="text-xs font-semibold text-slate-300 hover:text-white transition-colors">
+          Log In
         </router-link>
       </div>
     </header>
 
-    <main class="flex-1 max-w-5xl mx-auto px-4 py-16 w-full space-y-16">
+    <main class="flex-1 max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-16 w-full space-y-12">
       <div class="text-center space-y-4 max-w-2xl mx-auto">
-        <h1 class="text-4xl sm:text-5xl font-extrabold text-white tracking-tight">
-          Simple, Transparent Pricing
+        <h1 class="text-3xl sm:text-4xl font-extrabold text-white tracking-tight">
+          Simple, transparent vault subscriptions.
         </h1>
-        <p class="text-slate-300 text-base">
-          No ad-tracking, no free tier compromises. Pure private cloud storage in INR.
+        <p class="text-slate-400 text-xs sm:text-sm leading-relaxed">
+          Zero-knowledge encryption, zero ads, and zero egress fees. Billed in INR with instant Razorpay activation.
         </p>
 
         <!-- Interval Switcher -->
-        <div class="mt-6 inline-flex p-1.5 rounded-2xl bg-slate-900 border border-slate-800">
+        <div class="inline-flex p-1 rounded-xl bg-surface-card border border-surface-border text-xs">
           <button
             @click="interval = 'monthly'"
-            class="px-6 py-2.5 rounded-xl text-sm font-semibold transition-all"
-            :class="interval === 'monthly' ? 'bg-brand-600 text-white shadow-md' : 'text-slate-400 hover:text-white'"
+            class="px-5 py-1.5 rounded-lg font-semibold transition-all"
+            :class="interval === 'monthly' ? 'bg-surface-elevated text-white shadow-sm' : 'text-slate-400 hover:text-white'"
           >
             Monthly
           </button>
           <button
             @click="interval = 'yearly'"
-            class="px-6 py-2.5 rounded-xl text-sm font-semibold transition-all flex items-center space-x-2"
-            :class="interval === 'yearly' ? 'bg-brand-600 text-white shadow-md' : 'text-slate-400 hover:text-white'"
+            class="px-5 py-1.5 rounded-lg font-semibold transition-all flex items-center space-x-2"
+            :class="interval === 'yearly' ? 'bg-surface-elevated text-white shadow-sm' : 'text-slate-400 hover:text-white'"
           >
-            <span>Yearly (Save 17%)</span>
-            <span class="px-2 py-0.5 rounded-full text-[10px] bg-accent-orange text-white font-bold">2 Mos Free</span>
+            <span>Annual (Save 16%)</span>
+            <span class="px-1.5 py-0.2 rounded bg-brand-600/20 text-brand-400 text-[10px] font-bold">BEST VALUE</span>
           </button>
         </div>
       </div>
 
-      <!-- Storage Calculator -->
-      <div class="glass-card rounded-3xl p-8 border border-slate-800 space-y-6">
+      <!-- Storage Calculator Slider -->
+      <div class="vault-panel rounded-2xl p-6 sm:p-8 border border-surface-border space-y-5">
         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h2 class="text-xl font-bold text-white">Storage Need Calculator</h2>
-            <p class="text-sm text-slate-400">Estimate how much zero-knowledge storage your archives require.</p>
+            <h2 class="text-sm font-bold text-white tracking-tight">Storage Estimator</h2>
+            <p class="text-xs text-slate-400">Slide to see how much encrypted capacity fits your archive requirements.</p>
           </div>
           <div class="text-right">
-            <span class="text-3xl font-black text-brand-400 font-mono">{{ storageNeededGB }} GB</span>
-            <div class="text-xs text-slate-400">Recommended: <span class="text-white font-bold uppercase">{{ recommendedPlan }}</span></div>
+            <span class="text-2xl font-bold text-brand-400 font-mono">{{ storageNeededGB }} GB</span>
+            <div class="text-[11px] text-slate-400">Recommended Plan: <span class="text-white font-bold uppercase">{{ recommendedPlan }}</span></div>
           </div>
         </div>
 
@@ -85,9 +87,9 @@ function selectPlan(planCode: string) {
           min="50"
           max="2000"
           step="50"
-          class="w-full accent-brand-500 h-2 bg-slate-800 rounded-lg cursor-pointer"
+          class="w-full accent-brand-500 h-2 bg-surface-subtle rounded-lg cursor-pointer"
         />
-        <div class="flex justify-between text-xs text-slate-500 font-mono">
+        <div class="flex justify-between text-[11px] text-slate-500 font-mono">
           <span>50 GB</span>
           <span>200 GB (Personal)</span>
           <span>1 TB</span>
@@ -99,104 +101,96 @@ function selectPlan(planCode: string) {
       <div class="grid md:grid-cols-2 gap-8">
         <!-- Personal Plan -->
         <div
-          class="rounded-3xl p-8 glass-card border transition-all flex flex-col justify-between"
-          :class="recommendedPlan === 'personal' ? 'border-brand-500 shadow-2xl shadow-brand-500/10' : 'border-slate-800'"
+          class="vault-panel rounded-2xl p-7 border transition-all flex flex-col justify-between space-y-6"
+          :class="recommendedPlan === 'personal' ? 'border-brand-500/50 shadow-xl' : 'border-surface-border'"
         >
-          <div class="space-y-6">
-            <span class="px-3 py-1 rounded-full text-xs font-bold uppercase bg-brand-500/10 text-brand-400 border border-brand-500/30">
-              Personal Plan
-            </span>
-            <div class="flex items-baseline space-x-2">
-              <span class="text-5xl font-black text-white">
+          <div class="space-y-4">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-mono uppercase font-bold text-brand-400">Personal Vault</span>
+              <span class="text-[10px] px-2 py-0.5 rounded bg-surface-elevated text-slate-400">200 GB</span>
+            </div>
+            <div class="flex items-baseline space-x-1">
+              <span class="text-3xl font-extrabold text-white">
                 ₹{{ interval === 'yearly' ? '1,999' : '199' }}
               </span>
-              <span class="text-slate-400 font-medium">/ {{ interval === 'yearly' ? 'year' : 'month' }}</span>
+              <span class="text-xs text-slate-400">/ {{ interval === 'yearly' ? 'year' : 'month' }}</span>
             </div>
-            <p class="text-xs text-slate-400">For students, creators, and individuals wanting complete file sovereignty.</p>
+            <p class="text-xs text-slate-400">For personal documents, photo archives, and sensitive zero-knowledge backups.</p>
 
-            <div class="space-y-3 pt-4 border-t border-slate-800/80 text-sm">
-              <div class="flex items-center space-x-3 text-slate-200">
-                <CheckCircle2 class="w-5 h-5 text-brand-400" />
+            <div class="space-y-2.5 pt-4 border-t border-surface-border text-xs text-slate-300">
+              <div class="flex items-center space-x-2.5">
+                <CheckCircle2 class="w-4 h-4 text-accent-emerald shrink-0" />
                 <span><strong>200 GB</strong> Encrypted Storage</span>
               </div>
-              <div class="flex items-center space-x-3 text-slate-200">
-                <CheckCircle2 class="w-5 h-5 text-brand-400" />
+              <div class="flex items-center space-x-2.5">
+                <CheckCircle2 class="w-4 h-4 text-accent-emerald shrink-0" />
                 <span>10 GB Single Max File Size</span>
               </div>
-              <div class="flex items-center space-x-3 text-slate-200">
-                <CheckCircle2 class="w-5 h-5 text-brand-400" />
+              <div class="flex items-center space-x-2.5">
+                <CheckCircle2 class="w-4 h-4 text-accent-emerald shrink-0" />
                 <span>30 Days File Version History</span>
               </div>
-              <div class="flex items-center space-x-3 text-slate-200">
-                <CheckCircle2 class="w-5 h-5 text-brand-400" />
-                <span>Password Protected Public Links</span>
-              </div>
-              <div class="flex items-center space-x-3 text-slate-200">
-                <CheckCircle2 class="w-5 h-5 text-brand-400" />
-                <span>Up to 5 Devices</span>
+              <div class="flex items-center space-x-2.5">
+                <CheckCircle2 class="w-4 h-4 text-accent-emerald shrink-0" />
+                <span>X25519 End-to-End Link Sharing</span>
               </div>
             </div>
           </div>
 
-          <div class="pt-8">
-            <button
-              @click="selectPlan('personal')"
-              class="w-full py-4 rounded-xl font-bold text-white bg-gradient-to-r from-accent-orange to-amber-500 hover:from-orange-600 hover:to-amber-600 shadow-xl shadow-orange-500/20 transition-all"
-            >
-              Get Started with Personal
-            </button>
-          </div>
+          <button
+            @click="selectPlan('personal')"
+            class="w-full btn-primary py-3 rounded-xl text-xs font-semibold text-white flex items-center justify-center space-x-2"
+          >
+            <span>Activate Personal Plan</span>
+            <ArrowRight class="w-3.5 h-3.5" />
+          </button>
         </div>
 
         <!-- Business Plan -->
         <div
-          class="rounded-3xl p-8 glass-card border transition-all flex flex-col justify-between"
-          :class="recommendedPlan === 'business' ? 'border-brand-500 shadow-2xl shadow-brand-500/10' : 'border-slate-800'"
+          class="vault-panel rounded-2xl p-7 border transition-all flex flex-col justify-between space-y-6"
+          :class="recommendedPlan === 'business' ? 'border-brand-500/50 shadow-xl' : 'border-surface-border'"
         >
-          <div class="space-y-6">
-            <span class="px-3 py-1 rounded-full text-xs font-bold uppercase bg-brand-500/20 text-brand-300 border border-brand-500/40">
-              Business Plan
-            </span>
-            <div class="flex items-baseline space-x-2">
-              <span class="text-5xl font-black text-white">
+          <div class="space-y-4">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-mono uppercase font-bold text-brand-400">Business Vault</span>
+              <span class="text-[10px] px-2 py-0.5 rounded bg-brand-600/20 text-brand-400 font-bold uppercase">2 TB (2,048 GB)</span>
+            </div>
+            <div class="flex items-baseline space-x-1">
+              <span class="text-3xl font-extrabold text-white">
                 ₹{{ interval === 'yearly' ? '4,999' : '499' }}
               </span>
-              <span class="text-slate-400 font-medium">/ {{ interval === 'yearly' ? 'year' : 'month' }}</span>
+              <span class="text-xs text-slate-400">/ {{ interval === 'yearly' ? 'year' : 'month' }}</span>
             </div>
-            <p class="text-xs text-slate-400">For companies, developers, and compliance-heavy production workflows.</p>
+            <p class="text-xs text-slate-400">For teams, developers, and data-heavy workflows requiring extended retention.</p>
 
-            <div class="space-y-3 pt-4 border-t border-slate-800/80 text-sm">
-              <div class="flex items-center space-x-3 text-slate-200">
-                <CheckCircle2 class="w-5 h-5 text-brand-400" />
-                <span><strong>2 TB</strong> High-Speed Storage</span>
+            <div class="space-y-2.5 pt-4 border-t border-surface-border text-xs text-slate-300">
+              <div class="flex items-center space-x-2.5">
+                <CheckCircle2 class="w-4 h-4 text-accent-emerald shrink-0" />
+                <span><strong>2 TB</strong> Encrypted Storage</span>
               </div>
-              <div class="flex items-center space-x-3 text-slate-200">
-                <CheckCircle2 class="w-5 h-5 text-brand-400" />
+              <div class="flex items-center space-x-2.5">
+                <CheckCircle2 class="w-4 h-4 text-accent-emerald shrink-0" />
                 <span>50 GB Single Max File Size</span>
               </div>
-              <div class="flex items-center space-x-3 text-slate-200">
-                <CheckCircle2 class="w-5 h-5 text-brand-400" />
-                <span>365 Days Extended Version Retention</span>
+              <div class="flex items-center space-x-2.5">
+                <CheckCircle2 class="w-4 h-4 text-accent-emerald shrink-0" />
+                <span>90 Days Version Retention & Audit Logs</span>
               </div>
-              <div class="flex items-center space-x-3 text-slate-200">
-                <CheckCircle2 class="w-5 h-5 text-brand-400" />
-                <span>Team Access & X25519 Secure Sharing</span>
-              </div>
-              <div class="flex items-center space-x-3 text-slate-200">
-                <CheckCircle2 class="w-5 h-5 text-brand-400" />
-                <span>Unlimited Devices & Priority Support</span>
+              <div class="flex items-center space-x-2.5">
+                <CheckCircle2 class="w-4 h-4 text-accent-emerald shrink-0" />
+                <span>Priority 24/7 Dedicated Support</span>
               </div>
             </div>
           </div>
 
-          <div class="pt-8">
-            <button
-              @click="selectPlan('business')"
-              class="w-full py-4 rounded-xl font-bold text-white bg-brand-600 hover:bg-brand-500 shadow-xl shadow-brand-600/30 transition-all"
-            >
-              Choose Business Plan
-            </button>
-          </div>
+          <button
+            @click="selectPlan('business')"
+            class="w-full btn-primary py-3 rounded-xl text-xs font-semibold text-white flex items-center justify-center space-x-2"
+          >
+            <span>Activate Business Plan</span>
+            <ArrowRight class="w-3.5 h-3.5" />
+          </button>
         </div>
       </div>
     </main>

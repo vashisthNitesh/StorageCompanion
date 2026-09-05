@@ -16,9 +16,12 @@ import {
   Share2,
   Trash2,
   Edit2,
-  AlertCircle,
-  Clock,
-  HardDrive,
+  Lock,
+  FileCode,
+  FileArchive,
+  FileImage,
+  FileVideo,
+  FileAudio,
   File,
 } from "lucide-vue-next";
 
@@ -54,11 +57,21 @@ function formatBytes(bytes: number): string {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
 }
 
-function handleNodeClick(node: FileNode, event: MouseEvent) {
+function getFileIcon(name: string) {
+  const ext = name.split(".").pop()?.toLowerCase() || "";
+  if (["png", "jpg", "jpeg", "webp", "gif", "svg"].includes(ext)) return FileImage;
+  if (["mp4", "webm", "mkv", "mov"].includes(ext)) return FileVideo;
+  if (["mp3", "wav", "flac", "aac"].includes(ext)) return FileAudio;
+  if (["zip", "tar", "gz", "7z", "rar"].includes(ext)) return FileArchive;
+  if (["js", "ts", "py", "html", "css", "json", "vue", "rs", "go"].includes(ext)) return FileCode;
+  if (["pdf", "doc", "docx", "txt", "md"].includes(ext)) return FileText;
+  return File;
+}
+
+function handleNodeClick(node: FileNode) {
   if (node.type === "folder") {
     filesStore.navigateToFolder(node.id, node.name);
   } else {
-    // Open preview
     previewNode.value = node;
     isPreviewOpen.value = true;
   }
@@ -67,8 +80,8 @@ function handleNodeClick(node: FileNode, event: MouseEvent) {
 function openContextMenu(event: MouseEvent, node: FileNode) {
   event.preventDefault();
   contextMenu.value = {
-    x: event.clientX,
-    y: event.clientY,
+    x: Math.min(event.clientX, window.innerWidth - 200),
+    y: Math.min(event.clientY, window.innerHeight - 200),
     node,
     visible: true,
   };
@@ -114,7 +127,6 @@ async function triggerTrash(node: FileNode) {
   closeContextMenu();
 }
 
-// Drag and drop file upload handling
 function onDragOver(e: DragEvent) {
   e.preventDefault();
   isDraggingOver.value = true;
@@ -134,7 +146,6 @@ function onDrop(e: DragEvent) {
   }
 }
 
-// Keyboard shortcuts: Del, F2, Escape
 function handleKeydown(e: KeyboardEvent) {
   if (e.key === "Escape") {
     closeContextMenu();
@@ -158,143 +169,146 @@ onUnmounted(() => {
 
 <template>
   <div
-    class="h-full flex flex-col space-y-6 relative"
+    class="h-full flex flex-col space-y-5 relative"
     @dragover="onDragOver"
     @dragleave="onDragLeave"
     @drop="onDrop"
   >
-    <!-- Drag overlay -->
+    <!-- Drag & Drop Overlay -->
     <div
       v-if="isDraggingOver"
-      class="absolute inset-0 z-40 bg-brand-600/20 border-2 border-dashed border-brand-400 rounded-3xl flex items-center justify-center backdrop-blur-sm pointer-events-none"
+      class="absolute inset-0 z-40 bg-brand-600/10 border-2 border-dashed border-brand-500 rounded-2xl flex items-center justify-center backdrop-blur-sm pointer-events-none"
     >
-      <div class="p-6 rounded-2xl bg-slate-900/90 border border-brand-500/40 text-center space-y-2">
-        <UploadCloud class="w-10 h-10 text-brand-400 mx-auto animate-bounce" />
-        <div class="text-sm font-bold text-white">Drop files here to encrypt & upload</div>
-        <p class="text-xs text-slate-400">Zero-knowledge AES-256-GCM chunking direct to R2</p>
+      <div class="p-6 rounded-xl bg-surface-card border border-surface-border text-center space-y-2 shadow-2xl">
+        <UploadCloud class="w-8 h-8 text-brand-400 mx-auto animate-pulse" />
+        <div class="text-sm font-semibold text-white">Drop to encrypt & upload directly</div>
+        <p class="text-xs text-slate-400 font-mono">Zero-Knowledge AES-256-GCM Slicing</p>
       </div>
     </div>
 
-    <!-- Actions toolbar -->
+    <!-- Actions Toolbar -->
     <div class="flex items-center justify-between">
-      <div class="flex items-center space-x-3">
+      <div class="flex items-center space-x-2.5">
         <button
           @click="triggerCreateFolder"
-          class="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-xs font-semibold text-white flex items-center space-x-2 transition-colors shadow-sm"
+          class="btn-secondary px-3.5 py-1.5 rounded-lg text-xs font-semibold text-slate-200 flex items-center space-x-1.5"
         >
-          <FolderPlus class="w-4 h-4 text-brand-400" />
+          <FolderPlus class="w-3.5 h-3.5 text-brand-400" />
           <span>New Folder</span>
         </button>
       </div>
 
-      <!-- View Toggle -->
-      <div class="flex items-center p-1 rounded-xl bg-slate-900 border border-slate-800">
+      <!-- View Switcher -->
+      <div class="flex items-center p-0.5 rounded-lg bg-surface-card border border-surface-border">
         <button
           @click="filesStore.viewMode = 'grid'"
-          class="p-1.5 rounded-lg transition-colors"
-          :class="filesStore.viewMode === 'grid' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-white'"
+          class="p-1.5 rounded-md transition-colors"
+          :class="filesStore.viewMode === 'grid' ? 'bg-surface-elevated text-white shadow-sm' : 'text-slate-400 hover:text-white'"
           title="Grid view"
         >
-          <LayoutGrid class="w-4 h-4" />
+          <LayoutGrid class="w-3.5 h-3.5" />
         </button>
         <button
           @click="filesStore.viewMode = 'list'"
-          class="p-1.5 rounded-lg transition-colors"
-          :class="filesStore.viewMode === 'list' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-white'"
+          class="p-1.5 rounded-md transition-colors"
+          :class="filesStore.viewMode === 'list' ? 'bg-surface-elevated text-white shadow-sm' : 'text-slate-400 hover:text-white'"
           title="List view"
         >
-          <List class="w-4 h-4" />
+          <List class="w-3.5 h-3.5" />
         </button>
       </div>
     </div>
 
-    <!-- STATE 1: LOADING (Skeletons) -->
-    <div v-if="filesStore.isLoading" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-      <div v-for="i in 8" :key="i" class="p-4 rounded-2xl glass-panel border border-slate-800 animate-pulse space-y-3">
-        <div class="w-10 h-10 rounded-xl bg-slate-800"></div>
-        <div class="h-3 bg-slate-800 rounded w-3/4"></div>
-        <div class="h-2 bg-slate-800 rounded w-1/2"></div>
+    <!-- Loading Skeletons -->
+    <div v-if="filesStore.isLoading" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3.5">
+      <div v-for="i in 10" :key="i" class="p-4 rounded-xl vault-panel animate-pulse space-y-3">
+        <div class="w-8 h-8 rounded-lg bg-surface-subtle"></div>
+        <div class="h-3 bg-surface-subtle rounded w-3/4"></div>
+        <div class="h-2 bg-surface-subtle rounded w-1/2"></div>
       </div>
     </div>
 
-    <!-- STATE 2: EMPTY STATE -->
+    <!-- Empty Vault State -->
     <div
       v-else-if="filesStore.nodes.length === 0"
-      class="flex-1 flex flex-col items-center justify-center p-12 text-center rounded-3xl border border-dashed border-slate-800/80 bg-slate-900/20"
+      class="flex-1 flex flex-col items-center justify-center p-12 text-center rounded-2xl border border-dashed border-surface-border bg-surface-card/30"
     >
-      <div class="w-16 h-16 rounded-2xl bg-brand-500/10 border border-brand-500/20 flex items-center justify-center mb-4">
-        <UploadCloud class="w-8 h-8 text-brand-400" />
+      <div class="w-12 h-12 rounded-xl bg-surface-elevated border border-surface-border flex items-center justify-center mb-3">
+        <Lock class="w-5 h-5 text-brand-400" />
       </div>
-      <h3 class="text-base font-bold text-white">This folder is empty</h3>
-      <p class="text-xs text-slate-400 max-w-sm mt-1 mb-6">
-        Drag & drop files anywhere, or click below to encrypt and upload directly to zero-egress storage.
+      <h3 class="text-sm font-bold text-white">This folder is empty</h3>
+      <p class="text-xs text-slate-400 max-w-sm mt-1 mb-5">
+        Drag and drop files here, or use the upload button to encrypt and stream files to your vault.
       </p>
       <button
         @click="triggerCreateFolder"
-        class="px-5 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-xs font-semibold text-white shadow-md transition-all"
+        class="btn-secondary px-4 py-2 rounded-lg text-xs font-semibold text-slate-200"
       >
         Create a Folder
       </button>
     </div>
 
-    <!-- STATE 3 & 4: POPULATED VIEW -->
+    <!-- Populated Files View -->
     <div v-else>
       <!-- Grid View -->
-      <div v-if="filesStore.viewMode === 'grid'" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+      <div v-if="filesStore.viewMode === 'grid'" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3.5">
         <div
           v-for="node in filesStore.nodes"
           :key="node.id"
-          @click="handleNodeClick(node, $event)"
+          @click="handleNodeClick(node)"
           @contextmenu="openContextMenu($event, node)"
-          class="group p-4 rounded-2xl glass-card border border-slate-800/80 hover:border-brand-500/40 cursor-pointer transition-all flex flex-col justify-between space-y-3 relative"
+          class="vault-card group p-3.5 rounded-xl cursor-pointer flex flex-col justify-between space-y-3 relative select-none"
         >
           <div class="flex items-start justify-between">
-            <div class="w-10 h-10 rounded-xl flex items-center justify-center" :class="node.type === 'folder' ? 'bg-amber-500/10 text-amber-400' : 'bg-brand-500/10 text-brand-400'">
-              <Folder v-if="node.type === 'folder'" class="w-5 h-5 fill-amber-400/20" />
-              <FileText v-else class="w-5 h-5" />
+            <div
+              class="w-9 h-9 rounded-lg flex items-center justify-center"
+              :class="node.type === 'folder' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' : 'bg-brand-500/10 text-brand-400 border border-brand-500/20'"
+            >
+              <Folder v-if="node.type === 'folder'" class="w-4 h-4 fill-amber-400/20" />
+              <component v-else :is="getFileIcon(node.name)" class="w-4 h-4" />
             </div>
 
             <button
               @click.stop="openContextMenu($event, node)"
-              class="p-1 rounded-lg text-slate-500 hover:text-white hover:bg-slate-800 opacity-0 group-hover:opacity-100 transition-opacity"
+              class="p-1 rounded text-slate-500 hover:text-white hover:bg-surface-elevated opacity-0 group-hover:opacity-100 transition-opacity"
             >
-              <MoreVertical class="w-4 h-4" />
+              <MoreVertical class="w-3.5 h-3.5" />
             </button>
           </div>
 
           <div class="min-w-0">
-            <div class="text-xs font-semibold text-slate-200 truncate group-hover:text-brand-300" :title="node.name">
+            <div class="text-xs font-medium text-slate-200 truncate group-hover:text-white" :title="node.name">
               {{ node.name }}
             </div>
-            <div class="text-[10px] text-slate-400 font-mono mt-0.5">
+            <div class="text-[10px] text-slate-500 font-mono mt-0.5">
               {{ node.type === 'folder' ? 'Folder' : formatBytes(node.size_bytes) }}
             </div>
           </div>
         </div>
       </div>
 
-      <!-- List View -->
-      <div v-else class="rounded-2xl border border-slate-800 overflow-hidden bg-slate-900/40 divide-y divide-slate-800/60">
+      <!-- List / Table View -->
+      <div v-else class="vault-panel rounded-xl overflow-hidden divide-y divide-surface-border">
         <div
           v-for="node in filesStore.nodes"
           :key="node.id"
-          @click="handleNodeClick(node, $event)"
+          @click="handleNodeClick(node)"
           @contextmenu="openContextMenu($event, node)"
-          class="flex items-center justify-between px-4 py-3 hover:bg-slate-800/40 cursor-pointer transition-colors text-xs"
+          class="flex items-center justify-between px-4 py-3 hover:bg-surface-elevated cursor-pointer transition-colors text-xs select-none"
         >
           <div class="flex items-center space-x-3 min-w-0">
-            <Folder v-if="node.type === 'folder'" class="w-5 h-5 text-amber-400 fill-amber-400/20 shrink-0" />
-            <FileText v-else class="w-5 h-5 text-brand-400 shrink-0" />
+            <Folder v-if="node.type === 'folder'" class="w-4 h-4 text-amber-400 fill-amber-400/20 shrink-0" />
+            <component v-else :is="getFileIcon(node.name)" class="w-4 h-4 text-brand-400 shrink-0" />
             <span class="font-medium text-slate-200 truncate max-w-md">{{ node.name }}</span>
           </div>
 
           <div class="flex items-center space-x-6 text-slate-400 font-mono text-[11px]">
-            <span>{{ node.type === 'folder' ? '--' : formatBytes(node.size_bytes) }}</span>
+            <span>{{ node.type === 'folder' ? '—' : formatBytes(node.size_bytes) }}</span>
             <button
               @click.stop="openContextMenu($event, node)"
-              class="p-1 text-slate-500 hover:text-white rounded"
+              class="p-1 text-slate-500 hover:text-white rounded transition-colors"
             >
-              <MoreVertical class="w-4 h-4" />
+              <MoreVertical class="w-3.5 h-3.5" />
             </button>
           </div>
         </div>
@@ -305,84 +319,84 @@ onUnmounted(() => {
     <div
       v-if="contextMenu.visible && contextMenu.node"
       :style="{ top: `${contextMenu.y}px`, left: `${contextMenu.x}px` }"
-      class="fixed z-50 w-48 rounded-2xl glass-panel border border-slate-700/80 p-1.5 shadow-2xl space-y-1 bg-[#0c1427]/98 text-xs font-medium text-slate-200"
+      class="fixed z-50 w-48 rounded-xl vault-panel p-1 shadow-2xl space-y-0.5 text-xs font-medium text-slate-200 border border-surface-border bg-surface-card"
     >
       <button
         v-if="contextMenu.node.type === 'file'"
         @click="previewNode = contextMenu.node; isPreviewOpen = true; closeContextMenu()"
-        class="w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl hover:bg-slate-800 hover:text-white transition-colors"
+        class="w-full flex items-center space-x-2.5 px-3 py-1.5 rounded-lg hover:bg-surface-elevated hover:text-white transition-colors"
       >
-        <FileText class="w-4 h-4 text-brand-400" />
+        <FileText class="w-3.5 h-3.5 text-brand-400" />
         <span>Preview & Decrypt</span>
       </button>
 
       <button
         @click="triggerShare(contextMenu.node)"
-        class="w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl hover:bg-slate-800 hover:text-white transition-colors"
+        class="w-full flex items-center space-x-2.5 px-3 py-1.5 rounded-lg hover:bg-surface-elevated hover:text-white transition-colors"
       >
-        <Share2 class="w-4 h-4 text-brand-400" />
+        <Share2 class="w-3.5 h-3.5 text-brand-400" />
         <span>Share Link (#key)</span>
       </button>
 
       <button
         @click="triggerRename(contextMenu.node)"
-        class="w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl hover:bg-slate-800 hover:text-white transition-colors"
+        class="w-full flex items-center space-x-2.5 px-3 py-1.5 rounded-lg hover:bg-surface-elevated hover:text-white transition-colors"
       >
-        <Edit2 class="w-4 h-4 text-slate-400" />
+        <Edit2 class="w-3.5 h-3.5 text-slate-400" />
         <span>Rename</span>
       </button>
 
-      <div class="border-t border-slate-800 my-1"></div>
+      <div class="border-t border-surface-border my-1"></div>
 
       <button
         @click="triggerTrash(contextMenu.node)"
-        class="w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl hover:bg-rose-500/20 text-rose-400 transition-colors"
+        class="w-full flex items-center space-x-2.5 px-3 py-1.5 rounded-lg hover:bg-rose-950/40 text-rose-400 transition-colors"
       >
-        <Trash2 class="w-4 h-4" />
+        <Trash2 class="w-3.5 h-3.5" />
         <span>Move to Trash</span>
       </button>
     </div>
 
     <!-- Create Folder Modal -->
-    <div v-if="showCreateFolderModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-      <div class="glass-panel w-full max-w-sm rounded-3xl p-6 border border-slate-700 space-y-4 bg-[#0c1427]/95">
+    <div v-if="showCreateFolderModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm">
+      <div class="vault-panel w-full max-w-sm rounded-2xl p-6 border border-surface-border space-y-4 bg-surface-card">
         <h3 class="text-sm font-bold text-white">Create New Folder</h3>
         <input
           type="text"
           v-model="newFolderName"
           placeholder="Folder name..."
-          class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white focus:outline-none focus:border-brand-500"
+          class="w-full px-3 py-2 rounded-lg bg-surface-ground border border-surface-border text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-brand-500"
           autofocus
           @keyup.enter="submitCreateFolder"
         />
-        <div class="flex justify-end space-x-2 pt-2">
-          <button @click="showCreateFolderModal = false" class="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white">
+        <div class="flex justify-end space-x-2 pt-1">
+          <button @click="showCreateFolderModal = false" class="btn-secondary px-3 py-1.5 rounded-lg text-xs text-slate-300">
             Cancel
           </button>
-          <button @click="submitCreateFolder" class="px-4 py-2 rounded-xl bg-brand-600 text-white font-bold text-xs shadow-md">
-            Create
+          <button @click="submitCreateFolder" class="btn-primary px-3.5 py-1.5 rounded-lg text-xs font-semibold text-white">
+            Create Folder
           </button>
         </div>
       </div>
     </div>
 
     <!-- Rename Modal -->
-    <div v-if="showRenameModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-      <div class="glass-panel w-full max-w-sm rounded-3xl p-6 border border-slate-700 space-y-4 bg-[#0c1427]/95">
+    <div v-if="showRenameModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm">
+      <div class="vault-panel w-full max-w-sm rounded-2xl p-6 border border-surface-border space-y-4 bg-surface-card">
         <h3 class="text-sm font-bold text-white">Rename</h3>
         <input
           type="text"
           v-model="renameInput"
-          class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white focus:outline-none focus:border-brand-500"
+          class="w-full px-3 py-2 rounded-lg bg-surface-ground border border-surface-border text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-brand-500"
           autofocus
           @keyup.enter="submitRename"
         />
-        <div class="flex justify-end space-x-2 pt-2">
-          <button @click="showRenameModal = false" class="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white">
+        <div class="flex justify-end space-x-2 pt-1">
+          <button @click="showRenameModal = false" class="btn-secondary px-3 py-1.5 rounded-lg text-xs text-slate-300">
             Cancel
           </button>
-          <button @click="submitRename" class="px-4 py-2 rounded-xl bg-brand-600 text-white font-bold text-xs shadow-md">
-            Save
+          <button @click="submitRename" class="btn-primary px-3.5 py-1.5 rounded-lg text-xs font-semibold text-white">
+            Save Changes
           </button>
         </div>
       </div>

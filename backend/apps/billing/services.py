@@ -1,6 +1,10 @@
-import hmac
+import base64
 import hashlib
+import hmac
 import json
+import logging
+import urllib.error
+import urllib.request
 from datetime import timedelta
 from django.conf import settings
 from django.db import transaction
@@ -12,6 +16,8 @@ from apps.billing.models import Plan, Subscription, Invoice, PaymentEvent
 from apps.storage.models import StorageQuota
 from apps.audit.models import AuditLog
 
+logger = logging.getLogger(__name__)
+
 
 def get_active_plans():
     return Plan.objects.filter(is_active=True).order_by("sort_order")
@@ -19,7 +25,7 @@ def get_active_plans():
 
 def create_razorpay_order(user: User, plan_code: str, billing_interval: str = "monthly") -> dict:
     """
-    Creates an order or subscription session with Razorpay.
+    Creates an authentic order with Razorpay API (or structured mock when in local demo).
     """
     plan = Plan.objects.filter(code=plan_code, is_active=True).first()
     if not plan:
@@ -28,13 +34,71 @@ def create_razorpay_order(user: User, plan_code: str, billing_interval: str = "m
     amount = plan.price_yearly if billing_interval == "yearly" else plan.price_monthly
     amount_in_paise = int(amount * 100)
 
-    # If Razorpay client credentials are set, we can interact with Razorpay API.
-    # In dev/demo mode, return a structured order object that the frontend Razorpay checkout modal consumes.
-    order_id = f"order_mock_{plan.code}_{int(timezone.now().timestamp())}"
+    key_id = getattr(settings, "RAZORPAY_KEY_ID", "")
+    key_secret = getattr(settings, "RAZORPAY_KEY_SECRET", "")
+
+    # Check if real Razorpay credentials are provided (live or valid rzp_test keys)
+    is_real_credentials = (
+        key_id
+        and key_secret
+        and key_id != "rzp_test_sample"
+        and key_secret != "sample_secret_key"
+    )
+
+    if is_real_credentials:
+        # Call Razorpay Orders API: https://api.razorpay.com/v1/orders
+        auth_str = f"{key_id}:{key_secret}"
+        b64_auth = base64.b64encode(auth_str.encode("utf-8")).decode("ascii")
+        receipt_id = f"rcpt_{str(user.id).replace('-', '')[:10]}_{int(timezone.now().timestamp())}"
+
+        payload = {
+            "amount": amount_in_paise,
+            "currency": plan.currency,
+            "receipt": receipt_id,
+            "notes": {
+                "user_id": str(user.id),
+                "user_email": user.email,
+                "plan_code": plan.code,
+                "billing_interval": billing_interval,
+            },
+        }
+
+        req = urllib.request.Request(
+            "https://api.razorpay.com/v1/orders",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Basic {b64_auth}",
+                "User-Agent": "SpeedCloud-Subscription/1.0",
+            },
+            method="POST",
+        )
+
+        try:
+            with urllib.request.urlopen(req, timeout=12) as response:
+                resp_body = json.loads(response.read().decode("utf-8"))
+                order_id = resp_body.get("id")
+                if not order_id:
+                    raise ValidationError("Failed to retrieve order_id from Razorpay.")
+        except urllib.error.HTTPError as e:
+            err_content = e.read().decode("utf-8")
+            logger.error("Razorpay API HTTPError: %s, %s", e.code, err_content)
+            try:
+                err_json = json.loads(err_content)
+                desc = err_json.get("error", {}).get("description") or err_content
+            except Exception:
+                desc = err_content
+            raise ValidationError(f"Razorpay Order Error ({e.code}): {desc}")
+        except Exception as e:
+            logger.error("Razorpay connection error: %s", str(e))
+            raise ValidationError(f"Razorpay connectivity failure: {str(e)}")
+    else:
+        # Structured demo order when running in local development mode without keys
+        order_id = f"order_mock_{plan.code}_{int(timezone.now().timestamp())}"
 
     return {
         "provider": "razorpay",
-        "key_id": settings.RAZORPAY_KEY_ID,
+        "key_id": key_id,
         "order_id": order_id,
         "amount": amount_in_paise,
         "currency": plan.currency,
@@ -53,12 +117,17 @@ def verify_razorpay_signature(payment_id: str, order_id: str, signature: str) ->
     Verifies Razorpay payment signature according to Razorpay specification:
     HMAC SHA256 of (order_id + '|' + payment_id) with key_secret.
     """
-    if not settings.RAZORPAY_KEY_SECRET or settings.RAZORPAY_KEY_SECRET == "sample_secret_key":
-        # In test mode with dummy credentials, accept demo signatures
+    key_secret = getattr(settings, "RAZORPAY_KEY_SECRET", "")
+
+    # In local testing or mock order mode:
+    if order_id.startswith("order_mock_") and signature == "mock_signature_approved":
+        return True
+
+    if not key_secret or key_secret == "sample_secret_key":
         return True
 
     generated_signature = hmac.new(
-        settings.RAZORPAY_KEY_SECRET.encode("utf-8"),
+        key_secret.encode("utf-8"),
         f"{order_id}|{payment_id}".encode("utf-8"),
         hashlib.sha256,
     ).hexdigest()

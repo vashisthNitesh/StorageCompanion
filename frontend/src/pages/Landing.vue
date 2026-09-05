@@ -2,187 +2,196 @@
 import { ref } from "vue";
 import { useRouter } from "vue-router";
 import {
-  Cloud,
-  Zap,
   ShieldCheck,
-  Smartphone,
-  CreditCard,
   Lock,
-  ArrowRight,
-  CheckCircle2,
-  HelpCircle,
-  HardDrive,
-  FileSearch,
+  Zap,
   Key,
+  HardDrive,
+  Search,
+  CheckCircle2,
+  ArrowRight,
+  HelpCircle,
+  CreditCard,
+  Layers,
+  ChevronDown,
+  Terminal,
 } from "lucide-vue-next";
 
 const router = useRouter();
 const billingInterval = ref<"monthly" | "yearly">("monthly");
+const openFaqIndex = ref<number | null>(null);
 
-function goToRegister(planCode: string = "personal") {
-  router.push({ path: "/register", query: { plan: planCode, interval: billingInterval.value } });
+function toggleFaq(index: number) {
+  openFaqIndex.value = openFaqIndex.value === index ? null : index;
 }
+
+function selectPlan(planCode: string) {
+  router.push({
+    path: "/register",
+    query: { plan: planCode, interval: billingInterval.value },
+  });
+}
+
+const faqs = [
+  {
+    q: "Can SpeedCloud administrators read my files or recover my password?",
+    a: "No. SpeedCloud operates under a strict zero-knowledge model. Your vault encryption key is derived entirely in your browser using Argon2id and never leaves your device. If you forget your password, you must use your offline 24-word recovery phrase.",
+  },
+  {
+    q: "How does payment work with Razorpay?",
+    a: "We support seamless INR payments via Razorpay including UPI (Google Pay, PhonePe, Paytm, BHIM, CRED), Indian & international debit/credit cards (RuPay, Visa, Mastercard), and Netbanking across all major banks. Activation is instantaneous upon payment confirmation.",
+  },
+  {
+    q: "Why is there no free tier on SpeedCloud?",
+    a: "Free cloud storage providers subsidize costs by mining user telemetry, selling marketing data, or injecting ads. SpeedCloud is a pure privacy-first service sustained exclusively by transparent subscription fees. We treat your data as strictly private property.",
+  },
+  {
+    q: "What are the file size and bandwidth limits?",
+    a: "Personal plans support single files up to 10 GB with 200 GB total quota. Business plans support files up to 50 GB with 2 TB quota. There are absolutely zero bandwidth throttles and zero egress fees.",
+  },
+];
 </script>
 
 <template>
-  <div class="min-h-screen flex flex-col bg-[#070D1A] text-slate-100 selection:bg-brand-500 selection:text-white">
+  <div class="min-h-screen flex flex-col bg-surface-ground text-slate-100 selection:bg-brand-600 selection:text-white">
     <!-- Navbar -->
-    <header class="sticky top-0 z-40 glass-panel border-b border-slate-800/80 bg-[#070D1A]/80">
-      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
+    <header class="sticky top-0 z-40 bg-surface-ground/90 backdrop-blur-md border-b border-surface-border">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
         <!-- Logo -->
-        <router-link to="/" class="flex items-center space-x-3 group">
-          <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-brand-600 to-accent-orange flex items-center justify-center shadow-lg shadow-brand-500/20 group-hover:scale-105 transition-transform">
-            <Cloud class="w-6 h-6 text-white fill-white/20" />
+        <router-link to="/" class="flex items-center space-x-2.5 group">
+          <div class="w-8 h-8 rounded-lg bg-brand-600 border border-white/20 flex items-center justify-center shadow-sm">
+            <Lock class="w-4 h-4 text-white" />
           </div>
-          <span class="text-2xl font-black tracking-tight text-white">
+          <span class="text-lg font-bold tracking-tight text-white">
             Speed<span class="text-brand-400">Cloud</span>
+          </span>
+          <span class="text-[10px] uppercase font-mono px-2 py-0.5 rounded bg-surface-elevated border border-surface-border text-slate-400">
+            Zero-Knowledge
           </span>
         </router-link>
 
-        <!-- Nav Links -->
-        <nav class="hidden md:flex items-center space-x-8 text-sm font-medium text-slate-300">
-          <router-link to="/" class="text-brand-400 font-semibold">Home</router-link>
-          <a href="#features" class="hover:text-white transition-colors">Features</a>
-          <router-link to="/pricing" class="hover:text-white transition-colors">Pricing</router-link>
-          <router-link to="/security" class="hover:text-white transition-colors">Security</router-link>
+        <!-- Nav links -->
+        <nav class="hidden md:flex items-center space-x-7 text-xs font-medium text-slate-300">
+          <a href="#features" class="hover:text-white transition-colors">Architecture</a>
+          <a href="#pricing" class="hover:text-white transition-colors">Pricing</a>
+          <router-link to="/security" class="hover:text-white transition-colors">Security Whitepaper</router-link>
           <a href="#faq" class="hover:text-white transition-colors">FAQ</a>
         </nav>
 
         <!-- Actions -->
-        <div class="flex items-center space-x-4">
+        <div class="flex items-center space-x-3">
           <router-link
             to="/login"
-            class="px-4 py-2 text-sm font-medium text-slate-200 hover:text-white transition-colors"
+            class="px-3.5 py-1.5 text-xs font-medium text-slate-300 hover:text-white transition-colors"
           >
-            Login
+            Log in
           </router-link>
           <button
-            @click="goToRegister('personal')"
-            class="px-5 py-2.5 rounded-xl text-sm font-semibold bg-brand-600 hover:bg-brand-500 text-white shadow-lg shadow-brand-600/30 hover:shadow-brand-500/50 transition-all hover:scale-[1.02] active:scale-[0.98]"
+            @click="selectPlan('personal')"
+            class="btn-primary px-4 py-2 rounded-lg text-xs font-semibold text-white flex items-center space-x-1.5"
           >
-            Get Started
+            <span>Get Started</span>
+            <ArrowRight class="w-3.5 h-3.5" />
           </button>
         </div>
       </div>
     </header>
 
     <!-- Hero Section -->
-    <section class="relative pt-12 pb-20 overflow-hidden">
-      <!-- Glow Background Elements -->
-      <div class="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[450px] bg-brand-600/15 rounded-full blur-[120px] pointer-events-none"></div>
-      <div class="absolute top-1/3 right-10 w-[400px] h-[300px] bg-accent-orange/10 rounded-full blur-[100px] pointer-events-none"></div>
+    <section class="pt-16 pb-20 border-b border-surface-border relative overflow-hidden">
+      <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 text-center space-y-6">
+        <!-- Badge -->
+        <div class="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-surface-card border border-surface-border text-[11px] font-medium text-slate-300">
+          <span class="w-2 h-2 rounded-full bg-accent-emerald animate-pulse"></span>
+          <span>Argon2id + AES-256-GCM Client Encryption</span>
+          <span class="text-slate-600">•</span>
+          <span class="text-brand-400 font-semibold">Strictly Private</span>
+        </div>
 
-      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
-        <div class="grid lg:grid-cols-12 gap-12 items-center">
-          <!-- Hero Text -->
-          <div class="lg:col-span-6 space-y-6 text-center lg:text-left">
-            <div class="inline-flex items-center space-x-2 px-3.5 py-1.5 rounded-full bg-brand-950/80 border border-brand-800/60 text-xs font-semibold text-brand-300">
-              <Zap class="w-3.5 h-3.5 text-accent-orange animate-pulse" />
-              <span>India's Zero-Knowledge Cloud Storage</span>
-            </div>
+        <!-- Headline -->
+        <h1 class="text-3xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight text-white leading-tight">
+          The private cloud storage <br class="hidden sm:block" />
+          <span class="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-sky-300 to-indigo-300">
+            engineered for zero trust.
+          </span>
+        </h1>
 
-            <h1 class="text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight text-white leading-[1.15]">
-              India’s Fastest <br />
-              <span class="bg-clip-text text-transparent bg-gradient-to-r from-brand-400 via-sky-300 to-accent-orange">
-                Cloud Storage
-              </span>
-            </h1>
+        <!-- Subtitle -->
+        <p class="text-base sm:text-lg text-slate-400 max-w-2xl mx-auto font-normal leading-relaxed">
+          Files are encrypted directly in your browser before upload. Our servers only ever store ciphertext blocks. No telemetry, no scanning, and zero egress fees.
+        </p>
 
-            <p class="text-lg text-slate-300 max-w-xl mx-auto lg:mx-0 font-normal leading-relaxed">
-              Upload, Store & Access Your Files at Lightning Speed with Zero-Knowledge Client-Side Encryption. No operator surveillance. Zero egress fees.
-            </p>
+        <!-- CTAs -->
+        <div class="flex flex-col sm:flex-row items-center justify-center space-y-3 sm:space-y-0 sm:space-x-4 pt-2">
+          <button
+            @click="selectPlan('personal')"
+            class="w-full sm:w-auto btn-primary px-6 py-3.5 rounded-xl text-sm font-semibold text-white flex items-center justify-center space-x-2"
+          >
+            <span>Activate Personal Vault (₹199/mo)</span>
+            <ArrowRight class="w-4 h-4" />
+          </button>
+          <router-link
+            to="/security"
+            class="w-full sm:w-auto btn-secondary px-6 py-3.5 rounded-xl text-sm font-semibold text-slate-200 flex items-center justify-center space-x-2"
+          >
+            <ShieldCheck class="w-4 h-4 text-slate-400" />
+            <span>Read Cryptographic Spec</span>
+          </router-link>
+        </div>
 
-            <div class="flex flex-col sm:flex-row items-center justify-center lg:justify-start space-y-3 sm:space-y-0 sm:space-x-4 pt-2">
-              <button
-                @click="goToRegister('personal')"
-                class="w-full sm:w-auto px-8 py-4 rounded-xl text-base font-bold bg-gradient-to-r from-accent-orange to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white shadow-xl shadow-orange-500/25 transition-all hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center space-x-2"
-              >
-                <span>Get Started Now</span>
-                <ArrowRight class="w-5 h-5" />
-              </button>
-              <button
-                @click="goToRegister('business')"
-                class="w-full sm:w-auto px-8 py-4 rounded-xl text-base font-bold bg-slate-800/90 hover:bg-slate-700/90 text-white border border-slate-700/80 transition-all hover:scale-[1.02] active:scale-[0.98]"
-              >
-                For Business
-              </button>
-            </div>
-
-            <!-- Trust Badges -->
-            <div class="pt-6 flex flex-wrap items-center justify-center lg:justify-start gap-6 text-xs text-slate-400">
-              <div class="flex items-center space-x-2">
-                <ShieldCheck class="w-4 h-4 text-emerald-400" />
-                <span>AES-256-GCM End-to-End</span>
-              </div>
-              <div class="flex items-center space-x-2">
-                <Zap class="w-4 h-4 text-brand-400" />
-                <span>Direct-to-R2 (Zero Egress)</span>
-              </div>
-              <div class="flex items-center space-x-2">
-                <Key class="w-4 h-4 text-accent-orange" />
-                <span>24-Word Recovery Phrase</span>
-              </div>
-            </div>
+        <!-- Trust Badges -->
+        <div class="pt-6 flex flex-wrap items-center justify-center gap-6 text-xs text-slate-400">
+          <div class="flex items-center space-x-2">
+            <CheckCircle2 class="w-4 h-4 text-accent-emerald" />
+            <span>24-Word Offline Recovery Phrase</span>
           </div>
+          <div class="flex items-center space-x-2">
+            <CheckCircle2 class="w-4 h-4 text-accent-emerald" />
+            <span>Direct S3/R2 Multipart Uploads</span>
+          </div>
+          <div class="flex items-center space-x-2">
+            <CheckCircle2 class="w-4 h-4 text-accent-emerald" />
+            <span>Native Razorpay UPI & Cards</span>
+          </div>
+        </div>
 
-          <!-- Hero Mockup Illustration (Matching SpeedCloud Image) -->
-          <div class="lg:col-span-6 relative flex justify-center">
-            <div class="relative w-full max-w-lg rounded-3xl p-4 glass-card border border-brand-500/30 speed-glow bg-gradient-to-b from-[#0F1E36] to-[#0A1224]">
-              <!-- Mockup Header -->
-              <div class="flex items-center justify-between pb-3 mb-4 border-b border-slate-700/60">
-                <div class="flex space-x-2">
-                  <div class="w-3 h-3 rounded-full bg-rose-500/80"></div>
-                  <div class="w-3 h-3 rounded-full bg-amber-500/80"></div>
-                  <div class="w-3 h-3 rounded-full bg-emerald-500/80"></div>
-                </div>
-                <div class="px-3 py-1 rounded-md bg-slate-800/80 text-[11px] font-mono text-slate-400 flex items-center space-x-1.5">
-                  <Lock class="w-3 h-3 text-emerald-400" />
-                  <span>vault.speedcloud.app (Encrypted)</span>
-                </div>
+        <!-- Interactive Architecture Pipeline Diagram -->
+        <div class="pt-8 max-w-4xl mx-auto text-left">
+          <div class="vault-panel rounded-2xl p-5 border border-surface-border">
+            <div class="flex items-center justify-between pb-3 border-b border-surface-border text-xs text-slate-400">
+              <div class="flex items-center space-x-2">
+                <Terminal class="w-4 h-4 text-brand-400" />
+                <span class="font-mono font-medium text-slate-200">Zero-Knowledge Data Flow</span>
+              </div>
+              <span class="font-mono text-[11px] text-accent-emerald">Encrypted Client-Side</span>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4 text-xs">
+              <!-- Step 1 -->
+              <div class="p-3.5 rounded-xl bg-surface-card border border-surface-border space-y-1.5">
+                <div class="font-mono text-[10px] text-brand-400 font-bold">01. IN YOUR BROWSER</div>
+                <div class="font-semibold text-white">Argon2id & Key Derivation</div>
+                <p class="text-slate-400 text-[11px]">
+                  Master key is derived from your password with 64 MB memory cost. Never sent over the wire.
+                </p>
               </div>
 
-              <!-- Speed Graphic inside Laptop / UI Frame -->
-              <div class="space-y-4">
-                <div class="p-6 rounded-2xl bg-[#080E1C] border border-slate-800 text-center relative overflow-hidden">
-                  <div class="w-20 h-20 mx-auto rounded-full bg-brand-500/10 border-2 border-brand-400 flex items-center justify-center shadow-lg shadow-brand-500/30 mb-3">
-                    <Cloud class="w-10 h-10 text-brand-400" />
-                  </div>
-                  <div class="text-2xl font-black text-white">450 MB/s</div>
-                  <div class="text-xs text-brand-400 font-medium">Blazing Fast Multi-Part Direct Transfer</div>
-                  <!-- Speed gauge curve representation -->
-                  <div class="mt-4 w-full bg-slate-800 h-2 rounded-full overflow-hidden">
-                    <div class="bg-gradient-to-r from-brand-500 via-sky-400 to-accent-orange h-full w-[88%] rounded-full"></div>
-                  </div>
-                </div>
+              <!-- Step 2 -->
+              <div class="p-3.5 rounded-xl bg-surface-card border border-surface-border space-y-1.5">
+                <div class="font-mono text-[10px] text-brand-400 font-bold">02. CHUNKED ENCRYPTION</div>
+                <div class="font-semibold text-white">AES-256-GCM Slicing</div>
+                <p class="text-slate-400 text-[11px]">
+                  Files split into 5MB chunks. Each chunk receives a distinct deterministic nonce and authentication tag.
+                </p>
+              </div>
 
-                <!-- Simulated File Row Transfer -->
-                <div class="space-y-2">
-                  <div class="flex items-center justify-between p-3 rounded-xl bg-slate-800/40 border border-slate-700/50 text-xs">
-                    <div class="flex items-center space-x-3">
-                      <div class="w-8 h-8 rounded-lg bg-brand-600/20 text-brand-400 flex items-center justify-center font-bold">
-                        PDF
-                      </div>
-                      <div>
-                        <div class="font-semibold text-slate-200">Financial_Audit_2026.pdf</div>
-                        <div class="text-[10px] text-slate-400 font-mono">14.2 MB • Encrypted (AES-GCM)</div>
-                      </div>
-                    </div>
-                    <span class="text-emerald-400 font-semibold">100% Uploaded</span>
-                  </div>
-
-                  <div class="flex items-center justify-between p-3 rounded-xl bg-slate-800/40 border border-slate-700/50 text-xs">
-                    <div class="flex items-center space-x-3">
-                      <div class="w-8 h-8 rounded-lg bg-accent-orange/20 text-accent-orange flex items-center justify-center font-bold">
-                        MP4
-                      </div>
-                      <div>
-                        <div class="font-semibold text-slate-200">Product_Demo_4K.mp4</div>
-                        <div class="text-[10px] text-slate-400 font-mono">85.0 MB • Chunk 8/11</div>
-                      </div>
-                    </div>
-                    <span class="text-brand-400 font-semibold">73% (48 MB/s)</span>
-                  </div>
-                </div>
+              <!-- Step 3 -->
+              <div class="p-3.5 rounded-xl bg-surface-card border border-surface-border space-y-1.5">
+                <div class="font-mono text-[10px] text-brand-400 font-bold">03. DIRECT TO STORAGE</div>
+                <div class="font-semibold text-white">Presigned Object Store</div>
+                <p class="text-slate-400 text-[11px]">
+                  Ciphertext streams directly to storage via presigned URLs. Zero server interception possible.
+                </p>
               </div>
             </div>
           </div>
@@ -190,343 +199,307 @@ function goToRegister(planCode: string = "personal") {
       </div>
     </section>
 
-    <!-- Why Choose SpeedCloud? Section (Matching Mockup 4 Cards) -->
-    <section id="features" class="py-20 bg-[#091124] border-y border-slate-800/60">
+    <!-- Architecture & Features Grid -->
+    <section id="features" class="py-20 border-b border-surface-border">
       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div class="text-center max-w-3xl mx-auto mb-16">
-          <h2 class="text-3xl sm:text-4xl font-extrabold text-white tracking-tight">
-            Why Choose SpeedCloud?
+        <div class="text-center max-w-2xl mx-auto space-y-3 mb-14">
+          <h2 class="text-2xl sm:text-3xl font-extrabold text-white">
+            Built for security purists.
           </h2>
-          <p class="mt-4 text-base text-slate-300">
-            Engineered with zero compromises: the convenience of modern cloud storage with total mathematical privacy.
+          <p class="text-sm text-slate-400">
+            Every architectural decision prioritizes privacy, auditability, and verifiable zero-trust cryptography.
           </p>
         </div>
 
         <div class="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <!-- Card 1 -->
-          <div class="p-6 rounded-2xl glass-card transition-all hover:-translate-y-1 space-y-4">
-            <div class="w-12 h-12 rounded-xl bg-orange-500/10 border border-orange-500/30 text-accent-orange flex items-center justify-center">
-              <Zap class="w-6 h-6" />
+          <div class="vault-card p-6 rounded-2xl space-y-3">
+            <div class="w-9 h-9 rounded-lg bg-surface-subtle border border-surface-border flex items-center justify-center text-brand-400">
+              <Key class="w-5 h-5" />
             </div>
-            <h3 class="text-lg font-bold text-white">Blazing Fast Uploads</h3>
-            <p class="text-sm text-slate-300 leading-relaxed">
-              Upload files in seconds with ultra-fast multi-part streams direct to Cloudflare R2 edge locations.
+            <h3 class="text-sm font-bold text-white">24-Word Recovery Gate</h3>
+            <p class="text-xs text-slate-400 leading-relaxed">
+              Mandatory BIP-39 recovery mnemonic generated offline during signup. No backdoors for anyone, including us.
             </p>
           </div>
 
-          <!-- Card 2 -->
-          <div class="p-6 rounded-2xl glass-card transition-all hover:-translate-y-1 space-y-4">
-            <div class="w-12 h-12 rounded-xl bg-brand-500/10 border border-brand-500/30 text-brand-400 flex items-center justify-center">
-              <ShieldCheck class="w-6 h-6" />
+          <div class="vault-card p-6 rounded-2xl space-y-3">
+            <div class="w-9 h-9 rounded-lg bg-surface-subtle border border-surface-border flex items-center justify-center text-brand-400">
+              <Search class="w-5 h-5" />
             </div>
-            <h3 class="text-lg font-bold text-white">Secure & Encrypted</h3>
-            <p class="text-sm text-slate-300 leading-relaxed">
-              True zero-knowledge encryption: Argon2id KDF + AES-256-GCM. We cannot read your files even if compelled.
+            <h3 class="text-sm font-bold text-white">Decrypted Client Search</h3>
+            <p class="text-xs text-slate-400 leading-relaxed">
+              File names are decrypted into a local browser IndexedDB cache. Your search queries never hit our servers.
             </p>
           </div>
 
-          <!-- Card 3 -->
-          <div class="p-6 rounded-2xl glass-card transition-all hover:-translate-y-1 space-y-4">
-            <div class="w-12 h-12 rounded-xl bg-sky-500/10 border border-sky-500/30 text-sky-400 flex items-center justify-center">
-              <Smartphone class="w-6 h-6" />
+          <div class="vault-card p-6 rounded-2xl space-y-3">
+            <div class="w-9 h-9 rounded-lg bg-surface-subtle border border-surface-border flex items-center justify-center text-brand-400">
+              <Layers class="w-5 h-5" />
             </div>
-            <h3 class="text-lg font-bold text-white">Access Anywhere</h3>
-            <p class="text-sm text-slate-300 leading-relaxed">
-              Access your encrypted vault from any device or browser with responsive layout and client decryption.
+            <h3 class="text-sm font-bold text-white">X25519 Link Sharing</h3>
+            <p class="text-xs text-slate-400 leading-relaxed">
+              Share encrypted files via URL fragments (`#key=...`). The decryption secret stays strictly in the browser hash.
             </p>
           </div>
 
-          <!-- Card 4 -->
-          <div class="p-6 rounded-2xl glass-card transition-all hover:-translate-y-1 space-y-4">
-            <div class="w-12 h-12 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 flex items-center justify-center">
-              <CreditCard class="w-6 h-6" />
+          <div class="vault-card p-6 rounded-2xl space-y-3">
+            <div class="w-9 h-9 rounded-lg bg-surface-subtle border border-surface-border flex items-center justify-center text-brand-400">
+              <CreditCard class="w-4 h-4" />
             </div>
-            <h3 class="text-lg font-bold text-white">Affordable Plans</h3>
-            <p class="text-sm text-slate-300 leading-relaxed">
-              Pure subscription pricing in INR with zero hidden bandwidth or egress fees. Powered by Razorpay & UPI.
+            <h3 class="text-sm font-bold text-white">Native Razorpay Billing</h3>
+            <p class="text-xs text-slate-400 leading-relaxed">
+              Seamless INR payments via UPI (Google Pay, PhonePe, Paytm), RuPay, Visa, Mastercard, and Netbanking.
             </p>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- Pricing Section (Matching Mockup Cards) -->
-    <section id="pricing" class="py-20 relative">
-      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div class="text-center max-w-3xl mx-auto mb-12">
-          <h2 class="text-3xl sm:text-4xl font-extrabold text-white tracking-tight">
-            Flexible Plans for Everyone
+    <!-- Pricing Section -->
+    <section id="pricing" class="py-20 border-b border-surface-border bg-surface-card/40">
+      <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="text-center max-w-2xl mx-auto space-y-4 mb-12">
+          <h2 class="text-2xl sm:text-3xl font-extrabold text-white">
+            Transparent subscription pricing.
           </h2>
-          <p class="mt-3 text-slate-300 text-base">
-            No ad-tracking, no free tier compromises. Pure private cloud storage.
+          <p class="text-sm text-slate-400">
+            No ads, no data monetization, no free tier compromises. Cancel anytime with a single click.
           </p>
 
-          <!-- Toggle -->
-          <div class="mt-8 inline-flex items-center p-1.5 rounded-2xl bg-slate-900 border border-slate-800">
+          <!-- Interval switch -->
+          <div class="inline-flex items-center p-1 rounded-xl bg-surface-card border border-surface-border text-xs">
             <button
               @click="billingInterval = 'monthly'"
-              class="px-5 py-2 rounded-xl text-sm font-semibold transition-all"
-              :class="billingInterval === 'monthly' ? 'bg-brand-600 text-white shadow-md' : 'text-slate-400 hover:text-white'"
+              class="px-4 py-1.5 rounded-lg font-semibold transition-all"
+              :class="billingInterval === 'monthly' ? 'bg-surface-elevated text-white shadow-sm' : 'text-slate-400 hover:text-white'"
             >
               Monthly Billing
             </button>
             <button
               @click="billingInterval = 'yearly'"
-              class="px-5 py-2 rounded-xl text-sm font-semibold transition-all flex items-center space-x-1.5"
-              :class="billingInterval === 'yearly' ? 'bg-brand-600 text-white shadow-md' : 'text-slate-400 hover:text-white'"
+              class="px-4 py-1.5 rounded-lg font-semibold transition-all flex items-center space-x-1.5"
+              :class="billingInterval === 'yearly' ? 'bg-surface-elevated text-white shadow-sm' : 'text-slate-400 hover:text-white'"
             >
-              <span>Annual Billing</span>
-              <span class="px-2 py-0.5 rounded-full text-[10px] bg-accent-orange text-white font-bold">2 Months Free</span>
+              <span>Yearly (Save 16%)</span>
+              <span class="px-1.5 py-0.2 rounded bg-brand-600/20 text-brand-400 text-[10px] font-bold">BEST VALUE</span>
             </button>
           </div>
         </div>
 
         <!-- Pricing Cards -->
         <div class="grid md:grid-cols-2 gap-8 max-w-4xl mx-auto">
-          <!-- Personal Plan (Matching Mockup Orange Action) -->
-          <div class="rounded-3xl p-8 glass-card border border-slate-700/80 hover:border-brand-500/50 transition-all flex flex-col justify-between relative bg-gradient-to-b from-[#0F1C34] to-[#0A1224]">
-            <div class="space-y-6">
-              <div>
-                <span class="px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-brand-500/10 text-brand-400 border border-brand-500/30">
-                  Personal Plan
+          <!-- Personal Plan -->
+          <div class="vault-panel rounded-2xl p-7 border border-surface-border flex flex-col justify-between space-y-6">
+            <div class="space-y-4">
+              <div class="flex items-center justify-between">
+                <span class="text-xs font-mono uppercase tracking-wider font-bold text-brand-400">Personal Vault</span>
+                <span class="text-[10px] px-2 py-0.5 rounded bg-surface-elevated border border-surface-border text-slate-400">Single User</span>
+              </div>
+              <div class="flex items-baseline space-x-1">
+                <span class="text-3xl sm:text-4xl font-extrabold text-white">
+                  ₹{{ billingInterval === 'yearly' ? '1,999' : '199' }}
                 </span>
-                <div class="mt-4 flex items-baseline space-x-2">
-                  <span class="text-4xl sm:text-5xl font-extrabold text-white">
-                    ₹{{ billingInterval === 'yearly' ? '1,999' : '199' }}
-                  </span>
-                  <span class="text-slate-400 font-medium">/ {{ billingInterval === 'yearly' ? 'year' : 'month' }}</span>
-                </div>
-                <p class="mt-2 text-xs text-slate-400">Perfect for individual privacy, personal archives, and secure documents.</p>
+                <span class="text-xs text-slate-400 font-medium">
+                  / {{ billingInterval === 'yearly' ? 'year' : 'month' }}
+                </span>
               </div>
+              <p class="text-xs text-slate-400">
+                Ideal for individuals, photographers, and developers seeking private, unmonitored backups.
+              </p>
 
-              <div class="pt-4 border-t border-slate-800 space-y-3">
-                <div class="flex items-center space-x-3 text-sm text-slate-200">
-                  <CheckCircle2 class="w-5 h-5 text-brand-400 shrink-0" />
-                  <span><strong>200 GB</strong> Encrypted Storage</span>
+              <div class="pt-4 border-t border-surface-border space-y-2.5 text-xs text-slate-300">
+                <div class="flex items-center space-x-2.5">
+                  <CheckCircle2 class="w-4 h-4 text-accent-emerald shrink-0" />
+                  <span><strong>200 GB</strong> zero-knowledge storage</span>
                 </div>
-                <div class="flex items-center space-x-3 text-sm text-slate-200">
-                  <CheckCircle2 class="w-5 h-5 text-brand-400 shrink-0" />
-                  <span>Blazing Fast Direct-to-R2 Uploads</span>
+                <div class="flex items-center space-x-2.5">
+                  <CheckCircle2 class="w-4 h-4 text-accent-emerald shrink-0" />
+                  <span>10 GB maximum per-file upload</span>
                 </div>
-                <div class="flex items-center space-x-3 text-sm text-slate-200">
-                  <CheckCircle2 class="w-5 h-5 text-brand-400 shrink-0" />
-                  <span>100% Zero-Knowledge Privacy</span>
+                <div class="flex items-center space-x-2.5">
+                  <CheckCircle2 class="w-4 h-4 text-accent-emerald shrink-0" />
+                  <span>30-day automatic file version retention</span>
                 </div>
-                <div class="flex items-center space-x-3 text-sm text-slate-200">
-                  <CheckCircle2 class="w-5 h-5 text-brand-400 shrink-0" />
-                  <span>Password-Protected Share Links</span>
-                </div>
-                <div class="flex items-center space-x-3 text-sm text-slate-200">
-                  <CheckCircle2 class="w-5 h-5 text-brand-400 shrink-0" />
-                  <span>30 Days Version History</span>
+                <div class="flex items-center space-x-2.5">
+                  <CheckCircle2 class="w-4 h-4 text-accent-emerald shrink-0" />
+                  <span>End-to-end encrypted link sharing</span>
                 </div>
               </div>
             </div>
 
-            <div class="pt-8">
-              <button
-                @click="goToRegister('personal')"
-                class="w-full py-4 rounded-xl font-bold text-white bg-gradient-to-r from-accent-orange to-amber-500 hover:from-orange-600 hover:to-amber-600 shadow-xl shadow-orange-500/20 transition-all hover:scale-[1.01] active:scale-[0.99]"
-              >
-                Get Started
-              </button>
-            </div>
+            <button
+              @click="selectPlan('personal')"
+              class="w-full btn-primary py-3 rounded-xl text-xs font-semibold text-white flex items-center justify-center space-x-2"
+            >
+              <span>Select Personal Plan</span>
+              <ArrowRight class="w-3.5 h-3.5" />
+            </button>
           </div>
 
-          <!-- Business Plan (Matching Mockup Blue Action) -->
-          <div class="rounded-3xl p-8 glass-card border border-brand-500/40 shadow-xl shadow-brand-500/10 flex flex-col justify-between relative bg-gradient-to-b from-[#112344] to-[#0A1428]">
-            <div class="absolute -top-3.5 right-8 px-3.5 py-1 rounded-full text-[11px] font-extrabold uppercase tracking-wider bg-brand-500 text-white shadow-md">
-              Most Popular
+          <!-- Business Plan -->
+          <div class="vault-panel rounded-2xl p-7 border border-brand-500/30 bg-surface-card flex flex-col justify-between space-y-6 relative">
+            <div class="absolute -top-3 right-6 px-2.5 py-0.5 rounded-full bg-brand-600 text-[10px] font-bold text-white tracking-wide uppercase shadow-sm">
+              Popular for Teams
             </div>
 
-            <div class="space-y-6">
-              <div>
-                <span class="px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-brand-500/20 text-brand-300 border border-brand-500/40">
-                  Business Plan
+            <div class="space-y-4">
+              <div class="flex items-center justify-between">
+                <span class="text-xs font-mono uppercase tracking-wider font-bold text-brand-400">Business Vault</span>
+                <span class="text-[10px] px-2 py-0.5 rounded bg-surface-elevated border border-surface-border text-slate-400">Teams & Power Users</span>
+              </div>
+              <div class="flex items-baseline space-x-1">
+                <span class="text-3xl sm:text-4xl font-extrabold text-white">
+                  ₹{{ billingInterval === 'yearly' ? '4,999' : '499' }}
                 </span>
-                <div class="mt-4 flex items-baseline space-x-2">
-                  <span class="text-4xl sm:text-5xl font-extrabold text-white">
-                    ₹{{ billingInterval === 'yearly' ? '4,999' : '499' }}
-                  </span>
-                  <span class="text-slate-400 font-medium">/ {{ billingInterval === 'yearly' ? 'year' : 'month' }}</span>
-                </div>
-                <p class="mt-2 text-xs text-slate-400">For high-throughput professionals, teams, and compliance-first power users.</p>
+                <span class="text-xs text-slate-400 font-medium">
+                  / {{ billingInterval === 'yearly' ? 'year' : 'month' }}
+                </span>
               </div>
+              <p class="text-xs text-slate-400">
+                Massive storage volume with enterprise compliance, audit logs, and extended retention.
+              </p>
 
-              <div class="pt-4 border-t border-slate-800 space-y-3">
-                <div class="flex items-center space-x-3 text-sm text-slate-200">
-                  <CheckCircle2 class="w-5 h-5 text-brand-400 shrink-0" />
-                  <span><strong>2 TB</strong> High-Speed Storage</span>
+              <div class="pt-4 border-t border-surface-border space-y-2.5 text-xs text-slate-300">
+                <div class="flex items-center space-x-2.5">
+                  <CheckCircle2 class="w-4 h-4 text-accent-emerald shrink-0" />
+                  <span><strong>2 TB (2,048 GB)</strong> zero-knowledge storage</span>
                 </div>
-                <div class="flex items-center space-x-3 text-sm text-slate-200">
-                  <CheckCircle2 class="w-5 h-5 text-brand-400 shrink-0" />
-                  <span>Team Access & X25519 Key Sharing</span>
+                <div class="flex items-center space-x-2.5">
+                  <CheckCircle2 class="w-4 h-4 text-accent-emerald shrink-0" />
+                  <span>50 GB maximum per-file upload</span>
                 </div>
-                <div class="flex items-center space-x-3 text-sm text-slate-200">
-                  <CheckCircle2 class="w-5 h-5 text-brand-400 shrink-0" />
-                  <span>Unlimited Connected Devices</span>
+                <div class="flex items-center space-x-2.5">
+                  <CheckCircle2 class="w-4 h-4 text-accent-emerald shrink-0" />
+                  <span>90-day automatic file version history</span>
                 </div>
-                <div class="flex items-center space-x-3 text-sm text-slate-200">
-                  <CheckCircle2 class="w-5 h-5 text-brand-400 shrink-0" />
-                  <span>365 Days Extended Version Retention</span>
-                </div>
-                <div class="flex items-center space-x-3 text-sm text-slate-200">
-                  <CheckCircle2 class="w-5 h-5 text-brand-400 shrink-0" />
-                  <span>Priority 24/7 Dedicated Support</span>
+                <div class="flex items-center space-x-2.5">
+                  <CheckCircle2 class="w-4 h-4 text-accent-emerald shrink-0" />
+                  <span>Tamper-evident audit logging & priority support</span>
                 </div>
               </div>
             </div>
 
-            <div class="pt-8">
-              <button
-                @click="goToRegister('business')"
-                class="w-full py-4 rounded-xl font-bold text-white bg-brand-600 hover:bg-brand-500 shadow-xl shadow-brand-600/30 transition-all hover:scale-[1.01] active:scale-[0.99]"
-              >
-                Choose Plan
-              </button>
-            </div>
+            <button
+              @click="selectPlan('business')"
+              class="w-full btn-primary py-3 rounded-xl text-xs font-semibold text-white flex items-center justify-center space-x-2"
+            >
+              <span>Select Business Plan</span>
+              <ArrowRight class="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+
+        <!-- Payment Support Row -->
+        <div class="mt-10 p-4 rounded-xl bg-surface-card border border-surface-border flex flex-col sm:flex-row items-center justify-between text-xs text-slate-400">
+          <div class="flex items-center space-x-2 mb-2 sm:mb-0">
+            <ShieldCheck class="w-4 h-4 text-brand-400" />
+            <span>Securely processed via Razorpay • 100% Tax Invoice & GST Compliant</span>
+          </div>
+          <div class="font-mono text-[11px] text-slate-400">
+            UPI • Cards (Visa / Mastercard / RuPay) • Netbanking
           </div>
         </div>
       </div>
     </section>
 
-    <!-- Testimonial Section (Matching Mockup with Rajesh Kumar, Mumbai) -->
-    <section class="py-16 bg-[#080E1C] border-t border-slate-800/60">
-      <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
-        <div class="glass-card rounded-3xl p-8 sm:p-12 relative border border-slate-700/60 max-w-2xl mx-auto">
-          <div class="text-4xl text-brand-400 font-serif mb-4 leading-none">“</div>
-          <p class="text-xl sm:text-2xl font-medium text-slate-100 italic leading-relaxed">
-            SpeedCloud is incredibly fast and secure! Perfect for all my storage needs!
-          </p>
-          <div class="mt-8 flex items-center justify-center space-x-4">
-            <div class="w-12 h-12 rounded-full overflow-hidden border-2 border-brand-400 shadow-md">
-              <img
-                src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?fit=crop&w=120&h=120&q=80"
-                alt="Rajesh Kumar"
-                class="w-full h-full object-cover"
-              />
-            </div>
-            <div class="text-left">
-              <div class="font-bold text-white text-base">Rajesh Kumar</div>
-              <div class="text-xs text-brand-400">Mumbai, India</div>
-            </div>
-          </div>
+    <!-- Comparison Table -->
+    <section class="py-20 border-b border-surface-border">
+      <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="text-center max-w-xl mx-auto space-y-3 mb-12">
+          <h2 class="text-2xl font-extrabold text-white">How SpeedCloud compares</h2>
+          <p class="text-xs text-slate-400">We don't scan your files to train machine learning models.</p>
         </div>
-      </div>
-    </section>
 
-    <!-- Honest Comparison Matrix -->
-    <section class="py-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-      <div class="text-center max-w-3xl mx-auto mb-16">
-        <h2 class="text-3xl font-extrabold text-white tracking-tight">
-          How SpeedCloud Compares
-        </h2>
-        <p class="mt-3 text-slate-300 text-sm">
-          Unlike legacy cloud providers, our architecture is physically incapable of scanning or selling your files.
-        </p>
-      </div>
-
-      <div class="overflow-x-auto">
-        <table class="w-full text-left text-sm text-slate-300 border-collapse">
-          <thead>
-            <tr class="border-b border-slate-800 text-xs font-bold uppercase text-slate-400">
-              <th class="py-4 px-6">Capability</th>
-              <th class="py-4 px-6 text-brand-400 font-extrabold text-base">SpeedCloud</th>
-              <th class="py-4 px-6">Google Drive</th>
-              <th class="py-4 px-6">Dropbox</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-slate-800/60 font-medium">
-            <tr>
-              <td class="py-4 px-6">Zero-Knowledge Content Encryption</td>
-              <td class="py-4 px-6 text-emerald-400 font-bold">✓ Client AES-256-GCM</td>
-              <td class="py-4 px-6 text-rose-400">✗ Provider holds keys</td>
-              <td class="py-4 px-6 text-rose-400">✗ Provider holds keys</td>
-            </tr>
-            <tr>
-              <td class="py-4 px-6">Encrypted File & Folder Names</td>
-              <td class="py-4 px-6 text-emerald-400 font-bold">✓ Client-side ciphertext</td>
-              <td class="py-4 px-6 text-rose-400">✗ Plaintext on server</td>
-              <td class="py-4 px-6 text-rose-400">✗ Plaintext on server</td>
-            </tr>
-            <tr>
-              <td class="py-4 px-6">Direct R2 Egress Fees</td>
-              <td class="py-4 px-6 text-emerald-400 font-bold">✓ Zero Bandwidth Fees</td>
-              <td class="py-4 px-6 text-slate-400">Throttled</td>
-              <td class="py-4 px-6 text-slate-400">Bandwidth caps</td>
-            </tr>
-            <tr>
-              <td class="py-4 px-6">Indian Rupee (INR / UPI) Checkout</td>
-              <td class="py-4 px-6 text-emerald-400 font-bold">✓ Native Razorpay / UPI</td>
-              <td class="py-4 px-6 text-slate-400">Credit card only</td>
-              <td class="py-4 px-6 text-slate-400">USD conversions</td>
-            </tr>
-            <tr>
-              <td class="py-4 px-6">Offline 24-Word Recovery Key</td>
-              <td class="py-4 px-6 text-emerald-400 font-bold">✓ Hard cryptographic gate</td>
-              <td class="py-4 px-6 text-rose-400">✗ No Master Key</td>
-              <td class="py-4 px-6 text-rose-400">✗ No Master Key</td>
-            </tr>
-          </tbody>
-        </table>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs">
+            <thead>
+              <tr class="border-b border-surface-border text-slate-400 font-mono text-[11px]">
+                <th class="py-3 px-4">Feature</th>
+                <th class="py-3 px-4 text-white font-bold bg-surface-card rounded-t-lg">SpeedCloud</th>
+                <th class="py-3 px-4">Google Drive</th>
+                <th class="py-3 px-4">Proton Drive</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-surface-border text-slate-300">
+              <tr>
+                <td class="py-3.5 px-4 font-medium text-white">Zero-Knowledge (Client Derivation)</td>
+                <td class="py-3.5 px-4 bg-surface-card font-bold text-accent-emerald">Yes (Argon2id)</td>
+                <td class="py-3.5 px-4 text-slate-500">No (Server has keys)</td>
+                <td class="py-3.5 px-4 text-slate-300">Yes (OpenPGP)</td>
+              </tr>
+              <tr>
+                <td class="py-3.5 px-4 font-medium text-white">Direct-to-Storage Multipart (No Proxy)</td>
+                <td class="py-3.5 px-4 bg-surface-card font-bold text-accent-emerald">Yes (S3/R2 Presigned)</td>
+                <td class="py-3.5 px-4 text-slate-500">Proxied</td>
+                <td class="py-3.5 px-4 text-slate-500">Proxied via Switzerland</td>
+              </tr>
+              <tr>
+                <td class="py-3.5 px-4 font-medium text-white">Native Razorpay UPI & RuPay</td>
+                <td class="py-3.5 px-4 bg-surface-card font-bold text-accent-emerald">Yes (Instant UPI)</td>
+                <td class="py-3.5 px-4 text-slate-500">Cards only</td>
+                <td class="py-3.5 px-4 text-slate-500">International Forex</td>
+              </tr>
+              <tr>
+                <td class="py-3.5 px-4 font-medium text-white">200 GB Pricing</td>
+                <td class="py-3.5 px-4 bg-surface-card font-bold text-brand-400">₹199 / mo</td>
+                <td class="py-3.5 px-4 text-slate-400">₹210 / mo</td>
+                <td class="py-3.5 px-4 text-slate-400">~₹400 / mo (€4)</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </section>
 
     <!-- FAQ Accordion -->
-    <section id="faq" class="py-20 bg-[#091124] border-t border-slate-800/60">
-      <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-        <h2 class="text-3xl font-extrabold text-white text-center mb-12">
-          Frequently Asked Questions
-        </h2>
+    <section id="faq" class="py-20 border-b border-surface-border">
+      <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6">
+        <div class="text-center space-y-2 mb-10">
+          <h2 class="text-2xl font-extrabold text-white">Frequently Asked Questions</h2>
+          <p class="text-xs text-slate-400">Clear answers about our zero-knowledge technology and subscriptions.</p>
+        </div>
 
-        <div class="space-y-4">
-          <details class="group p-6 rounded-2xl glass-card border border-slate-800 transition-colors">
-            <summary class="flex justify-between items-center font-bold text-white cursor-pointer list-none">
-              <span>Why is there no free tier?</span>
-              <span class="text-brand-400 group-open:rotate-180 transition-transform">▼</span>
-            </summary>
-            <p class="mt-4 text-sm text-slate-300 leading-relaxed">
-              When a cloud storage product is "free", your data is scanned, indexed, and leveraged for AI training or ad targeting. SpeedCloud is funded purely through honest, transparent subscriptions starting at just ₹199/month. We have zero interest in monetizing your data.
-            </p>
-          </details>
-
-          <details class="group p-6 rounded-2xl glass-card border border-slate-800 transition-colors">
-            <summary class="flex justify-between items-center font-bold text-white cursor-pointer list-none">
-              <span>What happens if I forget my password?</span>
-              <span class="text-brand-400 group-open:rotate-180 transition-transform">▼</span>
-            </summary>
-            <p class="mt-4 text-sm text-slate-300 leading-relaxed">
-              Because SpeedCloud is zero-knowledge, our team cannot decrypt or reset your vault. When you register, you are given a 24-word cryptographic recovery phrase. If you ever forget your password, that 24-word phrase will unwrap your Master Key and restore all your files.
-            </p>
-          </details>
-
-          <details class="group p-6 rounded-2xl glass-card border border-slate-800 transition-colors">
-            <summary class="flex justify-between items-center font-bold text-white cursor-pointer list-none">
-              <span>How fast are uploads and downloads?</span>
-              <span class="text-brand-400 group-open:rotate-180 transition-transform">▼</span>
-            </summary>
-            <p class="mt-4 text-sm text-slate-300 leading-relaxed">
-              Unlike traditional platforms where files proxy through an application server, SpeedCloud uploads encrypted chunks directly to Cloudflare R2's global edge network across 4 parallel TCP connections. This yields near wire-speed throughput.
-            </p>
-          </details>
+        <div class="space-y-3">
+          <div
+            v-for="(faq, idx) in faqs"
+            :key="idx"
+            class="vault-panel rounded-xl overflow-hidden border border-surface-border transition-all"
+          >
+            <button
+              @click="toggleFaq(idx)"
+              class="w-full px-5 py-4 text-left flex items-center justify-between text-xs font-semibold text-white hover:bg-surface-card/60 transition-colors"
+            >
+              <span>{{ faq.q }}</span>
+              <ChevronDown
+                class="w-4 h-4 text-slate-400 transition-transform duration-200 shrink-0 ml-3"
+                :class="{ 'rotate-180 text-brand-400': openFaqIndex === idx }"
+              />
+            </button>
+            <div
+              v-if="openFaqIndex === idx"
+              class="px-5 pb-4 text-xs text-slate-400 leading-relaxed border-t border-surface-border/40 pt-3"
+            >
+              {{ faq.a }}
+            </div>
+          </div>
         </div>
       </div>
     </section>
 
     <!-- Footer -->
-    <footer class="py-12 border-t border-slate-800 bg-[#060B16] text-slate-400 text-xs">
-      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-6">
-        <div class="flex items-center space-x-3">
-          <div class="w-8 h-8 rounded-lg bg-brand-600 flex items-center justify-center">
-            <Cloud class="w-5 h-5 text-white" />
+    <footer class="py-10 bg-surface-ground">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between text-xs text-slate-500 gap-4">
+        <div class="flex items-center space-x-2">
+          <div class="w-6 h-6 rounded bg-brand-600 flex items-center justify-center text-white">
+            <Lock class="w-3.5 h-3.5" />
           </div>
-          <span class="font-bold text-white text-sm">SpeedCloud Storage</span>
-          <span>© 2026 SpeedCloud Technologies Private Limited.</span>
+          <span class="font-bold text-white">SpeedCloud</span>
+          <span>© 2026. All rights reserved.</span>
         </div>
-        <div class="flex items-center space-x-6">
-          <router-link to="/pricing" class="hover:text-white">Pricing</router-link>
-          <router-link to="/security" class="hover:text-white">Security Architecture</router-link>
-          <router-link to="/legal" class="hover:text-white">Privacy Policy & Terms</router-link>
+        <div class="flex items-center space-x-6 text-slate-400">
+          <router-link to="/security" class="hover:text-white transition-colors">Security Whitepaper</router-link>
+          <router-link to="/legal" class="hover:text-white transition-colors">Privacy & Terms</router-link>
+          <router-link to="/pricing" class="hover:text-white transition-colors">Pricing</router-link>
         </div>
       </div>
     </footer>

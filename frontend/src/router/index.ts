@@ -88,9 +88,31 @@ export const router = createRouter({
 
 router.beforeEach((to, _from, next) => {
   const authStore = useAuthStore();
-  if (to.meta.requiresAuth && !authStore.isAuthenticated) {
-    next({ name: "login", query: { redirect: to.fullPath } });
-  } else {
+
+  if (to.meta.requiresAuth) {
+    if (!authStore.isAuthenticated) {
+      next({ name: "login", query: { redirect: to.fullPath } });
+      return;
+    }
+
+    // Strict Subscription Gating (NO FREE TIER)
+    // If authenticated but unpaid, only allow billing and settings pages
+    if (!authStore.hasActiveSubscription) {
+      if (to.path === "/app/billing" || to.path === "/app/settings") {
+        next();
+      } else {
+        next({ path: "/app/billing", query: { gate: "required" } });
+      }
+      return;
+    }
+
     next();
+  } else {
+    // If already logged in and subscribed, redirect away from auth pages
+    if (authStore.isAuthenticated && authStore.hasActiveSubscription && (to.name === "login" || to.name === "register")) {
+      next({ path: "/app/files" });
+    } else {
+      next();
+    }
   }
 });

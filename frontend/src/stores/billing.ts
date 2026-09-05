@@ -78,6 +78,28 @@ export const useBillingStore = defineStore("billing", () => {
     }
   }
 
+  // Helper to guarantee checkout.js is loaded without adblock failure
+  async function loadRazorpaySDK(): Promise<boolean> {
+    if (typeof (window as any).Razorpay === "function") {
+      return true;
+    }
+    return new Promise((resolve) => {
+      const existing = document.querySelector('script[src*="checkout.razorpay.com"]');
+      if (existing) {
+        existing.addEventListener("load", () => resolve(true));
+        existing.addEventListener("error", () => resolve(false));
+        setTimeout(() => resolve(typeof (window as any).Razorpay === "function"), 1500);
+        return;
+      }
+      const script = document.createElement("script");
+      script.src = "https://checkout.razorpay.com/v1/checkout.js";
+      script.async = true;
+      script.onload = () => resolve(true);
+      script.onerror = () => resolve(false);
+      document.head.appendChild(script);
+    });
+  }
+
   async function checkout(planCode: string, interval: "monthly" | "yearly" = selectedInterval.value): Promise<void> {
     isLoading.value = true;
     try {
@@ -94,33 +116,43 @@ export const useBillingStore = defineStore("billing", () => {
         body: JSON.stringify({ plan_code: planCode, billing_interval: interval }),
       });
 
-      // Verify Razorpay script is loaded in browser
-      if (typeof (window as any).Razorpay !== "function") {
-        // In local/test mode without live CDN or simulated demo, simulate immediate activation
-        await verifyPayment({
-          plan_code: planCode,
-          razorpay_payment_id: `pay_sim_${Date.now()}`,
-          razorpay_order_id: order.order_id,
-          razorpay_signature: "mock_signature_approved",
-          billing_interval: interval,
-        });
-        return;
+      // Ensure Razorpay SDK script is loaded
+      const isLoaded = await loadRazorpaySDK();
+      if (!isLoaded || typeof (window as any).Razorpay !== "function") {
+        // Only if offline with mock order and placeholder keys allow mock demo simulation
+        if (order.order_id.startsWith("order_mock_") && (!order.key_id || order.key_id === "rzp_test_sample")) {
+          await verifyPayment({
+            plan_code: planCode,
+            razorpay_payment_id: `pay_sim_${Date.now()}`,
+            razorpay_order_id: order.order_id,
+            razorpay_signature: "mock_signature_approved",
+            billing_interval: interval,
+          });
+          return;
+        }
+
+        throw new Error(
+          "Razorpay checkout failed to load. Please disable any ad-blockers or shields for this page and try again."
+        );
       }
 
       return new Promise((resolve, reject) => {
+        let isSettled = false;
+
         const options = {
           key: order.key_id,
           amount: order.amount,
           currency: order.currency,
-          name: "SpeedCloud Storage",
-          description: `${order.plan_name} (${interval})`,
+          name: "SpeedCloud Vault",
+          description: `${order.plan_name} (${interval === "yearly" ? "Annual" : "Monthly"})`,
           image: "/logo.svg",
           order_id: order.order_id,
           prefill: order.prefill,
           theme: {
-            color: "#026fc7",
+            color: "#2563eb",
           },
           handler: async (response: any) => {
+            isSettled = true;
             try {
               await verifyPayment({
                 plan_code: planCode,
@@ -137,15 +169,26 @@ export const useBillingStore = defineStore("billing", () => {
           modal: {
             ondismiss: () => {
               isLoading.value = false;
+              if (!isSettled) {
+                reject(new Error("Payment was cancelled. An active subscription is required to unlock your vault."));
+              }
             },
           },
         };
 
-        const rzp = new (window as any).Razorpay(options);
-        rzp.on("payment.failed", (response: any) => {
-          reject(new Error(response.error.description || "Payment failed"));
-        });
-        rzp.open();
+        try {
+          const rzp = new (window as any).Razorpay(options);
+          rzp.on("payment.failed", (response: any) => {
+            isSettled = true;
+            isLoading.value = false;
+            const detail = response?.error?.description || response?.error?.reason || "Payment was declined by bank or gateway.";
+            reject(new Error(`Razorpay Error: ${detail}`));
+          });
+          rzp.open();
+        } catch (err: any) {
+          isLoading.value = false;
+          reject(new Error(`Could not initialize Razorpay checkout: ${err.message}`));
+        }
       });
     } finally {
       isLoading.value = false;
