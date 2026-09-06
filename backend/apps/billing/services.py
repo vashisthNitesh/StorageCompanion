@@ -69,7 +69,7 @@ def create_razorpay_order(user: User, plan_code: str, billing_interval: str = "m
             headers={
                 "Content-Type": "application/json",
                 "Authorization": f"Basic {b64_auth}",
-                "User-Agent": "SpeedCloud-Subscription/1.0",
+                "User-Agent": "SmartSpaceData-Subscription/1.0",
             },
             method="POST",
         )
@@ -238,7 +238,7 @@ def process_webhook_event(payload: dict, event_id: str) -> bool:
             sub = getattr(user, "subscription", None)
             if sub and sub.status == "active":
                 sub.status = "grace_period"
-                sub.grace_period_ends_at = timezone.now() + timedelta(days=30)
+                sub.grace_period_ends_at = timezone.now() + timedelta(days=15)
                 sub.save(update_fields=["status", "grace_period_ends_at"])
 
     return True

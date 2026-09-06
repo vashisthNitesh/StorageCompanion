@@ -72,8 +72,8 @@ function onSearch() {
 onMounted(() => {
   if (authStore.isAuthenticated && !authStore.isVaultUnlocked) {
     // Demo auto-unlock for test user
-    if (authStore.user?.email === "demo@speedcloud.local") {
-      authStore.unlockVault("SpeedCloud2026!").then(() => {
+    if (authStore.user?.email === "demo@smartspacedata.com" || authStore.user?.email === "demo@speedcloud.local") {
+      authStore.unlockVault("SmartSpace2026!").then(() => {
         if (authStore.hasActiveSubscription) {
           filesStore.fetchNodes();
         }
@@ -96,8 +96,8 @@ onMounted(() => {
             <Lock class="w-3.5 h-3.5 text-white" />
           </div>
           <div>
-            <div class="font-bold text-white text-sm tracking-tight leading-none">SpeedCloud</div>
-            <div class="text-[10px] text-slate-400 font-mono mt-0.5">Encrypted Vault</div>
+            <div class="font-bold text-white text-sm tracking-tight leading-none">SmartSpace</div>
+            <div class="text-[9px] text-slate-400 font-mono mt-0.5">smartspacedata.com</div>
           </div>
         </router-link>
 

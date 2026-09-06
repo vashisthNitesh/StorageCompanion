@@ -8,8 +8,8 @@ const router = useRouter();
 const route = useRoute();
 const authStore = useAuthStore();
 
-const email = ref("demo@speedcloud.local");
-const password = ref("SpeedCloud2026!");
+const email = ref("demo@smartspacedata.com");
+const password = ref("SmartSpace2026!");
 const totpCode = ref("");
 const mfaRequired = ref(false);
 const errorMessage = ref("");
@@ -33,12 +33,15 @@ async function handleLogin() {
 
 <template>
   <div class="min-h-screen bg-surface-ground flex flex-col justify-center py-12 px-4 sm:px-6 lg:px-8 selection:bg-brand-600 selection:text-white">
-    <div class="sm:mx-auto sm:w-full sm:max-w-md text-center space-y-2.5">
+    <div class="sm:mx-auto sm:w-full sm:max-w-md text-center space-y-2">
       <router-link to="/" class="inline-flex items-center space-x-2.5 group">
         <div class="w-8 h-8 rounded-lg bg-brand-600 border border-white/20 flex items-center justify-center shadow-sm">
           <Lock class="w-4 h-4 text-white" />
         </div>
-        <span class="text-xl font-bold tracking-tight text-white">SpeedCloud</span>
+        <div class="flex flex-col text-left">
+          <span class="text-lg font-bold tracking-tight text-white leading-none">SmartSpace</span>
+          <span class="text-[9px] text-slate-400 font-mono">smartspacedata.com</span>
+        </div>
       </router-link>
       <h1 class="text-xl font-bold text-white tracking-tight">Unlock your encrypted vault</h1>
       <p class="text-xs text-slate-400">Zero-knowledge client decryption will execute inside your browser.</p>
@@ -102,17 +105,17 @@ async function handleLogin() {
         <div class="p-3.5 rounded-xl bg-surface-card border border-surface-border text-xs text-slate-300 space-y-1">
           <div class="font-medium text-brand-400 flex items-center space-x-1.5">
             <KeyRound class="w-3.5 h-3.5" />
-            <span>Preloaded Demo Credentials</span>
+            <span>Creator Demo Credentials (Value Pack)</span>
           </div>
           <p class="text-[11px] text-slate-400">
-            Email: <code class="text-white font-mono">demo@speedcloud.local</code><br />
-            Password: <code class="text-white font-mono">SpeedCloud2026!</code>
+            Email: <code class="text-white font-mono">demo@smartspacedata.com</code><br />
+            Password: <code class="text-white font-mono">SmartSpace2026!</code>
           </p>
         </div>
 
         <div class="text-center pt-1 border-t border-surface-border/60">
           <router-link to="/register" class="text-xs text-slate-400 hover:text-white transition-colors">
-            Don't have an encrypted vault? Create account
+            Don't have an encrypted vault? Select a plan
           </router-link>
         </div>
       </div>

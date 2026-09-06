@@ -129,7 +129,7 @@ def setup_totp_mfa(user: User, device_name: str = "Authenticator App"):
     hashed_backup_codes = [make_password(code) for code in raw_backup_codes]
 
     totp = pyotp.TOTP(secret)
-    provisioning_uri = totp.provisioning_uri(name=user.email, issuer_name="SpeedCloud")
+    provisioning_uri = totp.provisioning_uri(name=user.email, issuer_name="SmartSpace Data")
 
     # Generate QR code image as base64
     qr = qrcode.QRCode(box_size=8, border=2)
