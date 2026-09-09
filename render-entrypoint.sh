@@ -14,9 +14,10 @@ echo "==> Running Django database migrations..."
 cd /app/backend
 python manage.py migrate --noinput
 
-# 3. Seed initial plans & demo account automatically
-echo "==> Seeding initial subscription plans & demo account..."
-python manage.py seed_demo || true
+# 3. Seed subscription plans & ensure master admin
+echo "==> Seeding subscription plans and master admin..."
+python manage.py seed_plans || true
+python manage.py create_master_admin || true
 
 # 4. Start Gunicorn in the background on 127.0.0.1:8000
 echo "==> Starting Gunicorn on 127.0.0.1:8000..."

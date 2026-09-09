@@ -18,6 +18,7 @@ import {
   ShieldAlert,
   HardDrive,
   AlertTriangle,
+  ArrowRight,
 } from "lucide-vue-next";
 import UploadTray from "../features/files/UploadTray.vue";
 
@@ -188,17 +189,24 @@ onMounted(() => {
         </div>
 
         <!-- Master Administrator Card: Shown for Super Admin (no user pack) -->
-        <div v-else class="p-3 rounded-xl bg-indigo-50/70 border border-indigo-200/80 shadow-2xs space-y-1.5 text-xs">
+        <div v-else class="p-3 rounded-xl bg-indigo-50/70 border border-indigo-200/80 shadow-2xs space-y-2 text-xs">
           <div class="flex items-center justify-between">
             <span class="font-bold text-indigo-900 flex items-center space-x-1.5">
               <ShieldAlert class="w-3.5 h-3.5 text-indigo-600" />
-              <span>Super Administrator</span>
+              <span>Platform Administrator</span>
             </span>
             <span class="text-[9px] bg-indigo-600 text-white px-1.5 py-0.5 rounded font-mono font-bold">Admin</span>
           </div>
           <p class="text-[10px] text-slate-500 leading-snug">
             Platform manager • 100% pool capacity allocated to users.
           </p>
+          <router-link
+            to="/app/admin"
+            class="inline-flex items-center space-x-1 text-[11px] text-indigo-700 font-semibold hover:text-indigo-900 pt-0.5"
+          >
+            <span>Open Admin Dashboard</span>
+            <ArrowRight class="w-3 h-3" />
+          </router-link>
         </div>
 
         <!-- User Profile Row -->

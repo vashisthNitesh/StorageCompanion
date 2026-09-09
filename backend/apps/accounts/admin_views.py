@@ -49,21 +49,26 @@ class AdminKPIsView(APIView):
             bucket_format = "%d %b"
             bucket_count = 30
 
-        # 1. User Metrics
-        total_users = User.objects.count()
-        new_users = User.objects.filter(date_joined__gte=start_date).count()
+        # 1. Customer User Metrics (Exclude Master Admin & Staff)
+        customer_users_qs = User.objects.filter(is_staff=False, is_superuser=False)
+        total_users = customer_users_qs.count()
+        new_users = customer_users_qs.filter(date_joined__gte=start_date).count()
 
-        # Active users in period (distinct users with audit logs or created recently)
+        # Active customer users in period (distinct non-staff users with audit logs or who joined recently)
         active_user_ids = set(
-            AuditLog.objects.filter(created_at__gte=start_date, user__isnull=False)
+            AuditLog.objects.filter(
+                created_at__gte=start_date,
+                user__isnull=False,
+                user__is_staff=False,
+                user__is_superuser=False,
+            )
             .values_list("user_id", flat=True)
             .distinct()
         )
-        # Include users who joined in this period
         recent_join_ids = set(
-            User.objects.filter(date_joined__gte=start_date).values_list("id", flat=True)
+            customer_users_qs.filter(date_joined__gte=start_date).values_list("id", flat=True)
         )
-        active_users_count = max(len(active_user_ids | recent_join_ids), 1)
+        active_users_count = len(active_user_ids | recent_join_ids)
 
         # 2. Global Storage Pool Metrics
         pool_stats = StorageQuota.get_global_pool_stats()
@@ -272,7 +277,12 @@ class AdminUsersListView(APIView):
         plan_filter = request.query_params.get("plan", "").strip().lower()
         status_filter = request.query_params.get("status", "").strip().lower()
 
-        queryset = User.objects.all().select_related("subscription__plan", "storage_quota").order_by("-date_joined")
+        # Strictly customer accounts: exclude Platform Administrator & staff
+        queryset = (
+            User.objects.filter(is_staff=False, is_superuser=False)
+            .select_related("subscription__plan", "storage_quota")
+            .order_by("-date_joined")
+        )
 
         if search:
             queryset = queryset.filter(
@@ -314,23 +324,23 @@ class AdminUsersListView(APIView):
                 "id": str(user.id),
                 "email": user.email,
                 "full_name": user.full_name or user.email.split("@")[0],
-                "is_staff": user.is_staff,
-                "is_superuser": user.is_superuser,
+                "is_staff": False,
+                "is_superuser": False,
                 "is_active": user.is_active,
                 "date_joined": user.date_joined.isoformat(),
                 "plan": {
-                    "code": "admin" if (user.is_staff or user.is_superuser) else (sub.plan.code if sub and sub.plan else "none"),
-                    "name": "Platform Administrator" if (user.is_staff or user.is_superuser) else (sub.plan.name if sub and sub.plan else "No Active Plan"),
-                    "status": "system_admin" if (user.is_staff or user.is_superuser) else (sub.status if sub else "inactive"),
-                    "billing_interval": "unlimited" if (user.is_staff or user.is_superuser) else (sub.billing_interval if sub else "monthly"),
+                    "code": sub.plan.code if sub and sub.plan else "none",
+                    "name": sub.plan.name if sub and sub.plan else "No Active Plan",
+                    "status": sub.status if sub else "inactive",
+                    "billing_interval": sub.billing_interval if sub else "monthly",
                     "current_period_end": sub.current_period_end.isoformat() if sub and sub.current_period_end else None,
                 },
                 "storage": {
-                    "bytes_used": 0 if (user.is_staff or user.is_superuser) else bytes_used,
-                    "bytes_limit": 0 if (user.is_staff or user.is_superuser) else bytes_limit,
-                    "percent_used": 0.0 if (user.is_staff or user.is_superuser) else percent_used,
-                    "used_formatted": "0 MB" if (user.is_staff or user.is_superuser) else (f"{round(bytes_used / (1024 * 1024), 1)} MB" if bytes_used < 1024*1024*1024 else f"{round(bytes_used / (1024 * 1024 * 1024), 2)} GB"),
-                    "limit_formatted": "No Pack Required" if (user.is_staff or user.is_superuser) else f"{round(bytes_limit / (1024 * 1024 * 1024), 1)} GB",
+                    "bytes_used": bytes_used,
+                    "bytes_limit": bytes_limit,
+                    "percent_used": percent_used,
+                    "used_formatted": f"{round(bytes_used / (1024 * 1024), 1)} MB" if bytes_used < 1024 * 1024 * 1024 else f"{round(bytes_used / (1024 * 1024 * 1024), 2)} GB",
+                    "limit_formatted": f"{round(bytes_limit / (1024 * 1024 * 1024), 1)} GB",
                 },
             })
 

@@ -94,10 +94,13 @@ def test_admin_user_management_and_upgrade(subscribed_user):
     client = APIClient()
     client.force_authenticate(user=admin_user)
 
-    # 1. User list
+    # 1. User list (strictly customers, admin excluded)
     res_list = client.get("/api/v1/admin/users/")
     assert res_list.status_code == 200
-    assert res_list.json()["total_count"] >= 2
+    assert res_list.json()["total_count"] >= 1
+    user_emails = [u["email"] for u in res_list.json()["results"]]
+    assert admin_user.email not in user_emails
+    assert subscribed_user.email in user_emails
 
     # Search user
     res_search = client.get(f"/api/v1/admin/users/?search={subscribed_user.email}")
