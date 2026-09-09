@@ -86,18 +86,18 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="flex h-screen bg-surface-ground text-slate-100 overflow-hidden selection:bg-brand-600 selection:text-white">
+  <div class="flex h-screen bg-slate-50 text-slate-900 overflow-hidden selection:bg-brand-600 selection:text-white">
     <!-- Left Sidebar -->
-    <aside class="w-64 border-r border-surface-border bg-surface-card flex flex-col justify-between shrink-0">
+    <aside class="w-64 border-r border-slate-200 bg-white flex flex-col justify-between shrink-0 shadow-[1px_0_3px_0_rgba(0,0,0,0.02)]">
       <div class="p-4 space-y-5">
         <!-- Logo -->
-        <router-link to="/" class="flex items-center space-x-2.5">
-          <div class="w-7 h-7 rounded-lg bg-brand-600 border border-white/20 flex items-center justify-center shadow-sm">
-            <Lock class="w-3.5 h-3.5 text-white" />
+        <router-link to="/" class="flex items-center space-x-2.5 group">
+          <div class="w-8 h-8 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center shadow-sm shadow-blue-500/20 group-hover:scale-105 transition-transform">
+            <Lock class="w-4 h-4 text-white" />
           </div>
           <div>
-            <div class="font-bold text-white text-sm tracking-tight leading-none">SmartSpace</div>
-            <div class="text-[9px] text-slate-400 font-mono mt-0.5">smartspacedata.com</div>
+            <div class="font-bold text-slate-900 text-sm tracking-tight leading-none">SmartSpace</div>
+            <div class="text-[10px] text-slate-500 font-medium mt-0.5">smartspacedata.com</div>
           </div>
         </router-link>
 
@@ -106,7 +106,7 @@ onMounted(() => {
           <input ref="fileInputRef" type="file" multiple class="hidden" @change="handleFileSelect" />
           <button
             @click="handleUploadClick"
-            class="w-full btn-primary py-2.5 px-3 rounded-lg text-xs font-semibold text-white flex items-center justify-center space-x-2 shadow-sm"
+            class="w-full btn-primary py-2.5 px-3 rounded-xl text-xs font-semibold flex items-center justify-center space-x-2"
           >
             <UploadCloud class="w-4 h-4" />
             <span>Upload Encrypted Files</span>
@@ -114,84 +114,84 @@ onMounted(() => {
         </div>
 
         <!-- Navigation Links -->
-        <nav class="space-y-1 text-xs font-medium text-slate-300">
+        <nav class="space-y-1 text-xs font-medium">
           <router-link
             to="/app/files"
-            class="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-surface-elevated hover:text-white transition-colors"
-            :class="{ 'bg-surface-elevated text-white font-semibold border border-surface-border': $route.path === '/app/files' }"
+            class="flex items-center space-x-3 px-3 py-2 rounded-xl transition-all"
+            :class="$route.path === '/app/files' ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/70'"
           >
-            <Folder class="w-4 h-4 text-slate-400" />
+            <Folder class="w-4 h-4" :class="$route.path === '/app/files' ? 'text-blue-600' : 'text-slate-400'" />
             <span>Encrypted Vault</span>
           </router-link>
 
           <router-link
             to="/app/shared"
-            class="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-surface-elevated hover:text-white transition-colors"
-            :class="{ 'bg-surface-elevated text-white font-semibold border border-surface-border': $route.path === '/app/shared' }"
+            class="flex items-center space-x-3 px-3 py-2 rounded-xl transition-all"
+            :class="$route.path === '/app/shared' ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/70'"
           >
-            <Share2 class="w-4 h-4 text-slate-400" />
+            <Share2 class="w-4 h-4" :class="$route.path === '/app/shared' ? 'text-blue-600' : 'text-slate-400'" />
             <span>Shared Links</span>
           </router-link>
 
           <router-link
             to="/app/billing"
-            class="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-surface-elevated hover:text-white transition-colors"
-            :class="{ 'bg-surface-elevated text-white font-semibold border border-surface-border': $route.path === '/app/billing' }"
+            class="flex items-center space-x-3 px-3 py-2 rounded-xl transition-all"
+            :class="$route.path === '/app/billing' ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/70'"
           >
-            <CreditCard class="w-4 h-4 text-slate-400" />
+            <CreditCard class="w-4 h-4" :class="$route.path === '/app/billing' ? 'text-blue-600' : 'text-slate-400'" />
             <span>Subscription & Billing</span>
           </router-link>
 
           <router-link
             to="/app/settings"
-            class="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-surface-elevated hover:text-white transition-colors"
-            :class="{ 'bg-surface-elevated text-white font-semibold border border-surface-border': $route.path === '/app/settings' }"
+            class="flex items-center space-x-3 px-3 py-2 rounded-xl transition-all"
+            :class="$route.path === '/app/settings' ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/70'"
           >
-            <Settings class="w-4 h-4 text-slate-400" />
+            <Settings class="w-4 h-4" :class="$route.path === '/app/settings' ? 'text-blue-600' : 'text-slate-400'" />
             <span>Security & Sessions</span>
           </router-link>
         </nav>
       </div>
 
       <!-- Storage Meter & Profile Footer -->
-      <div class="p-4 border-t border-surface-border space-y-4">
+      <div class="p-4 border-t border-slate-200 space-y-3.5 bg-slate-50/50">
         <!-- Storage Quota Meter -->
-        <div class="p-3 rounded-xl bg-surface-elevated border border-surface-border space-y-2">
+        <div class="p-3 rounded-xl bg-white border border-slate-200 shadow-2xs space-y-2">
           <div class="flex items-center justify-between text-xs">
-            <div class="flex items-center space-x-1.5 text-slate-300 font-medium">
-              <HardDrive class="w-3.5 h-3.5 text-brand-400" />
+            <div class="flex items-center space-x-1.5 text-slate-700 font-medium">
+              <HardDrive class="w-3.5 h-3.5 text-blue-600" />
               <span>Storage Quota</span>
             </div>
-            <span class="font-mono text-slate-400 text-[10px]">{{ percentUsed }}%</span>
+            <span class="font-mono text-slate-600 font-semibold text-[10px]">{{ percentUsed }}%</span>
           </div>
 
-          <div class="w-full bg-surface-subtle h-1.5 rounded-full overflow-hidden">
+          <div class="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
             <div
               class="h-full rounded-full transition-all duration-300"
-              :class="percentUsed > 85 ? 'bg-rose-500' : 'bg-brand-600'"
+              :class="percentUsed > 85 ? 'bg-rose-500' : 'bg-blue-600'"
               :style="{ width: `${percentUsed}%` }"
             ></div>
           </div>
 
-          <div class="flex items-center justify-between text-[10px] text-slate-400">
+          <div class="flex items-center justify-between text-[10px] text-slate-500">
             <span>{{ storageUsedMB }} MB of {{ storageLimitGB }} GB</span>
-            <router-link to="/app/billing" class="text-brand-400 hover:underline">
-              Manage
+            <router-link to="/app/billing" class="text-blue-600 font-medium hover:underline">
+              Upgrade
             </router-link>
           </div>
         </div>
 
         <!-- User Profile Row -->
-        <div class="flex items-center justify-between pt-1">
+        <div class="flex items-center justify-between pt-0.5">
           <div class="flex items-center space-x-2.5 min-w-0">
-            <div class="w-7 h-7 rounded-full bg-brand-600/30 border border-brand-500/40 text-brand-300 flex items-center justify-center font-bold text-xs shrink-0">
+            <div class="w-7 h-7 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-bold text-xs shrink-0 border border-blue-200">
               {{ (authStore.user?.full_name || authStore.user?.email || 'U')[0].toUpperCase() }}
             </div>
             <div class="min-w-0">
-              <div class="text-xs font-semibold text-white truncate">
+              <div class="text-xs font-semibold text-slate-900 truncate">
                 {{ authStore.user?.full_name || 'My Vault' }}
               </div>
-              <div class="text-[10px] text-slate-400 truncate">
+              <div class="text-[10px] text-slate-500 truncate">
                 {{ authStore.user?.email }}
               </div>
             </div>
@@ -199,7 +199,7 @@ onMounted(() => {
 
           <button
             @click="handleLogout"
-            class="p-1.5 text-slate-400 hover:text-rose-400 rounded-lg transition-colors"
+            class="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
             title="Sign out"
           >
             <LogOut class="w-3.5 h-3.5" />
@@ -209,37 +209,37 @@ onMounted(() => {
     </aside>
 
     <!-- Main Content Area -->
-    <div class="flex-1 flex flex-col min-w-0 overflow-hidden">
+    <div class="flex-1 flex flex-col min-w-0 overflow-hidden bg-slate-50">
       <!-- Unpaid Warning Banner -->
       <div
         v-if="!authStore.hasActiveSubscription"
-        class="px-6 py-2.5 bg-amber-950/70 border-b border-amber-800/60 flex items-center justify-between text-xs text-amber-200"
+        class="px-6 py-2.5 bg-amber-50 border-b border-amber-200 flex items-center justify-between text-xs text-amber-900"
       >
         <div class="flex items-center space-x-2">
-          <AlertTriangle class="w-4 h-4 text-amber-400 shrink-0" />
-          <span>Subscription Inactive: Complete your plan subscription with Razorpay to unlock your encrypted storage.</span>
+          <AlertTriangle class="w-4 h-4 text-amber-600 shrink-0" />
+          <span><strong>Subscription Required:</strong> Activate a monthly or yearly plan via Razorpay to unlock your cloud storage.</span>
         </div>
         <router-link
           to="/app/billing"
-          class="px-2.5 py-1 rounded bg-amber-500/20 text-amber-300 font-bold hover:bg-amber-500/30 transition-colors shrink-0"
+          class="px-3 py-1 rounded-lg bg-amber-600 text-white font-semibold hover:bg-amber-700 transition-colors shrink-0 shadow-xs"
         >
           Subscribe Now →
         </router-link>
       </div>
 
       <!-- Top Header -->
-      <header class="h-14 border-b border-surface-border bg-surface-card/60 backdrop-blur-md flex items-center justify-between px-6 shrink-0">
+      <header class="h-14 border-b border-slate-200 bg-white/80 backdrop-blur-md flex items-center justify-between px-6 shrink-0 shadow-2xs">
         <!-- Breadcrumbs -->
-        <div class="flex items-center space-x-2 text-xs font-medium text-slate-400">
+        <div class="flex items-center space-x-2 text-xs font-medium text-slate-500">
           <template v-for="(crumb, idx) in filesStore.breadcrumbs" :key="crumb.id || idx">
             <button
               @click="filesStore.navigateUp(idx)"
-              class="hover:text-white transition-colors"
-              :class="{ 'text-white font-semibold': idx === filesStore.breadcrumbs.length - 1 }"
+              class="hover:text-slate-900 transition-colors"
+              :class="{ 'text-slate-900 font-semibold': idx === filesStore.breadcrumbs.length - 1 }"
             >
               {{ crumb.name }}
             </button>
-            <ChevronRight v-if="idx < filesStore.breadcrumbs.length - 1" class="w-3.5 h-3.5 text-slate-600" />
+            <ChevronRight v-if="idx < filesStore.breadcrumbs.length - 1" class="w-3.5 h-3.5 text-slate-400" />
           </template>
         </div>
 
@@ -247,28 +247,29 @@ onMounted(() => {
         <div class="flex items-center space-x-3">
           <!-- Client-side decrypted search input -->
           <div class="relative w-64">
-            <Search class="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+            <Search class="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               type="text"
               v-model="searchInput"
               @input="onSearch"
               placeholder="Search decrypted vault..."
-              class="w-full pl-8 pr-3 py-1.5 rounded-lg bg-surface-ground border border-surface-border text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-brand-500"
+              class="w-full pl-8 pr-3 py-1.5 rounded-xl bg-slate-100/70 border border-slate-200 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all"
             />
           </div>
 
           <!-- Subscription Badge -->
           <div
-            class="px-2.5 py-1 rounded-md text-[10px] font-mono font-bold uppercase tracking-wider flex items-center space-x-1"
-            :class="authStore.hasActiveSubscription ? 'bg-emerald-950/60 text-accent-emerald border border-emerald-800/60' : 'bg-amber-950/60 text-amber-300 border border-amber-800/60'"
+            class="px-2.5 py-1 rounded-lg text-[10px] font-medium tracking-wide flex items-center space-x-1"
+            :class="authStore.hasActiveSubscription ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-amber-50 text-amber-700 border border-amber-200'"
           >
+            <span class="w-1.5 h-1.5 rounded-full" :class="authStore.hasActiveSubscription ? 'bg-emerald-500' : 'bg-amber-500'"></span>
             <span>{{ authStore.hasActiveSubscription ? (authStore.user?.subscription?.plan_name || 'Active Plan') : 'Unpaid' }}</span>
           </div>
         </div>
       </header>
 
       <!-- Routed Page Container -->
-      <main class="flex-1 overflow-y-auto p-6 bg-surface-ground">
+      <main class="flex-1 overflow-y-auto p-6 bg-slate-50">
         <router-view />
       </main>
 

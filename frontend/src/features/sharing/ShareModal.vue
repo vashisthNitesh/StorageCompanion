@@ -73,35 +73,35 @@ function copyToClipboard() {
 </script>
 
 <template>
-  <div v-if="isOpen" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-    <div class="glass-panel w-full max-w-lg rounded-3xl overflow-hidden border border-slate-700/80 bg-[#0c1427]/95 shadow-2xl p-6 space-y-6">
+  <div v-if="isOpen" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
+    <div class="w-full max-w-lg rounded-2xl border border-slate-200 bg-white shadow-2xl p-6 space-y-5">
       <!-- Header -->
       <div class="flex items-center justify-between">
         <div class="flex items-center space-x-2.5">
-          <Link class="w-5 h-5 text-brand-400" />
-          <h3 class="font-bold text-white text-base">Share File Securely</h3>
+          <Link class="w-5 h-5 text-brand-600" />
+          <h3 class="font-bold text-slate-900 text-base">Share File Securely</h3>
         </div>
-        <button @click="emit('close')" class="p-1 rounded-lg text-slate-400 hover:text-white">
+        <button @click="emit('close')" class="p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors">
           <X class="w-5 h-5" />
         </button>
       </div>
 
-      <div class="text-xs text-slate-300">
-        Sharing <strong class="text-white">{{ node?.name }}</strong>. The decryption key will be stored exclusively in the URL fragment (<code class="text-brand-400">#</code>) and will never touch our servers.
+      <div class="text-xs text-slate-600">
+        Sharing <strong class="text-slate-900">{{ node?.name }}</strong>. The decryption key will be stored exclusively in the URL fragment (<code class="text-brand-600 font-bold">#</code>) and will never touch our servers.
       </div>
 
-      <div v-if="errorMessage" class="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs">
+      <div v-if="errorMessage" class="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs">
         {{ errorMessage }}
       </div>
 
       <!-- Settings -->
-      <div class="space-y-4 pt-2">
-        <label class="flex items-center justify-between p-3 rounded-xl bg-slate-900/60 border border-slate-800 text-xs cursor-pointer">
-          <div class="flex items-center space-x-2 text-slate-200">
-            <Lock class="w-4 h-4 text-brand-400" />
+      <div class="space-y-4 pt-1">
+        <label class="flex items-center justify-between p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs cursor-pointer hover:bg-slate-100/70 transition-colors">
+          <div class="flex items-center space-x-2 text-slate-800 font-medium">
+            <Lock class="w-4 h-4 text-brand-600" />
             <span>Require Password</span>
           </div>
-          <input type="checkbox" v-model="requirePassword" class="w-4 h-4 rounded text-brand-600 focus:ring-brand-500 bg-slate-800 border-slate-700" />
+          <input type="checkbox" v-model="requirePassword" class="w-4 h-4 rounded text-brand-600 focus:ring-brand-500 border-slate-300" />
         </label>
 
         <div v-if="requirePassword" class="space-y-1">
@@ -109,35 +109,35 @@ function copyToClipboard() {
             type="password"
             v-model="password"
             placeholder="Set link password..."
-            class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white focus:outline-none focus:border-brand-500"
+            class="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-900 focus:bg-white focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100 transition-all"
           />
         </div>
 
         <div>
-          <label class="block text-xs text-slate-400 mb-1">Max Downloads (Optional)</label>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Max Downloads (Optional)</label>
           <input
             type="number"
             v-model.number="maxDownloads"
             placeholder="Unlimited"
             min="1"
-            class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white focus:outline-none focus:border-brand-500"
+            class="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-900 focus:bg-white focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100 transition-all"
           />
         </div>
       </div>
 
       <!-- Generated URL Box -->
-      <div v-if="shareUrl" class="space-y-2 pt-2">
-        <label class="block text-xs font-semibold text-brand-400">Encrypted Public Link</label>
+      <div v-if="shareUrl" class="space-y-2 pt-1">
+        <label class="block text-xs font-semibold text-brand-700">Encrypted Public Link</label>
         <div class="flex items-center space-x-2">
           <input
             type="text"
             readonly
             :value="shareUrl"
-            class="flex-1 px-3.5 py-2.5 rounded-xl bg-slate-950 border border-brand-500/40 text-xs text-slate-200 font-mono select-all focus:outline-none"
+            class="flex-1 px-3.5 py-2.5 rounded-xl bg-slate-50 border border-brand-300 text-xs text-slate-800 font-mono select-all focus:outline-none focus:bg-white"
           />
           <button
             @click="copyToClipboard"
-            class="px-4 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-xs font-bold text-white flex items-center space-x-1.5 transition-all shadow-md"
+            class="btn-primary px-4 py-2.5 rounded-xl text-xs font-semibold text-white flex items-center space-x-1.5 transition-all shadow-xs"
           >
             <Check v-if="copied" class="w-4 h-4" />
             <Copy v-else class="w-4 h-4" />
@@ -152,14 +152,14 @@ function copyToClipboard() {
           v-if="!shareUrl"
           @click="generatePublicLink"
           :disabled="isGenerating"
-          class="w-full py-3 rounded-xl font-bold text-white text-xs bg-brand-600 hover:bg-brand-500 disabled:opacity-50 transition-all shadow-lg shadow-brand-600/30"
+          class="btn-primary w-full py-3 rounded-xl font-semibold text-white text-xs disabled:opacity-50 transition-all shadow-sm hover:shadow-md"
         >
           {{ isGenerating ? 'Generating Encrypted Link...' : 'Create Zero-Knowledge Link' }}
         </button>
         <button
           v-else
           @click="emit('close')"
-          class="w-full py-2.5 rounded-xl font-semibold text-slate-300 text-xs hover:bg-slate-800 transition-colors"
+          class="w-full py-2.5 rounded-xl font-semibold text-slate-700 text-xs bg-slate-100 hover:bg-slate-200 transition-colors"
         >
           Done
         </button>

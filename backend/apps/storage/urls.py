@@ -9,6 +9,7 @@ from apps.storage.views import (
     UploadCompleteView,
     UploadAbortView,
     QuotaView,
+    StoragePoolStatusView,
 )
 
 urlpatterns = [
@@ -19,11 +20,13 @@ urlpatterns = [
     path("nodes/<uuid:pk>/versions", NodeVersionsView.as_view(), name="node-versions"),
     path("nodes/<uuid:pk>/download", NodeDownloadView.as_view(), name="node-download"),
     
-    # Upload Pipeline (Direct to R2)
+    # Upload Pipeline (Direct to SpaceByte S3 upstream)
     path("uploads", UploadInitView.as_view(), name="upload-init"),
     path("uploads/<uuid:upload_id>/complete", UploadCompleteView.as_view(), name="upload-complete"),
     path("uploads/<uuid:upload_id>", UploadAbortView.as_view(), name="upload-abort"),
     
-    # Quota
+    # Quota & SpaceByte Pool
     path("quota", QuotaView.as_view(), name="storage-quota"),
+    path("pool-status", StoragePoolStatusView.as_view(), name="storage-pool-status"),
+    path("storage/pool-status", StoragePoolStatusView.as_view(), name="storage-pool-status-alias"),
 ]

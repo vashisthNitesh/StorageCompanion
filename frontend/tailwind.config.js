@@ -9,31 +9,33 @@ export default {
     extend: {
       colors: {
         surface: {
-          ground: "#090B10",
-          card: "#10131B",
-          elevated: "#161A24",
-          subtle: "#1D2230",
-          border: "rgba(255, 255, 255, 0.08)",
-          borderHover: "rgba(255, 255, 255, 0.16)",
+          ground: "#F8FAFC",      // Soft, luminous slate-50 canvas
+          card: "#FFFFFF",        // Pure crisp white card surface
+          elevated: "#F1F5F9",    // Soft slate-100 hover / active wells
+          subtle: "#E2E8F0",      // Slate-200 dividers, borders & pills
+          border: "#E2E8F0",      // Refined light border
+          borderHover: "#CBD5E1", // Slate-300 border hover
         },
         brand: {
-          50: "#f0f7ff",
-          100: "#e0effe",
-          200: "#bae0fd",
-          300: "#7cc8fb",
-          400: "#38bdf8",
-          500: "#0ea5e9",
-          600: "#2563eb",
-          700: "#1d4ed8",
-          800: "#1e40af",
-          900: "#1e3a8a",
-          950: "#0f172a",
+          50: "#EFF6FF",
+          100: "#DBEAFE",
+          200: "#BFDBFE",
+          300: "#93C5FD",
+          400: "#60A5FA",
+          500: "#3B82F6",
+          600: "#2563EB",         // Royal Sapphire Blue
+          700: "#1D4ED8",
+          800: "#1E40AF",
+          900: "#1E3A8A",
+          950: "#172554",
         },
         accent: {
-          orange: "#f97316",
-          amber: "#f59e0b",
-          emerald: "#10b981",
-        }
+          orange: "#F97316",
+          amber: "#D97706",
+          emerald: "#059669",
+          indigo: "#4F46E5",
+          rose: "#E11D48",
+        },
       },
       fontFamily: {
         sans: ["Inter", "-apple-system", "BlinkMacSystemFont", "Segoe UI", "Roboto", "sans-serif"],

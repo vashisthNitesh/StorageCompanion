@@ -117,72 +117,72 @@ function selectPlan(planCode: string) {
 </script>
 
 <template>
-  <div class="min-h-screen bg-surface-ground text-slate-100 flex flex-col selection:bg-brand-600 selection:text-white">
+  <div class="min-h-screen bg-slate-50 text-slate-900 flex flex-col selection:bg-brand-600 selection:text-white">
     <!-- Top Nav -->
-    <header class="border-b border-surface-border bg-surface-ground/90 sticky top-0 z-30 backdrop-blur-md">
+    <header class="border-b border-slate-200 bg-white/80 sticky top-0 z-30 backdrop-blur-md shadow-2xs">
       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-        <router-link to="/" class="flex items-center space-x-2 text-slate-400 hover:text-white text-xs font-medium transition-colors">
+        <router-link to="/" class="flex items-center space-x-2 text-slate-600 hover:text-slate-900 text-xs font-semibold transition-colors">
           <ArrowLeft class="w-4 h-4" />
           <span>Back to smartspacedata.com</span>
         </router-link>
 
-        <div class="flex items-center space-x-2">
-          <div class="w-7 h-7 rounded-lg bg-brand-600 flex items-center justify-center text-white">
-            <Lock class="w-3.5 h-3.5" />
+        <div class="flex items-center space-x-2.5">
+          <div class="w-8 h-8 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center text-white shadow-sm shadow-blue-500/20">
+            <Lock class="w-4 h-4" />
           </div>
-          <span class="font-bold text-white text-sm tracking-tight">SmartSpace Data Pricing</span>
+          <span class="font-bold text-slate-900 text-sm tracking-tight">SmartSpace Cloud Storage</span>
         </div>
 
-        <router-link to="/login" class="text-xs font-semibold text-slate-300 hover:text-white transition-colors">
+        <router-link to="/login" class="text-xs font-semibold text-blue-600 hover:text-blue-700 transition-colors">
           Log In
         </router-link>
       </div>
     </header>
 
-    <main class="flex-1 max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-16 w-full space-y-12">
+    <main class="flex-1 max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-14 w-full space-y-12">
       <div class="text-center space-y-4 max-w-2xl mx-auto">
-        <div class="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-surface-card border border-surface-border text-xs font-mono text-accent-emerald">
-          <Zap class="w-3.5 h-3.5" />
-          <span>100% ALL-INCLUSIVE INR PRICING</span>
+        <div class="inline-flex items-center space-x-1.5 px-3.5 py-1 rounded-full bg-blue-50 border border-blue-200 text-xs font-semibold text-blue-700">
+          <Zap class="w-3.5 h-3.5 text-blue-600" />
+          <span>ALL-INCLUSIVE INR PRICING • ZERO HIDDEN FEES</span>
         </div>
-        <h1 class="text-3xl sm:text-4xl font-extrabold text-white tracking-tight">
-          India's 'Paisa Vasool' Plans
+        <h1 class="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">
+          Flexible Plans with SpaceByte Storage
         </h1>
-        <p class="text-slate-400 text-xs sm:text-sm leading-relaxed">
-          Zero hidden GST, zero egress download fees, and 100% original RAW quality. 1-Click native Razorpay UPI.
+        <p class="text-slate-600 text-xs sm:text-sm leading-relaxed">
+          Zero egress download fees, uncompressed original quality, and instant 1-click Razorpay UPI. Configured up to 1 TB for seamless high-capacity storage.
         </p>
 
         <!-- Interval Switcher -->
-        <div class="inline-flex p-1 rounded-xl bg-surface-card border border-surface-border text-xs">
+        <div class="inline-flex p-1.5 rounded-2xl bg-slate-200/70 border border-slate-300/60 text-xs shadow-2xs">
           <button
             @click="interval = 'monthly'"
-            class="px-5 py-1.5 rounded-lg font-semibold transition-all"
-            :class="interval === 'monthly' ? 'bg-surface-elevated text-white shadow-sm' : 'text-slate-400 hover:text-white'"
+            class="px-5 py-2 rounded-xl font-semibold transition-all"
+            :class="interval === 'monthly' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'"
           >
             Monthly Billing
           </button>
           <button
             @click="interval = 'yearly'"
-            class="px-5 py-1.5 rounded-lg font-semibold transition-all flex items-center space-x-2"
-            :class="interval === 'yearly' ? 'bg-surface-elevated text-white shadow-sm' : 'text-slate-400 hover:text-white'"
+            class="px-5 py-2 rounded-xl font-semibold transition-all flex items-center space-x-2"
+            :class="interval === 'yearly' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'"
           >
             <span>Annual (Save 17%)</span>
-            <span class="px-1.5 py-0.2 rounded bg-brand-600/20 text-brand-400 text-[10px] font-bold">2 Mos Free</span>
+            <span class="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold">2 Mos Free</span>
           </button>
         </div>
       </div>
 
       <!-- Storage Calculator Slider -->
-      <div class="vault-panel rounded-2xl p-6 sm:p-8 border border-surface-border space-y-5">
+      <div class="bg-white rounded-2xl p-6 sm:p-8 border border-slate-200 shadow-sm space-y-5">
         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h2 class="text-sm font-bold text-white tracking-tight">Storage Estimator</h2>
-            <p class="text-xs text-slate-400">Slide to find the exact plan matching your archive and shoot volumes.</p>
+            <h2 class="text-base font-bold text-slate-900 tracking-tight">Storage Estimator</h2>
+            <p class="text-xs text-slate-500">Slide to find the exact plan matching your archive and volume requirements.</p>
           </div>
           <div class="text-right">
-            <span class="text-2xl font-bold text-brand-400 font-mono">{{ storageNeededGB }} GB</span>
-            <div class="text-[11px] text-slate-400">
-              Recommended: <span class="text-white font-bold uppercase">{{ recommendedPlan }} Pack</span>
+            <span class="text-3xl font-extrabold text-blue-600 font-mono">{{ storageNeededGB }} GB</span>
+            <div class="text-xs text-slate-500 mt-0.5">
+              Recommended: <span class="text-slate-900 font-bold uppercase">{{ recommendedPlan }} Pack</span>
             </div>
           </div>
         </div>
@@ -193,9 +193,9 @@ function selectPlan(planCode: string) {
           min="25"
           max="1000"
           step="25"
-          class="w-full accent-brand-500 h-2 bg-surface-subtle rounded-lg cursor-pointer"
+          class="w-full accent-blue-600 h-2.5 bg-slate-100 rounded-lg cursor-pointer"
         />
-        <div class="flex justify-between text-[11px] text-slate-500 font-mono">
+        <div class="flex justify-between text-[11px] text-slate-500 font-medium font-mono">
           <span>25 GB (₹39)</span>
           <span>100 GB (₹89)</span>
           <span>200 GB (₹149)</span>
@@ -209,42 +209,42 @@ function selectPlan(planCode: string) {
         <div
           v-for="plan in plans"
           :key="plan.code"
-          class="vault-panel rounded-xl p-5 border flex flex-col justify-between space-y-4 transition-all"
-          :class="recommendedPlan === plan.code ? 'border-brand-500/70 shadow-xl ring-1 ring-brand-500/40' : 'border-surface-border'"
+          class="bg-white rounded-2xl p-5 border flex flex-col justify-between space-y-4 transition-all"
+          :class="plan.isHero ? 'border-2 border-blue-600 shadow-md ring-4 ring-blue-50' : 'border-slate-200 hover:border-slate-300 shadow-sm hover:shadow'"
         >
           <div class="space-y-3">
             <div class="flex items-center justify-between">
-              <span class="text-[10px] font-mono font-bold uppercase tracking-wider text-brand-400">
+              <span class="text-[11px] font-bold uppercase tracking-wider text-blue-600 font-mono">
                 {{ plan.name }}
               </span>
               <span
                 v-if="plan.isHero"
-                class="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-brand-600 text-white"
+                class="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-xs"
               >
-                Hero
+                POPULAR
               </span>
             </div>
 
             <div>
-              <div class="text-2xl font-extrabold text-white">
+              <div class="text-3xl font-extrabold text-slate-900 tracking-tight">
                 {{ interval === 'yearly' ? plan.yearlyPrice : plan.monthlyPrice }}
               </div>
-              <div class="text-[11px] text-slate-400">
+              <div class="text-xs text-slate-500 font-medium">
                 / {{ interval === 'yearly' ? 'year' : 'month' }}
               </div>
             </div>
 
-            <div class="px-2 py-1 rounded bg-surface-elevated text-xs font-mono font-bold text-accent-emerald text-center">
+            <div class="px-2.5 py-1 rounded-xl bg-slate-100 text-xs font-bold text-slate-800 font-mono text-center">
               {{ plan.storageLabel }} Storage
             </div>
 
-            <p class="text-[11px] text-slate-400 leading-snug">
+            <p class="text-xs text-slate-500 leading-snug">
               {{ plan.description }}
             </p>
 
-            <div class="pt-3 border-t border-surface-border space-y-2 text-[11px] text-slate-300">
-              <div v-for="(feat, idx) in plan.features" :key="idx" class="flex items-start space-x-1.5">
-                <CheckCircle2 class="w-3.5 h-3.5 text-accent-emerald shrink-0 mt-0.5" />
+            <div class="pt-3 border-t border-slate-100 space-y-2 text-xs text-slate-600">
+              <div v-for="(feat, idx) in plan.features" :key="idx" class="flex items-start space-x-2">
+                <CheckCircle2 class="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" />
                 <span class="leading-tight">{{ feat }}</span>
               </div>
             </div>
@@ -252,7 +252,7 @@ function selectPlan(planCode: string) {
 
           <button
             @click="selectPlan(plan.code)"
-            class="w-full py-2.5 rounded-lg text-xs font-semibold text-white transition-all flex items-center justify-center space-x-1.5"
+            class="w-full py-2.5 rounded-xl text-xs font-semibold transition-all flex items-center justify-center space-x-1.5 shadow-xs"
             :class="plan.isHero ? 'btn-primary' : 'btn-secondary'"
           >
             <span>Select {{ plan.name }}</span>
@@ -262,13 +262,13 @@ function selectPlan(planCode: string) {
       </div>
 
       <!-- Value Guarantee Banner -->
-      <div class="p-6 rounded-2xl bg-surface-card border border-surface-border space-y-3">
-        <div class="flex items-center space-x-2 text-sm font-bold text-white">
-          <ShieldCheck class="w-5 h-5 text-accent-emerald" />
+      <div class="p-6 sm:p-8 rounded-2xl bg-white border border-slate-200 shadow-sm space-y-3">
+        <div class="flex items-center space-x-2.5 text-base font-bold text-slate-900">
+          <ShieldCheck class="w-5 h-5 text-blue-600" />
           <span>The SmartSpace Data '₹149 Means ₹149' Commitment</span>
         </div>
-        <p class="text-xs text-slate-400 leading-relaxed">
-          Every plan on smartspacedata.com is all-inclusive. There are no surprise 18% GST add-ons at checkout, no payment gateway convenience markups, and no download egress bandwidth bills for you or your clients. Uninterrupted 100% original RAW quality powered by local Tier-4 Indian storage infrastructure.
+        <p class="text-xs sm:text-sm text-slate-600 leading-relaxed">
+          Every plan on smartspacedata.com is all-inclusive. There are no surprise 18% GST add-ons at checkout, no payment gateway convenience markups, and no download egress bandwidth bills for you or your clients. Uninterrupted 100% original RAW quality powered by local SpaceByte storage infrastructure.
         </p>
       </div>
     </main>

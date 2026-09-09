@@ -29,6 +29,27 @@ class StorageQuota(TimeStampedModel):
     def is_exceeded(self):
         return self.bytes_used > self.bytes_limit
 
+    @classmethod
+    def get_global_pool_stats(cls):
+        """
+        Returns aggregate stats for the 1 TB SpaceByte testing pool.
+        """
+        total_pool = getattr(settings, "SPACEBYTE_STORAGE_POOL_LIMIT_BYTES", 1000 * 1024 * 1024 * 1024)
+        used_agg = cls.objects.aggregate(total=models.Sum("bytes_used"))["total"] or 0
+        remaining = max(0, total_pool - used_agg)
+        percent = round((used_agg / total_pool) * 100, 2) if total_pool > 0 else 100.0
+        return {
+            "total_pool_bytes": total_pool,
+            "total_pool_gb": round(total_pool / (1024 * 1024 * 1024), 1),
+            "used_bytes": used_agg,
+            "used_gb": round(used_agg / (1024 * 1024 * 1024), 2),
+            "remaining_bytes": remaining,
+            "remaining_gb": round(remaining / (1024 * 1024 * 1024), 2),
+            "percent_used": min(100.0, percent),
+            "provider": "spacebyte",
+            "is_pool_full": used_agg >= total_pool,
+        }
+
     def __str__(self):
         return f"Quota for {self.user.email}: {self.bytes_used}/{self.bytes_limit} bytes ({self.percent_used}%)"
 
@@ -62,6 +83,10 @@ class Node(BaseModel):
     thumbnail_object_key = models.CharField(max_length=255, blank=True, default="")
     thumbnail_nonce = models.CharField(max_length=64, blank=True, default="")
     
+    # SpaceByte upstream integration fields
+    spacebyte_entry_id = models.BigIntegerField(null=True, blank=True, db_index=True)
+    spacebyte_hash = models.CharField(max_length=64, blank=True, default="", db_index=True)
+
     # Soft deletion & trashing
     trashed_at = models.DateTimeField(null=True, blank=True, db_index=True)
     deleted_at = models.DateTimeField(null=True, blank=True, db_index=True)
@@ -93,6 +118,7 @@ class FileVersion(BaseModel):
     wrapped_file_key = models.TextField()
     content_nonce = models.CharField(max_length=64)
     checksum = models.CharField(max_length=128, blank=True, default="")
+    spacebyte_file_name = models.CharField(max_length=255, blank=True, default="")
 
     class Meta:
         ordering = ["-version_no"]
@@ -129,6 +155,8 @@ class Upload(BaseModel):
     parent_id = models.UUIDField(null=True, blank=True)
     upload_id = models.CharField(max_length=255, db_index=True)
     object_key = models.CharField(max_length=255, unique=True)
+    spacebyte_upload_id = models.CharField(max_length=255, blank=True, default="")
+    spacebyte_key = models.CharField(max_length=255, blank=True, default="")
     encrypted_name = models.TextField()
     name_nonce = models.CharField(max_length=64)
     expected_size_bytes = models.BigIntegerField()

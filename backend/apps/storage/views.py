@@ -228,3 +228,22 @@ class QuotaView(APIView):
             quota.bytes_limit = subscription.plan.storage_bytes
             quota.save(update_fields=["bytes_limit"])
         return Response(StorageQuotaSerializer(quota).data)
+
+
+class StoragePoolStatusView(APIView):
+    """
+    Returns system-wide 1 TB SpaceByte testing storage pool metrics,
+    connection health, user quota summary, and supported billing intervals.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        stats = StorageQuota.get_global_pool_stats()
+        from apps.storage.spacebyte import get_spacebyte_client
+        sb_client = get_spacebyte_client()
+        stats["is_connected"] = sb_client.is_configured
+        stats["billing_intervals_supported"] = ["monthly", "yearly"]
+        stats["user_quota"] = StorageQuotaSerializer(
+            getattr(request.user, "storage_quota", None) or StorageQuota.objects.get_or_create(user=request.user)[0]
+        ).data
+        return Response(stats)

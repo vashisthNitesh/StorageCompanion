@@ -108,41 +108,41 @@ function handleDownload() {
 </script>
 
 <template>
-  <div v-if="isOpen" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
-    <div class="glass-panel w-full max-w-4xl max-h-[90vh] rounded-3xl overflow-hidden border border-slate-700/80 flex flex-col bg-[#0b1325]/95 shadow-2xl">
+  <div v-if="isOpen" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
+    <div class="w-full max-w-4xl max-h-[90vh] rounded-2xl overflow-hidden border border-slate-200 flex flex-col bg-white shadow-2xl">
       <!-- Header -->
-      <div class="px-6 py-4 border-b border-slate-800 flex items-center justify-between">
+      <div class="px-6 py-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
         <div class="flex items-center space-x-3 truncate">
-          <FileText class="w-5 h-5 text-brand-400 shrink-0" />
-          <span class="font-bold text-white text-sm truncate">{{ node?.name }}</span>
+          <FileText class="w-5 h-5 text-brand-600 shrink-0" />
+          <span class="font-bold text-slate-900 text-sm truncate">{{ node?.name }}</span>
         </div>
 
         <div class="flex items-center space-x-2">
           <button
             v-if="previewUrl"
             @click="handleDownload"
-            class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-white flex items-center space-x-1.5 transition-all"
+            class="btn-primary px-3.5 py-1.5 rounded-lg text-xs font-semibold text-white flex items-center space-x-1.5 shadow-xs"
           >
             <Download class="w-3.5 h-3.5" />
             <span>Save Decrypted</span>
           </button>
-          <button @click="emit('close')" class="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800">
+          <button @click="emit('close')" class="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 transition-colors">
             <X class="w-5 h-5" />
           </button>
         </div>
       </div>
 
       <!-- Preview Body -->
-      <div class="flex-1 overflow-auto p-6 flex items-center justify-center min-h-[300px]">
-        <div v-if="isLoading" class="flex flex-col items-center space-y-3 text-slate-400 text-xs">
-          <Loader2 class="w-8 h-8 text-brand-400 animate-spin" />
+      <div class="flex-1 overflow-auto p-6 flex items-center justify-center min-h-[300px] bg-[#F8FAFC]">
+        <div v-if="isLoading" class="flex flex-col items-center space-y-3 text-slate-500 text-xs">
+          <Loader2 class="w-8 h-8 text-brand-600 animate-spin" />
           <span>Streaming & Decrypting file client-side...</span>
         </div>
 
-        <div v-else-if="error" class="flex flex-col items-center space-y-2 text-rose-400 text-xs text-center max-w-md">
+        <div v-else-if="error" class="flex flex-col items-center space-y-2 text-rose-600 text-xs text-center max-w-md">
           <AlertCircle class="w-8 h-8 text-rose-500" />
           <span class="font-bold">Decryption Failed</span>
-          <span class="text-slate-400">{{ error }}</span>
+          <span class="text-slate-600">{{ error }}</span>
         </div>
 
         <!-- Render Image -->
@@ -150,7 +150,7 @@ function handleDownload() {
           v-else-if="fileType === 'image' && previewUrl"
           :src="previewUrl"
           :alt="node?.name"
-          class="max-w-full max-h-[70vh] object-contain rounded-xl shadow-lg"
+          class="max-w-full max-h-[70vh] object-contain rounded-xl shadow-md border border-slate-200 bg-white"
         />
 
         <!-- Render Video -->
@@ -158,7 +158,7 @@ function handleDownload() {
           v-else-if="fileType === 'video' && previewUrl"
           :src="previewUrl"
           controls
-          class="max-w-full max-h-[70vh] rounded-xl shadow-lg"
+          class="max-w-full max-h-[70vh] rounded-xl shadow-md border border-slate-200 bg-black"
         ></video>
 
         <!-- Render Audio -->
@@ -172,16 +172,16 @@ function handleDownload() {
         <!-- Render Text / Code -->
         <pre
           v-else-if="fileType === 'text' && textContent"
-          class="w-full p-4 rounded-xl bg-[#070D1A] border border-slate-800 font-mono text-xs text-slate-200 overflow-x-auto max-h-[65vh] leading-relaxed"
+          class="w-full p-4 rounded-xl bg-white border border-slate-200 font-mono text-xs text-slate-800 overflow-x-auto max-h-[65vh] leading-relaxed shadow-xs"
         ><code>{{ textContent }}</code></pre>
 
         <!-- Fallback -->
-        <div v-else class="text-center space-y-3 text-slate-400 text-xs">
-          <FileText class="w-12 h-12 mx-auto text-slate-600" />
+        <div v-else class="text-center space-y-3 text-slate-500 text-xs">
+          <FileText class="w-12 h-12 mx-auto text-slate-400" />
           <p>Preview not supported in-browser for this format.</p>
           <button
             @click="handleDownload"
-            class="px-4 py-2 rounded-xl bg-brand-600 text-white font-semibold text-xs"
+            class="btn-primary px-4 py-2 rounded-xl text-white font-semibold text-xs shadow-xs"
           >
             Download Decrypted File
           </button>

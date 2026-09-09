@@ -97,35 +97,38 @@ async function downloadAndDecrypt() {
 </script>
 
 <template>
-  <div class="min-h-screen bg-[#070D1A] flex flex-col justify-center py-12 sm:px-6 lg:px-8 text-slate-100">
+  <div class="min-h-screen bg-[#F8FAFC] flex flex-col justify-center py-12 sm:px-6 lg:px-8 text-slate-800 selection:bg-brand-600 selection:text-white">
     <div class="sm:mx-auto sm:w-full sm:max-w-md text-center space-y-3">
-      <router-link to="/" class="inline-flex items-center space-x-2">
-        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-brand-600 to-accent-orange flex items-center justify-center shadow-lg shadow-brand-500/20">
-          <Cloud class="w-6 h-6 text-white fill-white/20" />
+      <router-link to="/" class="inline-flex items-center space-x-2.5">
+        <div class="w-10 h-10 rounded-xl bg-brand-600 flex items-center justify-center shadow-md shadow-brand-500/20 text-white">
+          <Lock class="w-5 h-5" />
         </div>
-        <span class="text-2xl font-black text-white">SpeedCloud</span>
+        <div class="flex flex-col text-left">
+          <span class="text-xl font-bold tracking-tight text-slate-900 leading-none">SmartSpace</span>
+          <span class="text-[9px] text-slate-500 font-mono">smartspacedata.com</span>
+        </div>
       </router-link>
-      <h2 class="text-xl font-bold text-white">Shared Encrypted File</h2>
-      <p class="text-xs text-slate-400">Zero-knowledge client-side decryption.</p>
+      <h2 class="text-xl font-bold text-slate-900">Shared Encrypted File</h2>
+      <p class="text-xs text-slate-500">Zero-knowledge client-side decryption executing in your browser.</p>
     </div>
 
     <div class="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
-      <div class="glass-panel p-8 rounded-3xl border border-slate-800 shadow-2xl space-y-6">
-        <div v-if="error" class="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-center space-x-2">
-          <AlertCircle class="w-4 h-4 shrink-0" />
+      <div class="bg-white p-8 rounded-2xl border border-slate-200 shadow-xl space-y-6">
+        <div v-if="error" class="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center space-x-2">
+          <AlertCircle class="w-4 h-4 shrink-0 text-rose-600" />
           <span>{{ error }}</span>
         </div>
 
-        <div v-if="isLoading" class="text-center py-8 text-slate-400 text-xs">
+        <div v-if="isLoading" class="text-center py-8 text-slate-500 text-xs">
           Loading share information...
         </div>
 
         <!-- Password Protected View -->
         <div v-else-if="requiresPassword" class="space-y-4">
           <div class="text-center space-y-2">
-            <Lock class="w-8 h-8 text-brand-400 mx-auto" />
-            <div class="text-sm font-bold text-white">Password Protected Link</div>
-            <p class="text-xs text-slate-400">Enter the password provided by the file owner to proceed.</p>
+            <Lock class="w-8 h-8 text-brand-600 mx-auto" />
+            <div class="text-sm font-bold text-slate-900">Password Protected Link</div>
+            <p class="text-xs text-slate-500">Enter the password provided by the file owner to proceed.</p>
           </div>
 
           <form @submit.prevent="unlockWithPassword" class="space-y-3">
@@ -134,11 +137,11 @@ async function downloadAndDecrypt() {
               v-model="passwordInput"
               required
               placeholder="Enter password..."
-              class="w-full px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 text-sm text-white focus:outline-none focus:border-brand-500"
+              class="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 text-sm text-slate-900 placeholder:text-slate-400 focus:bg-white focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100 transition-all"
             />
             <button
               type="submit"
-              class="w-full py-3 rounded-xl font-bold text-white bg-brand-600 hover:bg-brand-500 text-xs shadow-md"
+              class="btn-primary w-full py-3 rounded-xl font-semibold text-white text-xs shadow-sm hover:shadow-md"
             >
               Unlock Share Link
             </button>
@@ -147,27 +150,27 @@ async function downloadAndDecrypt() {
 
         <!-- Ready to Download View -->
         <div v-else-if="shareInfo" class="space-y-6">
-          <div class="p-5 rounded-2xl bg-slate-900/80 border border-slate-800 text-center space-y-3">
-            <div class="w-12 h-12 rounded-xl bg-brand-500/10 border border-brand-500/30 text-brand-400 flex items-center justify-center mx-auto">
+          <div class="p-5 rounded-2xl bg-slate-50 border border-slate-200 text-center space-y-3">
+            <div class="w-12 h-12 rounded-xl bg-blue-50 text-brand-600 flex items-center justify-center mx-auto border border-blue-200">
               <FileText class="w-6 h-6" />
             </div>
             <div>
-              <div class="text-sm font-bold text-white">Encrypted File Ready</div>
-              <div class="text-xs text-slate-400 font-mono mt-1">
+              <div class="text-sm font-bold text-slate-900">Encrypted File Ready</div>
+              <div class="text-xs text-slate-500 font-mono mt-1">
                 {{ (shareInfo.size_bytes / (1024 * 1024)).toFixed(1) }} MB • AES-256-GCM
               </div>
             </div>
           </div>
 
-          <div v-if="downloadSuccess" class="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs flex items-center space-x-2">
-            <CheckCircle2 class="w-4 h-4 shrink-0 text-emerald-400" />
+          <div v-if="downloadSuccess" class="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center space-x-2">
+            <CheckCircle2 class="w-4 h-4 shrink-0 text-emerald-600" />
             <span>Decrypted and downloaded successfully!</span>
           </div>
 
           <button
             @click="downloadAndDecrypt"
             :disabled="isDownloading"
-            class="w-full py-3.5 rounded-xl font-bold text-white bg-brand-600 hover:bg-brand-500 disabled:opacity-50 text-xs shadow-lg shadow-brand-600/30 flex items-center justify-center space-x-2 transition-all"
+            class="btn-primary w-full py-3.5 rounded-xl font-semibold text-white disabled:opacity-50 text-xs shadow-md hover:shadow-lg flex items-center justify-center space-x-2 transition-all"
           >
             <Download class="w-4 h-4" />
             <span>{{ isDownloading ? 'Streaming & Decrypting...' : 'Decrypt & Download File' }}</span>
