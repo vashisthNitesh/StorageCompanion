@@ -53,16 +53,20 @@ export function base64ToUint8Array(base64: string): Uint8Array {
 export async function deriveKEK(
   password: string,
   saltHex: string,
-  params: KDFParams = DEFAULT_KDF_PARAMS
+  params: any = DEFAULT_KDF_PARAMS
 ): Promise<Uint8Array> {
   const salt = hexToUint8Array(saltHex);
+  const iterations = params?.iterations ?? params?.t ?? DEFAULT_KDF_PARAMS.iterations;
+  const memorySize = params?.memorySize ?? params?.m ?? DEFAULT_KDF_PARAMS.memorySize;
+  const parallelism = params?.parallelism ?? params?.p ?? DEFAULT_KDF_PARAMS.parallelism;
+  const hashLength = params?.hashLength ?? DEFAULT_KDF_PARAMS.hashLength;
   const derivedBytes = await argon2id({
     password,
     salt,
-    iterations: params.iterations,
-    memorySize: params.memorySize,
-    parallelism: params.parallelism,
-    hashLength: params.hashLength,
+    iterations,
+    memorySize,
+    parallelism,
+    hashLength,
     outputType: "binary",
   });
   return derivedBytes;

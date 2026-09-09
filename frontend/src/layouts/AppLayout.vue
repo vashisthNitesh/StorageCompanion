@@ -15,6 +15,7 @@ import {
   Search,
   ChevronRight,
   Shield,
+  ShieldAlert,
   HardDrive,
   AlertTriangle,
 } from "lucide-vue-next";
@@ -150,13 +151,27 @@ onMounted(() => {
             <Settings class="w-4 h-4" :class="$route.path === '/app/settings' ? 'text-blue-600' : 'text-slate-400'" />
             <span>Security & Sessions</span>
           </router-link>
+
+          <!-- Master Admin Portal (Restricted to Superusers / Staff) -->
+          <router-link
+            v-if="authStore.isMasterAdmin"
+            to="/app/admin"
+            class="flex items-center space-x-3 px-3 py-2 rounded-xl transition-all border border-indigo-200/70"
+            :class="$route.path.startsWith('/app/admin') ? 'bg-indigo-50 text-indigo-800 font-bold shadow-xs' : 'bg-indigo-50/40 text-indigo-700 hover:bg-indigo-100/60'"
+          >
+            <ShieldAlert class="w-4 h-4 text-indigo-600 shrink-0" />
+            <div class="flex items-center justify-between w-full min-w-0">
+              <span class="truncate">Admin Portal</span>
+              <span class="text-[9px] bg-indigo-600 text-white px-1.5 py-0.5 rounded font-mono font-bold uppercase tracking-wider">Master</span>
+            </div>
+          </router-link>
         </nav>
       </div>
 
       <!-- Storage Meter & Profile Footer -->
       <div class="p-4 border-t border-slate-200 space-y-3.5 bg-slate-50/50">
-        <!-- Storage Quota Meter -->
-        <div class="p-3 rounded-xl bg-white border border-slate-200 shadow-2xs space-y-2">
+        <!-- Storage Quota Meter: Displayed strictly for regular customers -->
+        <div v-if="!authStore.isMasterAdmin" class="p-3 rounded-xl bg-white border border-slate-200 shadow-2xs space-y-2">
           <div class="flex items-center justify-between text-xs">
             <div class="flex items-center space-x-1.5 text-slate-700 font-medium">
               <HardDrive class="w-3.5 h-3.5 text-blue-600" />
@@ -179,6 +194,20 @@ onMounted(() => {
               Upgrade
             </router-link>
           </div>
+        </div>
+
+        <!-- Master Administrator Card: Shown for Super Admin (no user pack) -->
+        <div v-else class="p-3 rounded-xl bg-indigo-50/70 border border-indigo-200/80 shadow-2xs space-y-1.5 text-xs">
+          <div class="flex items-center justify-between">
+            <span class="font-bold text-indigo-900 flex items-center space-x-1.5">
+              <ShieldAlert class="w-3.5 h-3.5 text-indigo-600" />
+              <span>Super Administrator</span>
+            </span>
+            <span class="text-[9px] bg-indigo-600 text-white px-1.5 py-0.5 rounded font-mono font-bold">Admin</span>
+          </div>
+          <p class="text-[10px] text-slate-500 leading-snug">
+            Platform manager • 100% pool capacity allocated to users.
+          </p>
         </div>
 
         <!-- User Profile Row -->

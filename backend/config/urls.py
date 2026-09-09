@@ -8,6 +8,7 @@ urlpatterns = [
     
     # API v1 routes
     path("api/v1/auth/", include("apps.accounts.urls")),
+    path("api/v1/admin/", include("apps.accounts.admin_urls")),
     path("api/v1/", include("apps.storage.urls")),
     path("api/v1/", include("apps.sharing.urls")),
     path("api/v1/", include("apps.billing.urls")),

@@ -234,8 +234,9 @@ class StoragePoolStatusView(APIView):
     """
     Returns system-wide 1 TB SpaceByte testing storage pool metrics,
     connection health, user quota summary, and supported billing intervals.
+    Restricted exclusively to Master Admins.
     """
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, permissions.IsAdminUser]
 
     def get(self, request):
         stats = StorageQuota.get_global_pool_stats()

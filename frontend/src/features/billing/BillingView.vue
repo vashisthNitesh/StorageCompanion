@@ -24,14 +24,6 @@ const billingStore = useBillingStore();
 
 const isGateRequired = ref(route.query.gate === "required");
 const checkoutError = ref("");
-const poolStats = ref<{
-  total_pool_gb: number;
-  used_gb: number;
-  remaining_gb: number;
-  percent_used: number;
-  is_connected: boolean;
-  provider: string;
-} | null>(null);
 
 const plansList = [
   {
@@ -73,32 +65,15 @@ const plansList = [
     storage: "1 TB (1,000 GB)",
     monthlyPrice: "₹449",
     yearlyPrice: "₹4,490",
-    desc: "Agency multi-part archives (Max Testing Tier)",
+    desc: "Agency multi-part archives",
   },
 ];
-
-async function fetchPoolStatus() {
-  try {
-    const data = await apiRequest<any>("/api/v1/pool-status");
-    poolStats.value = data;
-  } catch {
-    poolStats.value = {
-      total_pool_gb: 1000,
-      used_gb: 0,
-      remaining_gb: 1000,
-      percent_used: 0,
-      is_connected: false,
-      provider: "spacebyte",
-    };
-  }
-}
 
 onMounted(async () => {
   await Promise.all([
     billingStore.fetchPlans(),
     billingStore.fetchSubscription(),
     billingStore.fetchInvoices(),
-    fetchPoolStatus(),
   ]);
 });
 
@@ -107,7 +82,7 @@ async function handleUpgrade(planCode: string) {
   try {
     await billingStore.checkout(planCode, billingStore.selectedInterval);
     isGateRequired.value = false;
-    await fetchPoolStatus();
+    await authStore.fetchProfile();
   } catch (err: any) {
     checkoutError.value = err.message || "Payment could not be completed.";
   }
@@ -211,45 +186,47 @@ async function handleUpgrade(planCode: string) {
         </div>
       </div>
 
-      <!-- SpaceByte 1 TB Testing Pool Card (Span 1) -->
+      <!-- Personal Storage Guarantee Card (Span 1) -->
       <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4 flex flex-col justify-between">
         <div class="space-y-3">
           <div class="flex items-center justify-between">
             <div class="flex items-center space-x-2 text-xs font-bold text-slate-700">
-              <Server class="w-4 h-4 text-blue-600" />
-              <span>SpaceByte.in Storage Pool</span>
+              <ShieldCheck class="w-4 h-4 text-emerald-600" />
+              <span>Zero-Knowledge Vault</span>
             </div>
-            <span
-              class="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase"
-              :class="poolStats?.is_connected ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-blue-50 text-blue-700 border border-blue-200'"
-            >
-              {{ poolStats?.is_connected ? 'Live Upstream' : 'Testing Pool' }}
+            <span class="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase bg-emerald-50 text-emerald-700 border border-emerald-200">
+              Encrypted
             </span>
           </div>
 
           <div class="space-y-1">
-            <div class="text-2xl font-bold text-slate-900 font-mono">
-              {{ poolStats?.total_pool_gb || 1000 }} GB (1 TB)
+            <div class="text-xl font-bold text-slate-900">
+              Client-Side E2EE
             </div>
             <p class="text-[11px] text-slate-500 leading-snug">
-              System testing capacity limit allocated on SpaceByte.in upstream storage.
+              Every file chunk is encrypted client-side in your browser before transmission.
             </p>
           </div>
 
-          <div class="space-y-1.5 pt-2 border-t border-slate-100 text-xs text-slate-600">
-            <div class="flex justify-between">
-              <span>Pool Available:</span>
-              <span class="font-mono font-semibold text-slate-900">{{ poolStats?.remaining_gb || 1000 }} GB</span>
+          <div class="space-y-2 pt-2 border-t border-slate-100 text-xs text-slate-600">
+            <div class="flex items-center space-x-2">
+              <CheckCircle2 class="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+              <span>Zero Egress Bandwidth Fees</span>
             </div>
-            <div class="flex justify-between">
-              <span>Billing Supported:</span>
-              <span class="font-medium text-slate-700">Monthly & Yearly</span>
+            <div class="flex items-center space-x-2">
+              <CheckCircle2 class="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+              <span>100% Original RAW Quality</span>
+            </div>
+            <div class="flex items-center space-x-2">
+              <CheckCircle2 class="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+              <span>Instant Razorpay UPI Activation</span>
             </div>
           </div>
         </div>
 
-        <div class="text-[10px] text-slate-400 bg-slate-50 p-2.5 rounded-xl border border-slate-200/80">
-          Token: <code class="font-mono text-slate-600">SPACEBYTE_ACCESS_TOKEN</code> configured in server environment.
+        <div class="text-[10px] text-slate-500 bg-slate-50 p-2.5 rounded-xl border border-slate-200/80 flex items-center justify-between">
+          <span>Need custom storage?</span>
+          <span class="text-blue-600 font-semibold cursor-pointer">Contact Support</span>
         </div>
       </div>
     </div>

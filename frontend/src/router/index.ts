@@ -70,6 +70,12 @@ const routes: RouteRecordRaw[] = [
         name: "settings",
         component: () => import("../features/settings/SettingsView.vue"),
       },
+      {
+        path: "admin",
+        name: "admin-dashboard",
+        component: () => import("../features/admin/AdminDashboard.vue"),
+        meta: { requiresAuth: true, requiresAdmin: true },
+      },
     ],
   },
   {
@@ -95,9 +101,15 @@ router.beforeEach((to, _from, next) => {
       return;
     }
 
+    // Admin Route Protection: only master admin can access /app/admin
+    if (to.meta.requiresAdmin && !authStore.isMasterAdmin) {
+      next({ path: "/app/files" });
+      return;
+    }
+
     // Strict Subscription Gating (NO FREE TIER)
-    // If authenticated but unpaid, only allow billing and settings pages
-    if (!authStore.hasActiveSubscription) {
+    // If authenticated but unpaid (and not an admin), only allow billing and settings pages
+    if (!authStore.hasActiveSubscription && !authStore.isMasterAdmin) {
       if (to.path === "/app/billing" || to.path === "/app/settings") {
         next();
       } else {
@@ -109,8 +121,8 @@ router.beforeEach((to, _from, next) => {
     next();
   } else {
     // If already logged in and subscribed, redirect away from auth pages
-    if (authStore.isAuthenticated && authStore.hasActiveSubscription && (to.name === "login" || to.name === "register")) {
-      next({ path: "/app/files" });
+    if (authStore.isAuthenticated && (authStore.hasActiveSubscription || authStore.isMasterAdmin) && (to.name === "login" || to.name === "register")) {
+      next({ path: authStore.isMasterAdmin ? "/app/admin" : "/app/files" });
     } else {
       next();
     }

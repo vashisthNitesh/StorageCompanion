@@ -63,6 +63,13 @@ def test_storage_pool_status_api(subscribed_user):
     api_client = APIClient()
     api_client.force_authenticate(user=subscribed_user)
 
+    # Regular user is forbidden from viewing the upstream testing pool
+    response_forbidden = api_client.get("/api/v1/storage/pool-status")
+    assert response_forbidden.status_code == 403
+
+    # Master Admin can inspect pool status
+    subscribed_user.is_staff = True
+    subscribed_user.save(update_fields=["is_staff"])
     response = api_client.get("/api/v1/storage/pool-status")
     assert response.status_code == 200
     data = response.json()

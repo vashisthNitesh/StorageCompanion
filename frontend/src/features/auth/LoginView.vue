@@ -2,17 +2,27 @@
 import { ref } from "vue";
 import { useRouter, useRoute } from "vue-router";
 import { useAuthStore } from "../../stores/auth";
-import { Lock, AlertTriangle, ArrowRight, RefreshCw, KeyRound } from "lucide-vue-next";
+import { Lock, AlertTriangle, ArrowRight, RefreshCw, KeyRound, ShieldCheck } from "lucide-vue-next";
 
 const router = useRouter();
 const route = useRoute();
 const authStore = useAuthStore();
 
-const email = ref("demo@smartspacedata.com");
-const password = ref("SmartSpace2026!");
+const email = ref("nitesh-vashisth");
+const password = ref("vashisth@0000");
 const totpCode = ref("");
 const mfaRequired = ref(false);
 const errorMessage = ref("");
+
+function fillAdminCredentials() {
+  email.value = "nitesh-vashisth";
+  password.value = "vashisth@0000";
+}
+
+function fillDemoCredentials() {
+  email.value = "demo@smartspacedata.com";
+  password.value = "SmartSpace2026!";
+}
 
 async function handleLogin() {
   errorMessage.value = "";
@@ -23,7 +33,8 @@ async function handleLogin() {
       return;
     }
 
-    const redirectPath = (route.query.redirect as string) || "/app/files";
+    const defaultTarget = authStore.isMasterAdmin ? "/app/admin" : "/app/files";
+    const redirectPath = (route.query.redirect as string) || defaultTarget;
     router.push(redirectPath);
   } catch (err: any) {
     errorMessage.value = err.message || "Invalid credentials or vault decryption failure.";
@@ -43,8 +54,8 @@ async function handleLogin() {
           <span class="text-[9px] text-slate-500 font-mono">smartspacedata.com</span>
         </div>
       </router-link>
-      <h1 class="text-xl font-bold text-slate-900 tracking-tight">Unlock your encrypted vault</h1>
-      <p class="text-xs text-slate-600">Zero-knowledge client decryption will execute inside your browser.</p>
+      <h2 class="text-xl font-bold tracking-tight text-slate-900">Sign in to your account</h2>
+      <p class="text-xs text-slate-500">Access your zero-knowledge vault or administrative portal</p>
     </div>
 
     <div class="mt-6 sm:mx-auto sm:w-full sm:max-w-md">
@@ -57,18 +68,19 @@ async function handleLogin() {
 
         <form @submit.prevent="handleLogin" class="space-y-4">
           <div>
-            <label class="block text-xs font-semibold text-slate-700 mb-1">Email Address</label>
+            <label class="block text-xs font-semibold text-slate-700 mb-1">Email or Username</label>
             <input
-              type="email"
+              type="text"
               v-model="email"
               required
+              placeholder="e.g. nitesh-vashisth or you@example.com"
               class="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 text-xs placeholder:text-slate-400 focus:bg-white focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100 transition-all"
             />
           </div>
 
           <div>
             <div class="flex items-center justify-between mb-1">
-              <label class="block text-xs font-semibold text-slate-700">Vault Password</label>
+              <label class="block text-xs font-semibold text-slate-700">Password</label>
             </div>
             <input
               type="password"
@@ -93,24 +105,49 @@ async function handleLogin() {
           <button
             type="submit"
             :disabled="authStore.isLoading"
-            class="w-full btn-primary py-3 rounded-xl text-xs font-semibold text-white flex items-center justify-center space-x-2 disabled:opacity-50 shadow-sm hover:shadow-md transition-all"
+            class="w-full btn-primary py-3 rounded-xl text-xs font-semibold text-white flex items-center justify-center space-x-2 disabled:opacity-50 shadow-sm hover:shadow-md transition-all cursor-pointer"
           >
             <RefreshCw v-if="authStore.isLoading" class="w-4 h-4 animate-spin" />
-            <span>{{ authStore.isLoading ? 'Unwrapping Vault...' : 'Unlock & Sign In' }}</span>
+            <span>{{ authStore.isLoading ? 'Authenticating...' : 'Unlock & Sign In' }}</span>
             <ArrowRight v-if="!authStore.isLoading" class="w-3.5 h-3.5" />
           </button>
         </form>
 
-        <!-- Demo Credentials Callout -->
-        <div class="p-3.5 rounded-xl bg-blue-50/70 border border-blue-200/80 text-xs text-slate-700 space-y-1.5">
-          <div class="font-semibold text-brand-700 flex items-center space-x-1.5">
-            <KeyRound class="w-3.5 h-3.5" />
-            <span>Creator Demo Credentials (Value Pack)</span>
+        <!-- Quick Credentials Switcher -->
+        <div class="space-y-2 pt-1 border-t border-slate-100">
+          <!-- Master Admin Creds -->
+          <div
+            @click="fillAdminCredentials"
+            class="p-3 rounded-xl bg-indigo-50/70 border border-indigo-200/80 text-xs text-indigo-950 cursor-pointer hover:bg-indigo-100/70 transition-colors space-y-1"
+          >
+            <div class="flex items-center justify-between font-bold text-indigo-700">
+              <div class="flex items-center space-x-1.5">
+                <ShieldCheck class="w-4 h-4 text-indigo-600" />
+                <span>Master Admin (Nitesh Vashisth)</span>
+              </div>
+              <span class="text-[10px] bg-indigo-200/60 text-indigo-800 px-1.5 py-0.5 rounded font-mono font-semibold">Click to Autofill</span>
+            </div>
+            <div class="text-[11px] text-slate-600 font-mono">
+              User: <span class="font-semibold text-indigo-900">nitesh-vashisth</span> • Pass: <span class="font-semibold text-indigo-900">vashisth@0000</span>
+            </div>
           </div>
-          <p class="text-[11px] text-slate-600 leading-relaxed">
-            Email: <code class="text-brand-900 font-mono font-semibold">demo@smartspacedata.com</code><br />
-            Password: <code class="text-brand-900 font-mono font-semibold">SmartSpace2026!</code>
-          </p>
+
+          <!-- Demo User Creds -->
+          <div
+            @click="fillDemoCredentials"
+            class="p-3 rounded-xl bg-blue-50/60 border border-blue-200/70 text-xs text-slate-700 cursor-pointer hover:bg-blue-100/60 transition-colors space-y-1"
+          >
+            <div class="flex items-center justify-between font-semibold text-brand-700">
+              <div class="flex items-center space-x-1.5">
+                <KeyRound class="w-3.5 h-3.5" />
+                <span>Basic User Demo (Value Pack 200 GB)</span>
+              </div>
+              <span class="text-[10px] bg-blue-200/60 text-brand-800 px-1.5 py-0.5 rounded font-mono font-semibold">Click to Autofill</span>
+            </div>
+            <div class="text-[11px] text-slate-600 font-mono">
+              Email: <span class="font-semibold text-slate-900">demo@smartspacedata.com</span> • Pass: <span class="font-semibold text-slate-900">SmartSpace2026!</span>
+            </div>
+          </div>
         </div>
 
         <div class="text-center pt-1 border-t border-slate-100">

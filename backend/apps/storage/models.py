@@ -35,7 +35,11 @@ class StorageQuota(TimeStampedModel):
         Returns aggregate stats for the 1 TB SpaceByte testing pool.
         """
         total_pool = getattr(settings, "SPACEBYTE_STORAGE_POOL_LIMIT_BYTES", 1000 * 1024 * 1024 * 1024)
-        used_agg = cls.objects.aggregate(total=models.Sum("bytes_used"))["total"] or 0
+        used_agg = (
+            cls.objects.filter(user__is_staff=False, user__is_superuser=False)
+            .aggregate(total=models.Sum("bytes_used"))["total"]
+            or 0
+        )
         remaining = max(0, total_pool - used_agg)
         percent = round((used_agg / total_pool) * 100, 2) if total_pool > 0 else 100.0
         return {

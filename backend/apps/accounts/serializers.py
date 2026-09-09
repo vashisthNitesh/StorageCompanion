@@ -10,6 +10,8 @@ class UserSerializer(serializers.ModelSerializer):
             "id",
             "email",
             "full_name",
+            "is_staff",
+            "is_superuser",
             "wrapped_master_key",
             "kdf_salt",
             "kdf_params",
@@ -20,7 +22,7 @@ class UserSerializer(serializers.ModelSerializer):
             "mfa_enabled",
             "created_at",
         ]
-        read_only_fields = ["id", "email_verified_at", "mfa_enabled", "created_at"]
+        read_only_fields = ["id", "is_staff", "is_superuser", "email_verified_at", "mfa_enabled", "created_at"]
 
 
 class RegisterSerializer(serializers.Serializer):
@@ -42,15 +44,25 @@ class RegisterSerializer(serializers.Serializer):
 
 
 class LoginSerializer(serializers.Serializer):
-    email = serializers.EmailField()
+    email = serializers.CharField()
     password = serializers.CharField(write_only=True)
     totp_code = serializers.CharField(required=False, allow_blank=True)
 
     def validate(self, attrs):
-        email = attrs.get("email", "").lower().strip()
+        raw_identifier = attrs.get("email", "").strip()
         password = attrs.get("password", "")
 
-        user = authenticate(username=email, password=password)
+        # Support username like 'nitesh-vashisth' or full email
+        lookup_email = raw_identifier.lower()
+        if "@" not in raw_identifier:
+            matched = (
+                User.objects.filter(email__iexact=raw_identifier).first()
+                or User.objects.filter(email__istartswith=f"{raw_identifier}@").first()
+            )
+            if matched:
+                lookup_email = matched.email
+
+        user = authenticate(username=lookup_email, password=password)
         if not user:
             raise serializers.ValidationError("Invalid email or password.")
         if not user.is_active:

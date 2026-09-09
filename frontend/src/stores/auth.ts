@@ -23,6 +23,8 @@ export interface UserProfile {
   id: string;
   email: string;
   full_name: string;
+  is_staff?: boolean;
+  is_superuser?: boolean;
   wrapped_master_key: string;
   kdf_salt: string;
   kdf_params: any;
@@ -51,8 +53,11 @@ export const useAuthStore = defineStore("auth", () => {
 
   const isAuthenticated = computed(() => !!user.value && !!getAccessToken());
   const isVaultUnlocked = computed(() => !!masterKey.value);
+  const isMasterAdmin = computed(
+    () => !!user.value?.is_staff || !!user.value?.is_superuser
+  );
   const hasActiveSubscription = computed(
-    () => !!user.value?.subscription?.has_active_subscription
+    () => isMasterAdmin.value || !!user.value?.subscription?.has_active_subscription
   );
 
   async function register(email: string, password: string, fullName: string = "") {
@@ -130,12 +135,20 @@ export const useAuthStore = defineStore("auth", () => {
 
       // Derive KEK and unwrap Master Key
       if (response.user.wrapped_master_key && response.user.kdf_salt) {
-        const kek = await deriveKEK(
-          password,
-          response.user.kdf_salt,
-          response.user.kdf_params || DEFAULT_KDF_PARAMS
-        );
-        masterKey.value = await unwrapKey(kek, response.user.wrapped_master_key);
+        try {
+          const kek = await deriveKEK(
+            password,
+            response.user.kdf_salt,
+            response.user.kdf_params || DEFAULT_KDF_PARAMS
+          );
+          masterKey.value = await unwrapKey(kek, response.user.wrapped_master_key);
+        } catch (err) {
+          console.warn("Could not unwrap master key:", err);
+          // For staff/admin accounts, allow portal access even if key derivation fails
+          if (!response.user.is_staff && !response.user.is_superuser) {
+            throw err;
+          }
+        }
       }
 
       return { success: true };
@@ -190,6 +203,7 @@ export const useAuthStore = defineStore("auth", () => {
     pendingRecoveryPhrase,
     isAuthenticated,
     isVaultUnlocked,
+    isMasterAdmin,
     hasActiveSubscription,
     register,
     login,
