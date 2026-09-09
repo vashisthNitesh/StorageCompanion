@@ -2,27 +2,17 @@
 import { ref } from "vue";
 import { useRouter, useRoute } from "vue-router";
 import { useAuthStore } from "../../stores/auth";
-import { Lock, AlertTriangle, ArrowRight, RefreshCw, KeyRound, ShieldCheck } from "lucide-vue-next";
+import { Lock, AlertTriangle, ArrowRight, RefreshCw } from "lucide-vue-next";
 
 const router = useRouter();
 const route = useRoute();
 const authStore = useAuthStore();
 
-const email = ref("nitesh-vashisth");
-const password = ref("vashisth@0000");
+const email = ref("");
+const password = ref("");
 const totpCode = ref("");
 const mfaRequired = ref(false);
 const errorMessage = ref("");
-
-function fillAdminCredentials() {
-  email.value = "nitesh-vashisth";
-  password.value = "vashisth@0000";
-}
-
-function fillDemoCredentials() {
-  email.value = "demo@smartspacedata.com";
-  password.value = "SmartSpace2026!";
-}
 
 async function handleLogin() {
   errorMessage.value = "";
@@ -73,7 +63,7 @@ async function handleLogin() {
               type="text"
               v-model="email"
               required
-              placeholder="e.g. nitesh-vashisth or you@example.com"
+              placeholder="Enter your email or username"
               class="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 text-xs placeholder:text-slate-400 focus:bg-white focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100 transition-all"
             />
           </div>
@@ -86,6 +76,7 @@ async function handleLogin() {
               type="password"
               v-model="password"
               required
+              placeholder="Enter your password"
               class="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 text-xs placeholder:text-slate-400 focus:bg-white focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100 transition-all"
             />
           </div>
@@ -112,43 +103,6 @@ async function handleLogin() {
             <ArrowRight v-if="!authStore.isLoading" class="w-3.5 h-3.5" />
           </button>
         </form>
-
-        <!-- Quick Credentials Switcher -->
-        <div class="space-y-2 pt-1 border-t border-slate-100">
-          <!-- Master Admin Creds -->
-          <div
-            @click="fillAdminCredentials"
-            class="p-3 rounded-xl bg-indigo-50/70 border border-indigo-200/80 text-xs text-indigo-950 cursor-pointer hover:bg-indigo-100/70 transition-colors space-y-1"
-          >
-            <div class="flex items-center justify-between font-bold text-indigo-700">
-              <div class="flex items-center space-x-1.5">
-                <ShieldCheck class="w-4 h-4 text-indigo-600" />
-                <span>Master Admin (Nitesh Vashisth)</span>
-              </div>
-              <span class="text-[10px] bg-indigo-200/60 text-indigo-800 px-1.5 py-0.5 rounded font-mono font-semibold">Click to Autofill</span>
-            </div>
-            <div class="text-[11px] text-slate-600 font-mono">
-              User: <span class="font-semibold text-indigo-900">nitesh-vashisth</span> • Pass: <span class="font-semibold text-indigo-900">vashisth@0000</span>
-            </div>
-          </div>
-
-          <!-- Demo User Creds -->
-          <div
-            @click="fillDemoCredentials"
-            class="p-3 rounded-xl bg-blue-50/60 border border-blue-200/70 text-xs text-slate-700 cursor-pointer hover:bg-blue-100/60 transition-colors space-y-1"
-          >
-            <div class="flex items-center justify-between font-semibold text-brand-700">
-              <div class="flex items-center space-x-1.5">
-                <KeyRound class="w-3.5 h-3.5" />
-                <span>Basic User Demo (Value Pack 200 GB)</span>
-              </div>
-              <span class="text-[10px] bg-blue-200/60 text-brand-800 px-1.5 py-0.5 rounded font-mono font-semibold">Click to Autofill</span>
-            </div>
-            <div class="text-[11px] text-slate-600 font-mono">
-              Email: <span class="font-semibold text-slate-900">demo@smartspacedata.com</span> • Pass: <span class="font-semibold text-slate-900">SmartSpace2026!</span>
-            </div>
-          </div>
-        </div>
 
         <div class="text-center pt-1 border-t border-slate-100">
           <router-link to="/register" class="text-xs text-slate-600 hover:text-brand-600 font-medium transition-colors">

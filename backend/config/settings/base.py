@@ -37,6 +37,8 @@ env = environ.Env(
 
 # Read .env if present
 env_file = BASE_DIR.parent / ".env"
+if not env_file.exists():
+    env_file = BASE_DIR / ".env"
 if env_file.exists():
     environ.Env.read_env(str(env_file))
 
