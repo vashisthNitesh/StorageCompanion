@@ -27,6 +27,15 @@ services:
         value: sample_secret_key
       - key: RAZORPAY_WEBHOOK_SECRET
         value: sample_webhook_secret
+      # SpaceByte Cloud Storage Upstream Integration (https://spacebyte.in/api-docs)
+      - key: SPACEBYTE_BASE_URL
+        value: https://spacebyte.in/api/v1
+      - key: SPACEBYTE_ACCESS_TOKEN
+        sync: false
+      - key: SPACEBYTE_STORAGE_POOL_LIMIT_BYTES
+        value: "1073741824000"
+      - key: SPACEBYTE_PARENT_FOLDER_ID
+        value: ""
       # If using a Render free database or external PostgreSQL (Supabase / Neon):
       # - key: DATABASE_URL
       #   fromDatabase:
