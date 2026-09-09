@@ -71,16 +71,7 @@ function onSearch() {
 }
 
 onMounted(() => {
-  if (authStore.isAuthenticated && !authStore.isVaultUnlocked) {
-    // Demo auto-unlock for test user
-    if (authStore.user?.email === "demo@smartspacedata.com" || authStore.user?.email === "demo@speedcloud.local") {
-      authStore.unlockVault("SmartSpace2026!").then(() => {
-        if (authStore.hasActiveSubscription) {
-          filesStore.fetchNodes();
-        }
-      }).catch(() => {});
-    }
-  } else if (authStore.isVaultUnlocked && authStore.hasActiveSubscription) {
+  if (authStore.isVaultUnlocked && authStore.hasActiveSubscription) {
     filesStore.fetchNodes();
   }
 });

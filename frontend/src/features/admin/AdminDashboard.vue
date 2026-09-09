@@ -407,7 +407,7 @@ onMounted(async () => {
             <p class="text-[11px] text-slate-500">Which pack is most used by customers</p>
           </div>
           <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
-            {{ kpisData?.kpis?.most_popular_plan || 'Value Pack' }}
+            {{ kpisData?.kpis?.most_popular_plan || 'None Yet' }}
           </span>
         </div>
 
@@ -430,8 +430,8 @@ onMounted(async () => {
             <div class="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
               <div
                 class="h-full rounded-full transition-all"
-                :class="plan.code === 'value' ? 'bg-blue-600' : 'bg-slate-400'"
-                :style="{ width: `${Math.max(plan.percent, 4)}%` }"
+                :class="plan.count > 0 ? 'bg-blue-600' : 'bg-slate-300'"
+                :style="{ width: `${Math.max(plan.percent, 3)}%` }"
               ></div>
             </div>
           </div>
@@ -440,10 +440,15 @@ onMounted(async () => {
         <div class="p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-600 space-y-1">
           <div class="font-bold text-slate-900 flex items-center space-x-1.5">
             <Sparkles class="w-3.5 h-3.5 text-amber-600" />
-            <span>Market Insight</span>
+            <span>Platform Status</span>
           </div>
           <p class="text-[11px] text-slate-500 leading-relaxed">
-            The <strong>Value Pack (200 GB)</strong> remains the top choice among creators and photographers due to optimal price-to-storage ratio.
+            <template v-if="kpisData?.kpis?.most_popular_plan && kpisData?.kpis?.most_popular_plan !== 'None Yet'">
+              The <strong>{{ kpisData.kpis.most_popular_plan }}</strong> is currently the top choice among customers.
+            </template>
+            <template v-else>
+              Clean state ready for operation. Active customer plan trends will appear here as users subscribe.
+            </template>
           </p>
         </div>
       </div>
@@ -605,7 +610,7 @@ onMounted(async () => {
                     class="w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shrink-0 border"
                     :class="user.is_staff ? 'bg-indigo-100 text-indigo-700 border-indigo-200' : 'bg-slate-100 text-slate-700 border-slate-200'"
                   >
-                    {{ user.full_name[0].toUpperCase() }}
+                    {{ (user.full_name || user.email || 'U')[0].toUpperCase() }}
                   </div>
                   <div>
                     <div class="font-bold text-slate-900 flex items-center space-x-1.5">

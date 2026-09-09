@@ -117,7 +117,8 @@ class AdminKPIsView(APIView):
             })
 
         # Sort by count desc to highlight most popular
-        most_popular_plan = max(plan_distribution, key=lambda x: x["count"]) if plan_distribution else None
+        active_plans = [p for p in plan_distribution if p["count"] > 0]
+        most_popular_plan = max(active_plans, key=lambda x: x["count"]) if active_plans else None
 
         # 5. Activity Time-Series Breakdown
         trend_points = []
@@ -145,7 +146,22 @@ class AdminKPIsView(APIView):
                 uploads = AuditLog.objects.filter(action__icontains="upload", created_at__gte=slot_start, created_at__lt=slot_end).count()
                 shares = AuditLog.objects.filter(action__icontains="share", created_at__gte=slot_start, created_at__lt=slot_end).count()
                 trend_points.append({
-                    "label": slot_start.strftime("%a (%d)"),
+                    "label": slot_start.strftime("%a"),
+                    "uploads": uploads,
+                    "logins": logins,
+                    "shares": shares,
+                    "total": uploads + logins + shares,
+                })
+        elif period == "monthly":
+            for d in range(30):
+                slot_time = now - timedelta(days=29 - d)
+                slot_start = slot_time.replace(hour=0, minute=0, second=0, microsecond=0)
+                slot_end = slot_start + timedelta(days=1)
+                logins = AuditLog.objects.filter(action__icontains="login", created_at__gte=slot_start, created_at__lt=slot_end).count()
+                uploads = AuditLog.objects.filter(action__icontains="upload", created_at__gte=slot_start, created_at__lt=slot_end).count()
+                shares = AuditLog.objects.filter(action__icontains="share", created_at__gte=slot_start, created_at__lt=slot_end).count()
+                trend_points.append({
+                    "label": slot_start.strftime("%d %b"),
                     "uploads": uploads,
                     "logins": logins,
                     "shares": shares,
@@ -153,29 +169,18 @@ class AdminKPIsView(APIView):
                 })
         elif period == "yearly":
             for m in range(12):
-                slot_time = now - timedelta(days=(11 - m) * 30)
-                slot_start = slot_time.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-                slot_end = (slot_start + timedelta(days=32)).replace(day=1)
+                month_date = (now.replace(day=1) - timedelta(days=(11 - m) * 30)).replace(day=1)
+                slot_start = month_date.replace(hour=0, minute=0, second=0, microsecond=0)
+                # Next month approximation
+                if slot_start.month == 12:
+                    slot_end = slot_start.replace(year=slot_start.year + 1, month=1)
+                else:
+                    slot_end = slot_start.replace(month=slot_start.month + 1)
                 logins = AuditLog.objects.filter(action__icontains="login", created_at__gte=slot_start, created_at__lt=slot_end).count()
                 uploads = AuditLog.objects.filter(action__icontains="upload", created_at__gte=slot_start, created_at__lt=slot_end).count()
                 shares = AuditLog.objects.filter(action__icontains="share", created_at__gte=slot_start, created_at__lt=slot_end).count()
                 trend_points.append({
-                    "label": slot_start.strftime("%b %y"),
-                    "uploads": uploads,
-                    "logins": logins,
-                    "shares": shares,
-                    "total": uploads + logins + shares,
-                })
-        else: # monthly
-            for d in range(15): # 15 two-day steps or last 15 days
-                slot_time = now - timedelta(days=(14 - d) * 2)
-                slot_start = slot_time.replace(hour=0, minute=0, second=0, microsecond=0)
-                slot_end = slot_start + timedelta(days=2)
-                logins = AuditLog.objects.filter(action__icontains="login", created_at__gte=slot_start, created_at__lt=slot_end).count()
-                uploads = AuditLog.objects.filter(action__icontains="upload", created_at__gte=slot_start, created_at__lt=slot_end).count()
-                shares = AuditLog.objects.filter(action__icontains="share", created_at__gte=slot_start, created_at__lt=slot_end).count()
-                trend_points.append({
-                    "label": slot_start.strftime("%d %b"),
+                    "label": slot_start.strftime("%b %Y"),
                     "uploads": uploads,
                     "logins": logins,
                     "shares": shares,
@@ -209,7 +214,7 @@ class AdminKPIsView(APIView):
                 "pool_used_gb": pool_stats["used_gb"],
                 "pool_total_gb": pool_stats["total_pool_gb"],
                 "pool_percent_used": pool_stats["percent_used"],
-                "most_popular_plan": most_popular_plan["name"] if most_popular_plan else "Value Pack",
+                "most_popular_plan": most_popular_plan["name"] if most_popular_plan else "None Yet",
             },
             "plan_distribution": plan_distribution,
             "activity_trend": trend_points,
