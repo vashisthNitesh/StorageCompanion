@@ -222,12 +222,33 @@ class QuotaView(APIView):
 
     def get(self, request):
         quota, _ = StorageQuota.objects.get_or_create(user=request.user)
-        # Check active subscription
         subscription = getattr(request.user, "subscription", None)
-        if subscription and subscription.plan and quota.bytes_limit != subscription.plan.storage_bytes:
-            quota.bytes_limit = subscription.plan.storage_bytes
-            quota.save(update_fields=["bytes_limit"])
-        return Response(StorageQuotaSerializer(quota).data)
+
+        if subscription and subscription.plan and subscription.is_valid:
+            if quota.bytes_limit != subscription.plan.storage_bytes:
+                quota.bytes_limit = subscription.plan.storage_bytes
+                quota.save(update_fields=["bytes_limit"])
+        elif subscription and not subscription.is_valid:
+            # When subscription is expired or lapsed, retain existing files without deleting them,
+            # but reclaim any unused reservation back into the pool.
+            effective_limit = max(0, quota.bytes_used)
+            if quota.bytes_limit != effective_limit:
+                quota.bytes_limit = effective_limit
+                quota.save(update_fields=["bytes_limit"])
+
+        data = StorageQuotaSerializer(quota).data
+        if subscription:
+            data["subscription_status"] = subscription.status
+            data["can_upload"] = subscription.can_upload
+            data["is_in_grace_period"] = subscription.is_in_grace_period
+            data["grace_period_ends_at"] = subscription.grace_period_ends_at
+        else:
+            data["subscription_status"] = "none"
+            data["can_upload"] = False
+            data["is_in_grace_period"] = False
+            data["grace_period_ends_at"] = None
+
+        return Response(data)
 
 
 class StoragePoolStatusView(APIView):

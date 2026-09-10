@@ -242,3 +242,91 @@ def process_webhook_event(payload: dict, event_id: str) -> bool:
                 sub.save(update_fields=["status", "grace_period_ends_at"])
 
     return True
+
+
+@transaction.atomic
+def process_expired_subscriptions() -> dict:
+    """
+    Evaluates subscription lifecycle transitions:
+    1. Subscriptions that reached current_period_end:
+       - If cancel_at_period_end is True, marks as canceled and reclaims unused reserved quota.
+       - Otherwise, moves to grace_period (15 days read-only) with can_upload blocked.
+    2. Subscriptions in grace_period whose grace window has elapsed:
+       - Moves to expired and reclaims unused reserved quota while preserving stored files.
+    """
+    now = timezone.now()
+    summary = {
+        "transitioned_to_grace_period": 0,
+        "transitioned_to_canceled": 0,
+        "transitioned_to_expired": 0,
+    }
+
+    # 1. Process active/trialing subscriptions past their billing cycle
+    lapsed_subs = Subscription.objects.select_for_update().filter(
+        status__in=["active", "trialing"],
+        current_period_end__lt=now,
+    )
+
+    for sub in lapsed_subs:
+        if sub.cancel_at_period_end:
+            sub.status = "canceled"
+            sub.save(update_fields=["status"])
+
+            # Reclaim unused quota into pool while protecting existing files
+            quota = StorageQuota.objects.filter(user=sub.user).first()
+            if quota:
+                quota.bytes_limit = max(0, quota.bytes_used)
+                quota.save(update_fields=["bytes_limit"])
+
+            AuditLog.objects.create(
+                user=sub.user,
+                action="subscription.canceled_period_end",
+                target_type="subscription",
+                target_id=str(sub.id),
+                metadata={"plan": sub.plan.code, "reason": "cancel_at_period_end"},
+            )
+            summary["transitioned_to_canceled"] += 1
+        else:
+            sub.status = "grace_period"
+            sub.grace_period_ends_at = now + timedelta(days=15)
+            sub.save(update_fields=["status", "grace_period_ends_at"])
+
+            AuditLog.objects.create(
+                user=sub.user,
+                action="subscription.entered_grace_period",
+                target_type="subscription",
+                target_id=str(sub.id),
+                metadata={
+                    "plan": sub.plan.code,
+                    "grace_period_days": 15,
+                    "grace_period_ends_at": sub.grace_period_ends_at.isoformat(),
+                },
+            )
+            summary["transitioned_to_grace_period"] += 1
+
+    # 2. Process grace period subscriptions that have exceeded the 15-day window
+    expired_grace_subs = Subscription.objects.select_for_update().filter(
+        status="grace_period",
+        grace_period_ends_at__lt=now,
+    )
+
+    for sub in expired_grace_subs:
+        sub.status = "expired"
+        sub.save(update_fields=["status"])
+
+        # Reclaim unused quota allocation into pool while keeping uploaded data intact
+        quota = StorageQuota.objects.filter(user=sub.user).first()
+        if quota:
+            quota.bytes_limit = max(0, quota.bytes_used)
+            quota.save(update_fields=["bytes_limit"])
+
+        AuditLog.objects.create(
+            user=sub.user,
+            action="subscription.expired",
+            target_type="subscription",
+            target_id=str(sub.id),
+            metadata={"plan": sub.plan.code, "reason": "grace_period_exhausted"},
+        )
+        summary["transitioned_to_expired"] += 1
+
+    return summary

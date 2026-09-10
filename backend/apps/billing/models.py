@@ -60,19 +60,56 @@ class Subscription(BaseModel):
         ordering = ["-created_at"]
 
     @property
+    def is_in_grace_period(self):
+        """Returns True if subscription is currently in an active grace period."""
+        if self.status == "grace_period":
+            if self.grace_period_ends_at:
+                return timezone.now() <= self.grace_period_ends_at
+            return True
+        return False
+
+    @property
+    def is_expired(self):
+        """Returns True if subscription has lapsed beyond valid billing or grace periods."""
+        if self.status in ["expired", "canceled"]:
+            return True
+        now = timezone.now()
+        if self.status == "grace_period" and self.grace_period_ends_at and now > self.grace_period_ends_at:
+            return True
+        if self.status in ["active", "trialing"] and self.current_period_end and now > self.current_period_end:
+            return True
+        return False
+
+    @property
     def is_valid(self):
-        """Returns True if user currently has valid storage access (active, trialing, or in grace period)."""
-        if self.status in ["active", "trialing", "grace_period"]:
-            if self.current_period_end and timezone.now() > self.current_period_end:
-                if self.status != "grace_period":
-                    return False
+        """
+        Returns True if user currently has valid storage access (active, trialing, or in grace period).
+        Users in grace period have read access to protect their data without deleting.
+        """
+        now = timezone.now()
+        if self.status in ["active", "trialing"]:
+            if self.current_period_end and now > self.current_period_end:
+                return False
+            return True
+        if self.status == "grace_period":
+            if self.grace_period_ends_at and now > self.grace_period_ends_at:
+                return False
             return True
         return False
 
     @property
     def can_upload(self):
-        """During grace period or past due, uploads are blocked but reads are permitted."""
-        return self.status in ["active", "trialing"]
+        """
+        During grace period, past due, or expired states, uploads are blocked.
+        Only active/trialing subscriptions within their billing cycle can upload.
+        """
+        if not self.is_valid:
+            return False
+        if self.status not in ["active", "trialing"]:
+            return False
+        if self.current_period_end and timezone.now() > self.current_period_end:
+            return False
+        return True
 
     def __str__(self):
         return f"{self.user.email} - {self.plan.name} ({self.status})"

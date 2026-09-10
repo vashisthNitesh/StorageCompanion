@@ -32,24 +32,40 @@ class StorageQuota(TimeStampedModel):
     @classmethod
     def get_global_pool_stats(cls):
         """
-        Returns aggregate stats for the 1 TB SpaceByte testing pool.
+        Returns aggregate stats for the 1 TB SpaceByte testing pool,
+        tracking both physical disk storage and committed subscription allocations.
         """
         total_pool = getattr(settings, "SPACEBYTE_STORAGE_POOL_LIMIT_BYTES", 1000 * 1024 * 1024 * 1024)
-        used_agg = (
-            cls.objects.filter(user__is_staff=False, user__is_superuser=False)
-            .aggregate(total=models.Sum("bytes_used"))["total"]
-            or 0
-        )
-        remaining = max(0, total_pool - used_agg)
-        percent = round((used_agg / total_pool) * 100, 2) if total_pool > 0 else 100.0
+        non_staff_quotas = cls.objects.filter(user__is_staff=False, user__is_superuser=False)
+
+        # 1. Physical usage (actual bytes written/uploaded)
+        used_agg = non_staff_quotas.aggregate(total=models.Sum("bytes_used"))["total"] or 0
+        remaining_physical = max(0, total_pool - used_agg)
+        percent_used = round((used_agg / total_pool) * 100, 2) if total_pool > 0 else 100.0
+
+        # 2. Committed / Allocated capacity (promised to subscribed users)
+        committed_agg = non_staff_quotas.aggregate(total=models.Sum("bytes_limit"))["total"] or 0
+        uncommitted = max(0, total_pool - committed_agg)
+        committed_percent = round((committed_agg / total_pool) * 100, 2) if total_pool > 0 else 100.0
+        active_subscribers = non_staff_quotas.filter(bytes_limit__gt=0).count()
+        oversubscription_ratio = round(committed_agg / total_pool, 2) if total_pool > 0 else 0.0
+
         return {
             "total_pool_bytes": total_pool,
             "total_pool_gb": round(total_pool / (1024 * 1024 * 1024), 1),
             "used_bytes": used_agg,
             "used_gb": round(used_agg / (1024 * 1024 * 1024), 2),
-            "remaining_bytes": remaining,
-            "remaining_gb": round(remaining / (1024 * 1024 * 1024), 2),
-            "percent_used": min(100.0, percent),
+            "remaining_bytes": remaining_physical,
+            "remaining_gb": round(remaining_physical / (1024 * 1024 * 1024), 2),
+            "percent_used": min(100.0, percent_used),
+            "committed_bytes": committed_agg,
+            "committed_gb": round(committed_agg / (1024 * 1024 * 1024), 2),
+            "uncommitted_bytes": uncommitted,
+            "uncommitted_gb": round(uncommitted / (1024 * 1024 * 1024), 2),
+            "committed_percent": committed_percent,
+            "active_subscribers_count": active_subscribers,
+            "is_pool_overcommitted": committed_agg > total_pool,
+            "oversubscription_ratio": oversubscription_ratio,
             "provider": "spacebyte",
             "is_pool_full": used_agg >= total_pool,
         }

@@ -364,28 +364,70 @@ onMounted(async () => {
       </div>
 
       <!-- Capacity Usage Bars & Metrics -->
-      <div class="grid grid-cols-1 md:grid-cols-4 gap-4 pt-3 border-t border-slate-800/80">
+      <div class="space-y-3 pt-2">
+        <!-- Dual Bars: Physical vs Committed -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div class="space-y-1.5 bg-white/5 p-3 rounded-xl border border-white/10">
+            <div class="flex items-center justify-between text-xs">
+              <span class="text-slate-300 font-medium">Physical Data Uploaded</span>
+              <span class="font-mono text-emerald-400 font-bold">{{ poolData?.used_gb || 0 }} GB / {{ poolData?.total_pool_gb || 1000 }} GB ({{ poolData?.percent_used || 0 }}%)</span>
+            </div>
+            <div class="w-full bg-slate-800 h-2.5 rounded-full overflow-hidden">
+              <div
+                class="h-full rounded-full transition-all duration-500"
+                :class="poolData?.percent_used > 85 ? 'bg-rose-500' : 'bg-emerald-500'"
+                :style="{ width: `${Math.min(100, poolData?.percent_used || 0)}%` }"
+              ></div>
+            </div>
+            <div class="text-[10px] text-slate-400">Actual encrypted bytes stored on upstream SpaceByte/S3.</div>
+          </div>
+
+          <div class="space-y-1.5 bg-white/5 p-3 rounded-xl border border-white/10">
+            <div class="flex items-center justify-between text-xs">
+              <span class="text-slate-300 font-medium">Committed / Allocated Quota</span>
+              <span class="font-mono text-indigo-300 font-bold">{{ poolData?.committed_gb || 0 }} GB / {{ poolData?.total_pool_gb || 1000 }} GB ({{ poolData?.committed_percent || 0 }}%)</span>
+            </div>
+            <div class="w-full bg-slate-800 h-2.5 rounded-full overflow-hidden">
+              <div
+                class="h-full rounded-full transition-all duration-500"
+                :class="poolData?.committed_percent > 90 ? 'bg-amber-500' : 'bg-indigo-500'"
+                :style="{ width: `${Math.min(100, poolData?.committed_percent || 0)}%` }"
+              ></div>
+            </div>
+            <div class="text-[10px] text-slate-400">Storage capacity promised to {{ poolData?.active_subscribers_count || 0 }} active subscribers.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Capacity Usage 5-Card Metrics Grid -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5 pt-3 border-t border-slate-800/80">
         <div class="p-3.5 rounded-xl bg-white/5 border border-white/10 space-y-1">
-          <div class="text-[11px] text-slate-400">Total Pool Allocation</div>
-          <div class="text-xl font-bold font-mono">{{ poolData?.total_pool_gb || 1000 }} GB (1 TB)</div>
-          <div class="text-[10px] text-indigo-300">SpaceByte upstream test allocation</div>
+          <div class="text-[11px] text-slate-400">Total Upstream Pool</div>
+          <div class="text-xl font-bold font-mono">{{ poolData?.total_pool_gb || 1000 }} GB</div>
+          <div class="text-[10px] text-indigo-300">Total master pool</div>
         </div>
 
         <div class="p-3.5 rounded-xl bg-white/5 border border-white/10 space-y-1">
-          <div class="text-[11px] text-slate-400">Storage Used Across Users</div>
+          <div class="text-[11px] text-slate-400">Physical Storage Used</div>
           <div class="text-xl font-bold font-mono text-emerald-400">{{ poolData?.used_gb || 0 }} GB</div>
-          <div class="text-[10px] text-slate-400">{{ poolData?.percent_used || 0 }}% of pool consumed</div>
+          <div class="text-[10px] text-slate-400">{{ poolData?.percent_used || 0 }}% disk consumed</div>
         </div>
 
         <div class="p-3.5 rounded-xl bg-white/5 border border-white/10 space-y-1">
-          <div class="text-[11px] text-slate-400">Remaining Pool Space</div>
-          <div class="text-xl font-bold font-mono text-blue-300">{{ poolData?.remaining_gb || 1000 }} GB</div>
-          <div class="text-[10px] text-slate-400">Available for new user uploads</div>
+          <div class="text-[11px] text-slate-400">Committed Quota</div>
+          <div class="text-xl font-bold font-mono text-indigo-300">{{ poolData?.committed_gb || 0 }} GB</div>
+          <div class="text-[10px] text-slate-400">{{ poolData?.committed_percent || 0 }}% allocated</div>
         </div>
 
         <div class="p-3.5 rounded-xl bg-white/5 border border-white/10 space-y-1">
+          <div class="text-[11px] text-slate-400">Uncommitted Left</div>
+          <div class="text-xl font-bold font-mono text-blue-300">{{ poolData?.uncommitted_gb ?? 1000 }} GB</div>
+          <div class="text-[10px] text-slate-400">Available to sell</div>
+        </div>
+
+        <div class="p-3.5 rounded-xl bg-white/5 border border-white/10 space-y-1 sm:col-span-2 lg:col-span-1">
           <div class="text-[11px] text-slate-400">Pool Health & Status</div>
-          <div class="text-sm font-bold uppercase tracking-wider flex items-center space-x-1.5" :class="poolData?.pool_health === 'critical' ? 'text-rose-400' : 'text-emerald-400'">
+          <div class="text-sm font-bold uppercase tracking-wider flex items-center space-x-1.5" :class="poolData?.pool_health === 'critical' ? 'text-rose-400' : (poolData?.pool_health === 'warning' ? 'text-amber-400' : 'text-emerald-400')">
             <CheckCircle2 class="w-4 h-4" />
             <span>{{ poolData?.pool_health || 'Optimal' }}</span>
           </div>

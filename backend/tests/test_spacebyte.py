@@ -74,6 +74,9 @@ def test_storage_pool_status_api(subscribed_user):
     assert response.status_code == 200
     data = response.json()
     assert "total_pool_bytes" in data
+    assert "committed_bytes" in data
+    assert "uncommitted_gb" in data
+    assert "committed_percent" in data
     assert data["provider"] == "spacebyte"
     assert "user_quota" in data
     assert "billing_intervals_supported" in data

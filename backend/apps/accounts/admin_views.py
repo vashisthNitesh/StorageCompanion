@@ -240,19 +240,29 @@ class AdminPoolStatusView(APIView):
         sb_client = get_spacebyte_client()
 
         percent = stats["percent_used"]
-        if percent >= 90:
+        committed_percent = stats.get("committed_percent", 0.0)
+
+        # Evaluate health based on both physical disk consumption and sold quota commitment
+        if percent >= 90 or committed_percent >= 100:
             pool_health = "critical"
-            health_message = "Storage pool is over 90% capacity! Urgent upstream expansion required."
-        elif percent >= 75:
+            if percent >= 90:
+                health_message = "Storage pool is over 90% physical capacity! Urgent upstream expansion required."
+            else:
+                health_message = f"Pool is fully committed to subscribers ({stats.get('committed_gb', 0)} GB). Upstream expansion required for new subscriptions."
+        elif percent >= 75 or committed_percent >= 80:
             pool_health = "warning"
-            health_message = "Storage pool is approaching 75% capacity. Consider purchasing additional capacity."
+            if percent >= 75:
+                health_message = "Storage pool is approaching 75% physical capacity. Consider purchasing additional capacity."
+            else:
+                health_message = f"Storage pool committed quota is at {committed_percent}%. Consider purchasing additional capacity."
         else:
             pool_health = "optimal"
             health_message = "Upstream SpaceByte pool operating smoothly within safe testing parameters."
 
+        max_load = max(percent, committed_percent)
         expansion_tiers = [
-            {"label": "+1 TB Upstream Expansion", "size_gb": 1000, "estimated_price": "₹4,490/yr", "recommended": percent > 70},
-            {"label": "+5 TB Studio Cluster Expansion", "size_gb": 5000, "estimated_price": "₹19,990/yr", "recommended": percent > 85},
+            {"label": "+1 TB Upstream Expansion", "size_gb": 1000, "estimated_price": "₹4,490/yr", "recommended": max_load > 70},
+            {"label": "+5 TB Studio Cluster Expansion", "size_gb": 5000, "estimated_price": "₹19,990/yr", "recommended": max_load > 85},
             {"label": "+10 TB Enterprise Scale Expansion", "size_gb": 10000, "estimated_price": "₹34,990/yr", "recommended": False},
         ]
 

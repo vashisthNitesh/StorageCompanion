@@ -27,6 +27,7 @@ urlpatterns = [
     
     # Quota & SpaceByte Pool
     path("quota", QuotaView.as_view(), name="storage-quota"),
+    path("storage/quota", QuotaView.as_view(), name="storage-quota-alias"),
     path("pool-status", StoragePoolStatusView.as_view(), name="storage-pool-status"),
     path("storage/pool-status", StoragePoolStatusView.as_view(), name="storage-pool-status-alias"),
 ]
