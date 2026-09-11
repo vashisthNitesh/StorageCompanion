@@ -58,3 +58,27 @@ def test_unsubscribed_user_cannot_upload(api_client):
     }
     res = api_client.post("/api/v1/uploads", payload, format="json")
     assert res.status_code == 402  # Payment Required / Subscription Required
+
+
+@pytest.mark.django_db
+def test_upload_part_relay(auth_client, subscribed_user):
+    init_payload = {
+        "encrypted_name": "ZW5jcnlwdGVkX2ZpbGU=",
+        "name_nonce": "1122334455667788",
+        "size_bytes": 1024,
+    }
+    res = auth_client.post("/api/v1/uploads", init_payload, format="json")
+    assert res.status_code == 201
+    upload_id = res.data["upload_session_id"]
+
+    # Relay chunk upload
+    chunk_bytes = b"encrypted chunk bytes"
+    relay_res = auth_client.post(
+        f"/api/v1/uploads/{upload_id}/parts/1",
+        data=chunk_bytes,
+        content_type="application/octet-stream",
+    )
+    assert relay_res.status_code == 200
+    assert relay_res.data["status"] == "success"
+    assert relay_res.data["part_number"] == 1
+    assert "etag" in relay_res.data

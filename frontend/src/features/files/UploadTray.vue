@@ -70,7 +70,7 @@ const uploadStore = useUploadStore();
             <div
               class="h-full rounded-full transition-all duration-300"
               :class="{
-                'bg-brand-600': item.status === 'uploading' || item.status === 'encrypting',
+                'bg-brand-600': item.status === 'uploading' || item.status === 'encrypting' || item.status === 'completing',
                 'bg-emerald-500': item.status === 'completed',
                 'bg-rose-500': item.status === 'error',
                 'bg-amber-500': item.status === 'paused'
@@ -81,10 +81,16 @@ const uploadStore = useUploadStore();
 
           <!-- Status Indicator -->
           <div class="flex items-center justify-between text-[10px] text-slate-500 font-mono">
-            <div class="flex items-center space-x-1">
-              <CheckCircle2 v-if="item.status === 'completed'" class="w-3 h-3 text-emerald-600" />
-              <AlertCircle v-else-if="item.status === 'error'" class="w-3 h-3 text-rose-500" />
-              <span class="capitalize">{{ item.status }}</span>
+            <div class="flex items-center space-x-1 max-w-[280px] truncate">
+              <CheckCircle2 v-if="item.status === 'completed'" class="w-3 h-3 text-emerald-600 shrink-0" />
+              <AlertCircle v-else-if="item.status === 'error'" class="w-3 h-3 text-rose-500 shrink-0" />
+              <span
+                class="capitalize truncate"
+                :class="{ 'text-rose-600 font-medium': item.status === 'error' }"
+                :title="item.status === 'error' && item.errorMessage ? item.errorMessage : item.status"
+              >
+                {{ item.status === 'error' && item.errorMessage ? item.errorMessage : item.status }}
+              </span>
             </div>
             <span>{{ item.progress }}%</span>
           </div>

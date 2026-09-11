@@ -1,5 +1,5 @@
 import { defineStore } from "pinia";
-import { ref, computed } from "vue";
+import { ref, computed, reactive } from "vue";
 import { apiRequest } from "../lib/api";
 import { useAuthStore } from "./auth";
 import { useFilesStore } from "./files";
@@ -33,7 +33,7 @@ export const useUploadStore = defineStore("upload", () => {
   const isTrayOpen = ref<boolean>(false);
 
   const activeCount = computed(
-    () => uploads.value.filter((u) => u.status === "uploading" || u.status === "encrypting").length
+    () => uploads.value.filter((u) => u.status === "uploading" || u.status === "encrypting" || u.status === "completing").length
   );
   const totalProgress = computed(() => {
     if (uploads.value.length === 0) return 0;
@@ -44,7 +44,7 @@ export const useUploadStore = defineStore("upload", () => {
   async function uploadFile(file: File, parentId: string | null = null) {
     if (!authStore.masterKey) throw new Error("Vault must be unlocked to upload.");
 
-    const uploadItem: ActiveUpload = {
+    const uploadItem = reactive<ActiveUpload>({
       id: crypto.randomUUID(),
       file,
       name: file.name,
@@ -53,7 +53,7 @@ export const useUploadStore = defineStore("upload", () => {
       speedMBs: 0,
       status: "queued",
       completedBytes: 0,
-    };
+    });
 
     uploads.value.unshift(uploadItem);
     isTrayOpen.value = true;
@@ -141,37 +141,55 @@ export const useUploadStore = defineStore("upload", () => {
             partNumber
           );
 
-          // Find presigned URL
-          const presignedUrl = initData.presigned_urls.find(
+          // Find presigned URL if available
+          const presignedUrl = initData.presigned_urls?.find(
             (p: { part_number: number; url: string }) => p.part_number === partNumber
           )?.url;
 
-          if (!presignedUrl) {
-            throw new Error(`Missing presigned URL for part ${partNumber}`);
-          }
-
-          // Upload directly to R2 / MinIO
+          // Upload chunk: try direct PUT first, fallback to backend relay if blocked (e.g. CORS/network policies)
           let retries = 3;
           let etag = "";
-          while (retries > 0) {
-            try {
-              const putRes = await fetch(presignedUrl, {
-                method: "PUT",
-                body: encryptedChunk,
-                headers: {
-                  "Content-Type": "application/octet-stream",
-                },
-              });
+          let uploaded = false;
 
-              if (!putRes.ok) {
-                throw new Error(`R2 upload failed: ${putRes.statusText}`);
+          while (retries > 0 && !uploaded) {
+            if (presignedUrl) {
+              try {
+                const putRes = await fetch(presignedUrl, {
+                  method: "PUT",
+                  body: encryptedChunk,
+                  headers: {
+                    "Content-Type": "application/octet-stream",
+                  },
+                });
+
+                if (putRes.ok) {
+                  etag = putRes.headers.get("ETag") || `"${partNumber}"`;
+                  uploaded = true;
+                  break;
+                }
+              } catch {
+                // Direct upload failed or blocked by CORS, fallback to proxy relay
               }
+            }
 
-              etag = putRes.headers.get("ETag") || `"${partNumber}"`;
+            // Fallback: relay through backend API endpoint
+            try {
+              const relayRes = await apiRequest<{ status: string; etag: string; part_number: number }>(
+                `/api/v1/uploads/${initData.upload_session_id}/parts/${partNumber}`,
+                {
+                  method: "POST",
+                  body: encryptedChunk,
+                  headers: {
+                    "Content-Type": "application/octet-stream",
+                  },
+                }
+              );
+              etag = relayRes.etag || `"${partNumber}"`;
+              uploaded = true;
               break;
-            } catch (err) {
+            } catch (relayErr) {
               retries--;
-              if (retries === 0) throw err;
+              if (retries === 0) throw relayErr;
               await new Promise((r) => setTimeout(r, 1000));
             }
           }

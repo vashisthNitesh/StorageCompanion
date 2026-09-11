@@ -1,10 +1,11 @@
 from django.utils import timezone
 from rest_framework import status, permissions, generics
+from rest_framework.parsers import BaseParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.exceptions import NotFound, PermissionDenied
 
-from apps.storage.models import Node, FileVersion, StorageQuota
+from apps.storage.models import Node, FileVersion, StorageQuota, Upload
 from apps.storage.serializers import (
     NodeSerializer,
     FileVersionSerializer,
@@ -19,9 +20,17 @@ from apps.storage.services import (
     init_multipart_upload,
     complete_multipart_upload,
     abort_multipart_upload,
+    relay_upload_part,
     get_download_info,
 )
 from apps.audit.models import AuditLog
+
+
+class BinaryParser(BaseParser):
+    media_type = "application/octet-stream"
+
+    def parse(self, stream, media_type=None, parser_context=None):
+        return stream.read()
 
 
 class NodeListView(generics.ListCreateAPIView):
@@ -215,6 +224,29 @@ class UploadAbortView(APIView):
     def delete(self, request, upload_id):
         abort_multipart_upload(upload_id=upload_id, user=request.user)
         return Response({"success": True, "message": "Upload session aborted."})
+
+
+class UploadPartRelayView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    parser_classes = [BinaryParser]
+
+    def post(self, request, upload_id, part_number):
+        upload = Upload.objects.filter(id=upload_id, user=request.user).first()
+        if not upload:
+            raise NotFound("Upload session not found.")
+        if upload.status not in [Upload.STATUS_UPLOADING, Upload.STATUS_INITIATED]:
+            return Response({"error": "Upload session is not active."}, status=status.HTTP_400_BAD_REQUEST)
+
+        chunk_bytes = request.data if isinstance(request.data, (bytes, bytearray)) else request.body
+        if not chunk_bytes:
+            return Response({"error": "No chunk data received."}, status=status.HTTP_400_BAD_REQUEST)
+
+        etag = relay_upload_part(upload, int(part_number), chunk_bytes)
+        return Response({
+            "status": "success",
+            "part_number": int(part_number),
+            "etag": etag,
+        })
 
 
 class QuotaView(APIView):

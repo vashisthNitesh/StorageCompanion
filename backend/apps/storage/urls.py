@@ -8,6 +8,7 @@ from apps.storage.views import (
     UploadInitView,
     UploadCompleteView,
     UploadAbortView,
+    UploadPartRelayView,
     QuotaView,
     StoragePoolStatusView,
 )
@@ -20,8 +21,9 @@ urlpatterns = [
     path("nodes/<uuid:pk>/versions", NodeVersionsView.as_view(), name="node-versions"),
     path("nodes/<uuid:pk>/download", NodeDownloadView.as_view(), name="node-download"),
     
-    # Upload Pipeline (Direct to SpaceByte S3 upstream)
+    # Upload Pipeline (Direct to SpaceByte S3 upstream with backend proxy fallback)
     path("uploads", UploadInitView.as_view(), name="upload-init"),
+    path("uploads/<uuid:upload_id>/parts/<int:part_number>", UploadPartRelayView.as_view(), name="upload-part-relay"),
     path("uploads/<uuid:upload_id>/complete", UploadCompleteView.as_view(), name="upload-complete"),
     path("uploads/<uuid:upload_id>", UploadAbortView.as_view(), name="upload-abort"),
     

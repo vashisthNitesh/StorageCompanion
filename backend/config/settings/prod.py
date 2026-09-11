@@ -26,6 +26,24 @@ SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 CSP_DEFAULT_SRC = ("'self'",)
 CSP_STYLE_SRC = ("'self'", "https://fonts.googleapis.com", "'unsafe-inline'")
 CSP_FONT_SRC = ("'self'", "https://fonts.gstatic.com")
-CSP_IMG_SRC = ("'self'", "data:", "blob:", "https://images.unsplash.com", "https://*.spacebyte.in", "https://spacebyte.in")
-CSP_CONNECT_SRC = ("'self'", "https://*.r2.cloudflarestorage.com", "https://api.razorpay.com", "https://spacebyte.in", "https://*.spacebyte.in", "https://*.amazonaws.com")
+CSP_IMG_SRC = (
+    "'self'",
+    "data:",
+    "blob:",
+    "https://images.unsplash.com",
+    "https://*.spacebyte.in",
+    "https://spacebyte.in",
+    "https://*.spacebyte.cloud",
+    "https://storage.spacebyte.cloud",
+)
+CSP_CONNECT_SRC = (
+    "'self'",
+    "https://*.r2.cloudflarestorage.com",
+    "https://api.razorpay.com",
+    "https://spacebyte.in",
+    "https://*.spacebyte.in",
+    "https://*.spacebyte.cloud",
+    "https://storage.spacebyte.cloud",
+    "https://*.amazonaws.com",
+)
 CSP_SCRIPT_SRC = ("'self'", "https://checkout.razorpay.com")
