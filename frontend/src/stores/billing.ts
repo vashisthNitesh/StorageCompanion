@@ -64,6 +64,9 @@ export const useBillingStore = defineStore("billing", () => {
     try {
       const data = await apiRequest<Subscription>("/api/v1/subscription");
       currentSubscription.value = data.is_valid ? data : null;
+      if (data.is_valid && !authStore.hasActiveSubscription) {
+        await authStore.fetchProfile();
+      }
     } catch {
       currentSubscription.value = null;
     }

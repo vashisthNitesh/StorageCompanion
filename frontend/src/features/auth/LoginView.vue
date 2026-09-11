@@ -24,7 +24,10 @@ async function handleLogin() {
     }
 
     const defaultTarget = authStore.isMasterAdmin ? "/app/admin" : "/app/files";
-    const redirectPath = (route.query.redirect as string) || defaultTarget;
+    let redirectPath = (route.query.redirect as string) || defaultTarget;
+    if (redirectPath.includes("gate=required") && authStore.hasActiveSubscription) {
+      redirectPath = defaultTarget;
+    }
     router.push(redirectPath);
   } catch (err: any) {
     errorMessage.value = err.message || "Invalid credentials or vault decryption failure.";

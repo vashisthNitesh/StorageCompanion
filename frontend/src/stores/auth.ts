@@ -132,6 +132,9 @@ export const useAuthStore = defineStore("auth", () => {
 
       setAccessToken(response.access_token);
       user.value = response.user;
+      if (!response.user.subscription) {
+        await fetchProfile();
+      }
 
       // Derive KEK and unwrap Master Key
       if (response.user.wrapped_master_key && response.user.kdf_salt) {

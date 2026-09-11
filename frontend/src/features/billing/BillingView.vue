@@ -74,6 +74,7 @@ onMounted(async () => {
     billingStore.fetchPlans(),
     billingStore.fetchSubscription(),
     billingStore.fetchInvoices(),
+    authStore.fetchProfile(),
   ]);
 });
 
@@ -118,7 +119,7 @@ async function handleUpgrade(planCode: string) {
     </div>
 
     <!-- Gate Required Alert -->
-    <div v-if="isGateRequired || !authStore.hasActiveSubscription" class="p-4 rounded-2xl bg-amber-50 border border-amber-200 flex items-start space-x-3 text-xs text-amber-900 shadow-xs">
+    <div v-if="!authStore.hasActiveSubscription" class="p-4 rounded-2xl bg-amber-50 border border-amber-200 flex items-start space-x-3 text-xs text-amber-900 shadow-xs">
       <Lock class="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
       <div class="space-y-1 leading-relaxed">
         <div class="font-bold text-amber-900">Active Subscription Required</div>

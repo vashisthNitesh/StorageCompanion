@@ -4,6 +4,9 @@ from apps.accounts.models import User, Session, MFADevice
 
 
 class UserSerializer(serializers.ModelSerializer):
+    subscription = serializers.SerializerMethodField()
+    quota = serializers.SerializerMethodField()
+
     class Meta:
         model = User
         fields = [
@@ -21,8 +24,72 @@ class UserSerializer(serializers.ModelSerializer):
             "email_verified_at",
             "mfa_enabled",
             "created_at",
+            "subscription",
+            "quota",
         ]
-        read_only_fields = ["id", "is_staff", "is_superuser", "email_verified_at", "mfa_enabled", "created_at"]
+        read_only_fields = [
+            "id",
+            "is_staff",
+            "is_superuser",
+            "email_verified_at",
+            "mfa_enabled",
+            "created_at",
+            "subscription",
+            "quota",
+        ]
+
+    def get_subscription(self, obj):
+        if obj.is_staff or obj.is_superuser:
+            return {
+                "has_active_subscription": True,
+                "status": "admin",
+                "plan_name": "Master Administrator (No Pack)",
+                "plan_code": "admin",
+            }
+        try:
+            subscription = getattr(obj, "subscription", None)
+        except Exception:
+            subscription = None
+
+        if not subscription:
+            return {
+                "has_active_subscription": False,
+                "status": "no_subscription",
+                "plan_name": None,
+                "plan_code": None,
+            }
+
+        return {
+            "has_active_subscription": bool(subscription.is_valid),
+            "status": subscription.status,
+            "plan_name": subscription.plan.name if subscription.plan else None,
+            "plan_code": subscription.plan.code if subscription.plan else None,
+        }
+
+    def get_quota(self, obj):
+        if obj.is_staff or obj.is_superuser:
+            return {
+                "bytes_used": 0,
+                "bytes_limit": 0,
+                "percent_used": 0,
+            }
+        try:
+            quota = getattr(obj, "storage_quota", None)
+        except Exception:
+            quota = None
+
+        if not quota:
+            return {
+                "bytes_used": 0,
+                "bytes_limit": 0,
+                "percent_used": 0,
+            }
+
+        return {
+            "bytes_used": quota.bytes_used,
+            "bytes_limit": quota.bytes_limit,
+            "percent_used": quota.percent_used,
+        }
 
 
 class RegisterSerializer(serializers.Serializer):

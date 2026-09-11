@@ -188,44 +188,7 @@ class MeView(APIView):
 
     def get(self, request):
         serializer = UserSerializer(request.user)
-        user_data = serializer.data
-
-        # Attach active subscription & quota summary
-        subscription = getattr(request.user, "subscription", None)
-        quota = getattr(request.user, "storage_quota", None)
-
-        is_admin = request.user.is_staff or request.user.is_superuser
-        has_sub = True if is_admin else (subscription.is_valid if subscription else False)
-
-        user_data["is_staff"] = request.user.is_staff
-        user_data["is_superuser"] = request.user.is_superuser
-
-        if is_admin:
-            user_data["subscription"] = {
-                "has_active_subscription": True,
-                "status": "admin",
-                "plan_name": "Master Administrator (No Pack)",
-                "plan_code": "admin",
-            }
-            user_data["quota"] = {
-                "bytes_used": 0,
-                "bytes_limit": 0,
-                "percent_used": 0,
-            }
-        else:
-            user_data["subscription"] = {
-                "has_active_subscription": subscription.is_valid if subscription else False,
-                "status": subscription.status if subscription else "no_subscription",
-                "plan_name": subscription.plan.name if subscription and subscription.plan else None,
-                "plan_code": subscription.plan.code if subscription and subscription.plan else None,
-            }
-            user_data["quota"] = {
-                "bytes_used": quota.bytes_used if quota else 0,
-                "bytes_limit": quota.bytes_limit if quota else 0,
-                "percent_used": quota.percent_used if quota else 0,
-            }
-
-        return Response(user_data)
+        return Response(serializer.data)
 
 
 class ChangePasswordView(APIView):
