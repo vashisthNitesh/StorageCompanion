@@ -213,6 +213,26 @@ class NodeContentView(APIView):
         if not version:
             raise NotFound("File version not found.")
 
+        def _stream_s3():
+            s3 = get_s3_client()
+            params = {"Bucket": settings.S3_BUCKET_NAME, "Key": version.object_key}
+            if "HTTP_RANGE" in request.META:
+                params["Range"] = request.META["HTTP_RANGE"]
+            s3_obj = s3.get_object(**params)
+            status_code = 206 if "Range" in params else 200
+            streaming_resp = StreamingHttpResponse(
+                s3_obj["Body"].iter_chunks(chunk_size=128 * 1024),
+                status=status_code,
+                content_type="application/octet-stream",
+            )
+            if "ContentLength" in s3_obj:
+                streaming_resp["Content-Length"] = str(s3_obj["ContentLength"])
+            if "ContentRange" in s3_obj:
+                streaming_resp["Content-Range"] = str(s3_obj["ContentRange"])
+            streaming_resp["Accept-Ranges"] = "bytes"
+            streaming_resp["Access-Control-Allow-Origin"] = "*"
+            return streaming_resp
+
         # If SpaceByte hash is available, stream from SpaceByte with Bearer token
         if node.spacebyte_hash:
             sb_client = get_spacebyte_client()
@@ -236,33 +256,17 @@ class NodeContentView(APIView):
                 streaming_resp["Accept-Ranges"] = "bytes"
                 streaming_resp["Access-Control-Allow-Origin"] = "*"
                 return streaming_resp
-            except urllib.error.HTTPError as e:
-                logger.error("SpaceByte download stream error [%s]: %s", e.code, e.reason)
-                return Response({"error": f"Upstream storage error: {e.code}"}, status=e.code)
             except Exception as e:
-                logger.error("Failed to connect to SpaceByte upstream: %s", e)
-                return Response({"error": "Failed to retrieve file from upstream storage."}, status=status.HTTP_502_BAD_GATEWAY)
+                logger.warning("SpaceByte download stream failed (%s), attempting S3 fallback: %s", type(e).__name__, e)
+                if version and version.object_key:
+                    try:
+                        return _stream_s3()
+                    except Exception as s3_err:
+                        logger.error("S3 fallback stream also failed: %s", s3_err)
+                return Response({"error": "Failed to stream file from storage."}, status=status.HTTP_502_BAD_GATEWAY)
         else:
-            # Stream from S3
-            s3 = get_s3_client()
             try:
-                params = {"Bucket": settings.S3_BUCKET_NAME, "Key": version.object_key}
-                if "HTTP_RANGE" in request.META:
-                    params["Range"] = request.META["HTTP_RANGE"]
-                s3_obj = s3.get_object(**params)
-                status_code = 206 if "Range" in params else 200
-                streaming_resp = StreamingHttpResponse(
-                    s3_obj["Body"].iter_chunks(chunk_size=128 * 1024),
-                    status=status_code,
-                    content_type="application/octet-stream",
-                )
-                if "ContentLength" in s3_obj:
-                    streaming_resp["Content-Length"] = str(s3_obj["ContentLength"])
-                if "ContentRange" in s3_obj:
-                    streaming_resp["Content-Range"] = str(s3_obj["ContentRange"])
-                streaming_resp["Accept-Ranges"] = "bytes"
-                streaming_resp["Access-Control-Allow-Origin"] = "*"
-                return streaming_resp
+                return _stream_s3()
             except Exception as e:
                 logger.error("Failed to retrieve file from S3: %s", e)
                 return Response({"error": "Failed to retrieve file from storage."}, status=status.HTTP_502_BAD_GATEWAY)

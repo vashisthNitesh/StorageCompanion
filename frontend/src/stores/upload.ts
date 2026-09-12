@@ -305,6 +305,14 @@ export const useUploadStore = defineStore("upload", () => {
       await filesStore.fetchNodes();
       // Update quota in authStore
       await authStore.fetchProfile();
+
+      // Automatically remove completed item after 2 seconds so dialog closes automatically
+      setTimeout(() => {
+        const idx = uploads.value.findIndex((u) => u.id === uploadItem.id);
+        if (idx !== -1 && uploads.value[idx].status === "completed") {
+          uploads.value.splice(idx, 1);
+        }
+      }, 2000);
     } catch (err: any) {
       uploadItem.status = "error";
       uploadItem.errorMessage = err.message || "Upload failed";
@@ -330,6 +338,10 @@ export const useUploadStore = defineStore("upload", () => {
     }
   }
 
+  function clearCompleted() {
+    uploads.value = uploads.value.filter((u) => u.status !== "completed");
+  }
+
   function toggleTray() {
     isTrayOpen.value = !isTrayOpen.value;
   }
@@ -342,6 +354,7 @@ export const useUploadStore = defineStore("upload", () => {
     uploadFile,
     pauseUpload,
     cancelUpload,
+    clearCompleted,
     toggleTray,
   };
 });

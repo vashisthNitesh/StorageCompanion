@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { watch } from "vue";
 import { useUploadStore } from "../../stores/upload";
 import {
   UploadCloud,
@@ -19,6 +20,32 @@ function formatBytes(bytes: number): string {
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
 }
+
+// Automatically close the dialog after 2 seconds once all active uploads complete
+let autoCloseTimer: any = null;
+
+watch(
+  [() => uploadStore.activeCount, () => uploadStore.uploads.length],
+  ([activeCount, totalCount]) => {
+    if (autoCloseTimer) {
+      clearTimeout(autoCloseTimer);
+      autoCloseTimer = null;
+    }
+
+    // If there are uploads in tray but 0 are active, and remaining are completed
+    if (totalCount > 0 && activeCount === 0) {
+      const allCompleted = uploadStore.uploads.every(
+        (u) => u.status === "completed"
+      );
+      if (allCompleted) {
+        autoCloseTimer = setTimeout(() => {
+          uploadStore.clearCompleted();
+        }, 2000);
+      }
+    }
+  },
+  { immediate: true }
+);
 </script>
 
 <template>
@@ -42,6 +69,14 @@ function formatBytes(bytes: number): string {
           <span v-if="uploadStore.activeCount > 0" class="text-xs font-mono font-bold text-brand-600">
             {{ uploadStore.totalProgress }}%
           </span>
+          <button
+            v-if="uploadStore.activeCount === 0"
+            @click.stop="uploadStore.clearCompleted"
+            class="p-1 hover:bg-slate-200 rounded-lg text-slate-400 hover:text-slate-700 transition-colors"
+            title="Dismiss completed uploads"
+          >
+            <X class="w-3.5 h-3.5" />
+          </button>
           <component
             :is="uploadStore.isTrayOpen ? ChevronDown : ChevronUp"
             class="w-4 h-4 hover:text-slate-900 transition-colors"

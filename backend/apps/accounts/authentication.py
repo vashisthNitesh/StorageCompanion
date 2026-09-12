@@ -6,14 +6,19 @@ from rest_framework_simplejwt.exceptions import InvalidToken, AuthenticationFail
 class CookieJWTAuthentication(JWTAuthentication):
     """
     Standard JWT authentication that reads the Bearer token from the Authorization header.
-    Can also fall back to checking query parameters if specifically authorized for media streams.
+    Can also fall back to checking query parameters (?token=... or ?access_token=...)
+    or cookies if provided (e.g. for media streaming, audio/video elements, and previews).
     """
     def authenticate(self, request):
         header = self.get_header(request)
-        if header is None:
-            return None
+        raw_token = None
+        if header is not None:
+            raw_token = self.get_raw_token(header)
+        elif "token" in request.query_params:
+            raw_token = request.query_params["token"].encode("utf-8")
+        elif "access_token" in request.query_params:
+            raw_token = request.query_params["access_token"].encode("utf-8")
 
-        raw_token = self.get_raw_token(header)
         if raw_token is None:
             return None
 

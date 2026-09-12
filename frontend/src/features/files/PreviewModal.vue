@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, watch } from "vue";
-import { apiRequest } from "../../lib/api";
+import { apiRequest, apiFetch } from "../../lib/api";
 import { useAuthStore } from "../../stores/auth";
 import { decryptFile } from "../../lib/crypto/content";
 import { unwrapKey } from "../../lib/crypto/keys";
@@ -94,10 +94,14 @@ async function loadAndDecryptPreview(node: any) {
       content_nonce: string;
       size_bytes: number;
       part_size?: number;
+      direct_url?: string;
     }>(`/api/v1/nodes/${node.id}/download`);
 
-    // 2. Fetch encrypted bytes (via authenticated content stream endpoint)
-    const res = await fetch(downloadData.download_url);
+    // 2. Fetch encrypted bytes (via authenticated content stream endpoint with direct fallback)
+    let res = await apiFetch(downloadData.download_url);
+    if (!res.ok && downloadData.direct_url && downloadData.direct_url !== downloadData.download_url) {
+      res = await apiFetch(downloadData.direct_url);
+    }
     if (!res.ok) throw new Error(`Failed to fetch file bytes from storage (${res.status})`);
     const encryptedBuffer = await res.arrayBuffer();
     const encryptedBytes = new Uint8Array(encryptedBuffer);

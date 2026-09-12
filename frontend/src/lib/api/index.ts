@@ -14,17 +14,17 @@ export function getAccessToken(): string | null {
   return accessToken;
 }
 
-export async function apiRequest<T = any>(
+export async function apiFetch(
   endpoint: string,
   options: RequestInit = {}
-): Promise<T> {
+): Promise<Response> {
   const headers = new Headers(options.headers || {});
-  if (!headers.has("Content-Type") && !(options.body instanceof FormData)) {
-    headers.set("Content-Type", "application/json");
-  }
 
-  if (accessToken) {
-    headers.set("Authorization", `Bearer ${accessToken}`);
+  // Attach Bearer token for relative endpoints or same-origin API routes
+  if (accessToken && (endpoint.startsWith("/") || endpoint.includes("/api/"))) {
+    if (!headers.has("Authorization")) {
+      headers.set("Authorization", `Bearer ${accessToken}`);
+    }
   }
 
   const config: RequestInit = {
@@ -57,6 +57,20 @@ export async function apiRequest<T = any>(
       setAccessToken(null);
     }
   }
+
+  return response;
+}
+
+export async function apiRequest<T = any>(
+  endpoint: string,
+  options: RequestInit = {}
+): Promise<T> {
+  const headers = new Headers(options.headers || {});
+  if (!headers.has("Content-Type") && !(options.body instanceof FormData)) {
+    headers.set("Content-Type", "application/json");
+  }
+
+  const response = await apiFetch(endpoint, { ...options, headers });
 
   if (!response.ok) {
     let errorData: any = {};
