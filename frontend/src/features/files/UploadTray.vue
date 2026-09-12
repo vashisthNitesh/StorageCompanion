@@ -7,9 +7,18 @@ import {
   X,
   CheckCircle2,
   AlertCircle,
+  Loader2,
 } from "lucide-vue-next";
 
 const uploadStore = useUploadStore();
+
+function formatBytes(bytes: number): string {
+  if (!bytes || bytes === 0) return "0 B";
+  const k = 1024;
+  const sizes = ["B", "KB", "MB", "GB", "TB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
+}
 </script>
 
 <template>
@@ -52,7 +61,7 @@ const uploadStore = useUploadStore();
               {{ item.name }}
             </span>
             <div class="flex items-center space-x-2">
-              <span v-if="item.status === 'uploading'" class="text-slate-500 font-mono text-[10px]">
+              <span v-if="item.status === 'uploading' && item.speedMBs > 0" class="text-brand-600 font-mono text-[10px] font-semibold">
                 {{ item.speedMBs }} MB/s
               </span>
               <button
@@ -66,33 +75,42 @@ const uploadStore = useUploadStore();
           </div>
 
           <!-- Progress Bar -->
-          <div class="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+          <div class="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
             <div
-              class="h-full rounded-full transition-all duration-300"
+              class="h-full rounded-full transition-all duration-150"
               :class="{
-                'bg-brand-600': item.status === 'uploading' || item.status === 'encrypting' || item.status === 'completing',
+                'bg-gradient-to-r from-blue-600 to-indigo-600': item.status === 'uploading' || item.status === 'completing',
+                'bg-amber-500 animate-pulse': item.status === 'encrypting',
                 'bg-emerald-500': item.status === 'completed',
                 'bg-rose-500': item.status === 'error',
-                'bg-amber-500': item.status === 'paused'
+                'bg-slate-400': item.status === 'paused'
               }"
               :style="{ width: `${item.progress}%` }"
             ></div>
           </div>
 
-          <!-- Status Indicator -->
+          <!-- Status & Transferred Indicator -->
           <div class="flex items-center justify-between text-[10px] text-slate-500 font-mono">
-            <div class="flex items-center space-x-1 max-w-[280px] truncate">
-              <CheckCircle2 v-if="item.status === 'completed'" class="w-3 h-3 text-emerald-600 shrink-0" />
+            <div class="flex items-center space-x-1.5 max-w-[260px] truncate">
+              <Loader2 v-if="item.status === 'encrypting' || item.status === 'completing'" class="w-3 h-3 text-brand-600 animate-spin shrink-0" />
+              <CheckCircle2 v-else-if="item.status === 'completed'" class="w-3 h-3 text-emerald-600 shrink-0" />
               <AlertCircle v-else-if="item.status === 'error'" class="w-3 h-3 text-rose-500 shrink-0" />
+
               <span
-                class="capitalize truncate"
+                class="truncate"
                 :class="{ 'text-rose-600 font-medium': item.status === 'error' }"
                 :title="item.status === 'error' && item.errorMessage ? item.errorMessage : item.status"
               >
-                {{ item.status === 'error' && item.errorMessage ? item.errorMessage : item.status }}
+                <template v-if="item.status === 'encrypting'">Encrypting chunks client-side...</template>
+                <template v-else-if="item.status === 'completing'">Verifying & finalizing vault...</template>
+                <template v-else-if="item.status === 'completed'">Vault upload secured</template>
+                <template v-else-if="item.status === 'error'">{{ item.errorMessage || 'Upload failed' }}</template>
+                <template v-else>
+                  {{ formatBytes(item.completedBytes) }} / {{ formatBytes(item.size) }}
+                </template>
               </span>
             </div>
-            <span>{{ item.progress }}%</span>
+            <span class="font-bold text-slate-700">{{ item.progress }}%</span>
           </div>
         </div>
       </div>

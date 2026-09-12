@@ -1,3 +1,8 @@
+import logging
+import urllib.error
+import urllib.request
+from django.conf import settings
+from django.http import StreamingHttpResponse
 from django.utils import timezone
 from rest_framework import status, permissions, generics
 from rest_framework.parsers import BaseParser
@@ -22,8 +27,12 @@ from apps.storage.services import (
     abort_multipart_upload,
     relay_upload_part,
     get_download_info,
+    get_s3_client,
 )
+from apps.storage.spacebyte import get_spacebyte_client
 from apps.audit.models import AuditLog
+
+logger = logging.getLogger(__name__)
 
 
 class BinaryParser(BaseParser):
@@ -176,6 +185,87 @@ class NodeDownloadView(APIView):
             target_id=str(node.id),
         )
         return Response(download_info)
+
+
+class NodeContentView(APIView):
+    """
+    Streams encrypted file bytes directly to authenticated clients.
+    Handles upstream SpaceByte authentication (Bearer token) and S3 streaming seamlessly,
+    completely preventing 401 Unauthorized and CORS errors in browser decryption.
+    Supports HTTP Range requests for video/audio seeking.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, pk):
+        node = Node.objects.filter(id=pk, owner=request.user, deleted_at__isnull=True).first()
+        if not node:
+            raise NotFound("File not found.")
+        if node.type != Node.TYPE_FILE:
+            return Response({"error": "Folders cannot be streamed."}, status=status.HTTP_400_BAD_REQUEST)
+
+        version_no = request.query_params.get("v")
+        versions = FileVersion.objects.filter(node=node)
+        if version_no:
+            version = versions.filter(version_no=int(version_no)).first()
+        else:
+            version = versions.order_by("-version_no").first()
+
+        if not version:
+            raise NotFound("File version not found.")
+
+        # If SpaceByte hash is available, stream from SpaceByte with Bearer token
+        if node.spacebyte_hash:
+            sb_client = get_spacebyte_client()
+            upstream_url = sb_client.get_download_url(node.spacebyte_hash)
+            headers = sb_client._headers(content_type="")
+            if "HTTP_RANGE" in request.META:
+                headers["Range"] = request.META["HTTP_RANGE"]
+
+            req = urllib.request.Request(upstream_url, headers=headers)
+            try:
+                upstream_resp = urllib.request.urlopen(req, timeout=60)
+                streaming_resp = StreamingHttpResponse(
+                    iter(lambda: upstream_resp.read(128 * 1024), b""),
+                    status=upstream_resp.status,
+                    content_type="application/octet-stream",
+                )
+                if upstream_resp.headers.get("Content-Length"):
+                    streaming_resp["Content-Length"] = upstream_resp.headers.get("Content-Length")
+                if upstream_resp.headers.get("Content-Range"):
+                    streaming_resp["Content-Range"] = upstream_resp.headers.get("Content-Range")
+                streaming_resp["Accept-Ranges"] = "bytes"
+                streaming_resp["Access-Control-Allow-Origin"] = "*"
+                return streaming_resp
+            except urllib.error.HTTPError as e:
+                logger.error("SpaceByte download stream error [%s]: %s", e.code, e.reason)
+                return Response({"error": f"Upstream storage error: {e.code}"}, status=e.code)
+            except Exception as e:
+                logger.error("Failed to connect to SpaceByte upstream: %s", e)
+                return Response({"error": "Failed to retrieve file from upstream storage."}, status=status.HTTP_502_BAD_GATEWAY)
+        else:
+            # Stream from S3
+            s3 = get_s3_client()
+            try:
+                params = {"Bucket": settings.S3_BUCKET_NAME, "Key": version.object_key}
+                if "HTTP_RANGE" in request.META:
+                    params["Range"] = request.META["HTTP_RANGE"]
+                s3_obj = s3.get_object(**params)
+                status_code = 206 if "Range" in params else 200
+                streaming_resp = StreamingHttpResponse(
+                    s3_obj["Body"].iter_chunks(chunk_size=128 * 1024),
+                    status=status_code,
+                    content_type="application/octet-stream",
+                )
+                if "ContentLength" in s3_obj:
+                    streaming_resp["Content-Length"] = str(s3_obj["ContentLength"])
+                if "ContentRange" in s3_obj:
+                    streaming_resp["Content-Range"] = str(s3_obj["ContentRange"])
+                streaming_resp["Accept-Ranges"] = "bytes"
+                streaming_resp["Access-Control-Allow-Origin"] = "*"
+                return streaming_resp
+            except Exception as e:
+                logger.error("Failed to retrieve file from S3: %s", e)
+                return Response({"error": "Failed to retrieve file from storage."}, status=status.HTTP_502_BAD_GATEWAY)
 
 
 class UploadInitView(APIView):

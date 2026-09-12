@@ -161,10 +161,17 @@ def get_public_download_url(token: str, password: str | None = None) -> dict:
     share.download_count += 1
     share.save(update_fields=["download_count"])
 
+    part_size = 16 * 1024 * 1024 if version.size_bytes > 5 * 1024 * 1024 * 1024 else 8 * 1024 * 1024
+    stream_url = f"/api/v1/public/shares/{token}/content"
+    if password:
+        stream_url += f"?password={urllib.parse.quote(password)}"
+
     return {
-        "download_url": presigned_url,
+        "download_url": stream_url,
+        "direct_url": presigned_url,
         "wrapped_key": share.wrapped_key,
         "content_nonce": version.content_nonce,
         "size_bytes": version.size_bytes,
+        "part_size": part_size,
         "expires_in": settings.PRESIGNED_URL_TTL,
     }

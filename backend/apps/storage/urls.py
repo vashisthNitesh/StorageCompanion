@@ -5,6 +5,7 @@ from apps.storage.views import (
     NodeRestoreView,
     NodeVersionsView,
     NodeDownloadView,
+    NodeContentView,
     UploadInitView,
     UploadCompleteView,
     UploadAbortView,
@@ -20,6 +21,7 @@ urlpatterns = [
     path("nodes/<uuid:pk>/restore", NodeRestoreView.as_view(), name="node-restore"),
     path("nodes/<uuid:pk>/versions", NodeVersionsView.as_view(), name="node-versions"),
     path("nodes/<uuid:pk>/download", NodeDownloadView.as_view(), name="node-download"),
+    path("nodes/<uuid:pk>/content", NodeContentView.as_view(), name="node-content"),
     
     # Upload Pipeline (Direct to SpaceByte S3 upstream with backend proxy fallback)
     path("uploads", UploadInitView.as_view(), name="upload-init"),

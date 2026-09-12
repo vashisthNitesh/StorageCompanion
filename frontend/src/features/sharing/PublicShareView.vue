@@ -2,7 +2,7 @@
 import { ref, onMounted } from "vue";
 import { useRoute } from "vue-router";
 import { apiRequest } from "../../lib/api";
-import { decryptChunk } from "../../lib/crypto/content";
+import { decryptFile } from "../../lib/crypto/content";
 import { base64ToUint8Array, hexToUint8Array } from "../../lib/crypto/kdf";
 import { Cloud, Lock, Download, AlertCircle, FileText, CheckCircle2 } from "lucide-vue-next";
 
@@ -76,8 +76,9 @@ async function downloadAndDecrypt() {
     const encryptedBytes = new Uint8Array(encryptedBuffer);
     const baseNonce = hexToUint8Array(downloadData.content_nonce);
 
-    // Decrypt content chunk using linkKeyBytes
-    const decryptedBytes = await decryptChunk(linkKeyBytes, encryptedBytes, baseNonce, 1);
+    // Decrypt content using linkKeyBytes (supports multi-chunk files)
+    const partSize = downloadData.part_size || (8 * 1024 * 1024);
+    const decryptedBytes = await decryptFile(linkKeyBytes, encryptedBytes, baseNonce, partSize);
 
     // Trigger browser file download
     const blob = new Blob([decryptedBytes], { type: "application/octet-stream" });

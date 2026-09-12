@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { ref, computed, reactive } from "vue";
-import { apiRequest } from "../lib/api";
+import { apiRequest, getAccessToken } from "../lib/api";
 import { useAuthStore } from "./auth";
 import { useFilesStore } from "./files";
 import { generateFileKey, generateRandomBytes, wrapKey } from "../lib/crypto/keys";
@@ -12,6 +12,52 @@ import {
   hexToUint8Array,
 } from "../lib/crypto/kdf";
 import { saveUploadState, removeUploadState, type StoredUpload } from "../lib/db";
+
+function uploadPartWithProgress(
+  url: string,
+  data: Uint8Array,
+  method: "PUT" | "POST",
+  headers: Record<string, string>,
+  onProgress: (loaded: number, total: number) => void,
+  timeoutMs: number = 60000
+): Promise<{ ok: boolean; status: number; etag: string; responseJson?: any }> {
+  return new Promise((resolve) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open(method, url, true);
+    xhr.timeout = timeoutMs;
+    for (const [k, v] of Object.entries(headers)) {
+      xhr.setRequestHeader(k, v);
+    }
+    xhr.withCredentials = true;
+
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) {
+        onProgress(e.loaded, e.total);
+      }
+    };
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        let responseJson: any = null;
+        try {
+          responseJson = JSON.parse(xhr.responseText);
+        } catch {
+          // not json
+        }
+        const etag = xhr.getResponseHeader("ETag") || responseJson?.etag || "";
+        resolve({ ok: true, status: xhr.status, etag, responseJson });
+      } else {
+        resolve({ ok: false, status: xhr.status, etag: "" });
+      }
+    };
+
+    xhr.onerror = () => resolve({ ok: false, status: 0, etag: "" });
+    xhr.ontimeout = () => resolve({ ok: false, status: 408, etag: "" });
+    xhr.onabort = () => resolve({ ok: false, status: 0, etag: "" });
+
+    xhr.send(data);
+  });
+}
 
 export interface ActiveUpload {
   id: string; // client temporary ID
@@ -118,8 +164,25 @@ export const useUploadStore = defineStore("upload", () => {
       // 5. Upload chunks with bounded concurrency (4 parallel streams)
       const concurrency = 4;
       let nextPartIndex = 0;
-      let uploadedBytes = 0;
+      let directUploadFailed = false;
+      let totalCommittedBytes = 0;
+      const inFlightBytes = new Map<number, number>();
       const startTime = Date.now();
+
+      function updateProgress() {
+        let activeInFlight = 0;
+        for (const bytes of inFlightBytes.values()) {
+          activeInFlight += bytes;
+        }
+        const currentBytes = Math.min(file.size, totalCommittedBytes + activeInFlight);
+        uploadItem.completedBytes = currentBytes;
+        uploadItem.progress = Math.min(99, Math.round((currentBytes / file.size) * 100));
+
+        const elapsedSec = (Date.now() - startTime) / 1000;
+        if (elapsedSec > 0.2) {
+          uploadItem.speedMBs = Number((currentBytes / (1024 * 1024) / elapsedSec).toFixed(1));
+        }
+      }
 
       async function uploadNextPart(): Promise<void> {
         while (nextPartIndex < totalParts) {
@@ -142,67 +205,75 @@ export const useUploadStore = defineStore("upload", () => {
           );
 
           // Find presigned URL if available
-          const presignedUrl = initData.presigned_urls?.find(
-            (p: { part_number: number; url: string }) => p.part_number === partNumber
-          )?.url;
+          const presignedUrl = (!directUploadFailed && initData.presigned_urls)
+            ? initData.presigned_urls.find((p: { part_number: number; url: string }) => p.part_number === partNumber)?.url
+            : null;
 
-          // Upload chunk: try direct PUT first, fallback to backend relay if blocked (e.g. CORS/network policies)
           let retries = 3;
           let etag = "";
           let uploaded = false;
 
           while (retries > 0 && !uploaded) {
-            if (presignedUrl) {
-              try {
-                const putRes = await fetch(presignedUrl, {
-                  method: "PUT",
-                  body: encryptedChunk,
-                  headers: {
-                    "Content-Type": "application/octet-stream",
-                  },
-                });
+            // 1. Try direct upload if available and not previously failed
+            if (presignedUrl && !directUploadFailed) {
+              const directRes = await uploadPartWithProgress(
+                presignedUrl,
+                encryptedChunk,
+                "PUT",
+                { "Content-Type": "application/octet-stream" },
+                (loaded) => {
+                  inFlightBytes.set(partNumber, Math.min(chunkBytes.length, Math.round(loaded * (chunkBytes.length / encryptedChunk.length))));
+                  updateProgress();
+                },
+                5000 // Fast 5s timeout to prevent long stalls if blocked by CORS or network
+              );
 
-                if (putRes.ok) {
-                  etag = putRes.headers.get("ETag") || `"${partNumber}"`;
-                  uploaded = true;
-                  break;
-                }
-              } catch {
-                // Direct upload failed or blocked by CORS, fallback to proxy relay
+              if (directRes.ok) {
+                etag = directRes.etag || `"${partNumber}"`;
+                uploaded = true;
+                break;
+              } else {
+                // Direct upload failed or blocked by CORS: mark direct as unavailable
+                directUploadFailed = true;
               }
             }
 
-            // Fallback: relay through backend API endpoint
-            try {
-              const relayRes = await apiRequest<{ status: string; etag: string; part_number: number }>(
-                `/api/v1/uploads/${initData.upload_session_id}/parts/${partNumber}`,
-                {
-                  method: "POST",
-                  body: encryptedChunk,
-                  headers: {
-                    "Content-Type": "application/octet-stream",
-                  },
-                }
-              );
-              etag = relayRes.etag || `"${partNumber}"`;
+            // 2. Fallback: relay through backend API endpoint
+            const token = getAccessToken();
+            const relayHeaders: Record<string, string> = {
+              "Content-Type": "application/octet-stream",
+            };
+            if (token) {
+              relayHeaders["Authorization"] = `Bearer ${token}`;
+            }
+
+            const relayRes = await uploadPartWithProgress(
+              `/api/v1/uploads/${initData.upload_session_id}/parts/${partNumber}`,
+              encryptedChunk,
+              "POST",
+              relayHeaders,
+              (loaded) => {
+                inFlightBytes.set(partNumber, Math.min(chunkBytes.length, Math.round(loaded * (chunkBytes.length / encryptedChunk.length))));
+                updateProgress();
+              },
+              60000
+            );
+
+            if (relayRes.ok) {
+              etag = relayRes.etag || relayRes.responseJson?.etag || `"${partNumber}"`;
               uploaded = true;
               break;
-            } catch (relayErr) {
+            } else {
               retries--;
-              if (retries === 0) throw relayErr;
+              if (retries === 0) throw new Error(`Failed to upload part ${partNumber}`);
               await new Promise((r) => setTimeout(r, 1000));
             }
           }
 
+          inFlightBytes.delete(partNumber);
+          totalCommittedBytes += chunkBytes.length;
+          updateProgress();
           completedParts.push({ part_number: partNumber, etag });
-          uploadedBytes += chunkBytes.length;
-          uploadItem.completedBytes = uploadedBytes;
-          uploadItem.progress = Math.min(99, Math.round((uploadedBytes / file.size) * 100));
-
-          const elapsedSec = (Date.now() - startTime) / 1000;
-          if (elapsedSec > 0) {
-            uploadItem.speedMBs = Number((uploadedBytes / (1024 * 1024) / elapsedSec).toFixed(1));
-          }
 
           // Persist progress to IndexedDB
           storedUpload.completedParts = completedParts;

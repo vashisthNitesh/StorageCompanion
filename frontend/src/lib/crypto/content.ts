@@ -57,3 +57,46 @@ export async function decryptChunk(
 
   return new Uint8Array(decryptedBuffer);
 }
+
+/**
+ * Decrypts an entire file from encrypted bytes that may span one or more chunks.
+ * Standard multipart chunk size is 8 MB (8,388,608 bytes) or 16 MB for files > 5 GB.
+ * Each encrypted part has a 16-byte GCM authentication tag appended.
+ */
+export async function decryptFile(
+  fileKeyBytes: Uint8Array,
+  encryptedBytes: Uint8Array,
+  baseNonce: Uint8Array,
+  partSize: number = 8 * 1024 * 1024
+): Promise<Uint8Array> {
+  const encPartSize = partSize + 16;
+  if (encryptedBytes.length <= encPartSize) {
+    return await decryptChunk(fileKeyBytes, encryptedBytes, baseNonce, 1);
+  }
+
+  const totalParts = Math.ceil(encryptedBytes.length / encPartSize);
+  const decryptedParts: Uint8Array[] = [];
+  let totalDecryptedLength = 0;
+
+  for (let partNumber = 1; partNumber <= totalParts; partNumber++) {
+    const start = (partNumber - 1) * encPartSize;
+    const end = Math.min(encryptedBytes.length, start + encPartSize);
+    const chunkEncrypted = encryptedBytes.subarray(start, end);
+    const decryptedChunk = await decryptChunk(
+      fileKeyBytes,
+      chunkEncrypted,
+      baseNonce,
+      partNumber
+    );
+    decryptedParts.push(decryptedChunk);
+    totalDecryptedLength += decryptedChunk.length;
+  }
+
+  const combined = new Uint8Array(totalDecryptedLength);
+  let offset = 0;
+  for (const part of decryptedParts) {
+    combined.set(part, offset);
+    offset += part.length;
+  }
+  return combined;
+}

@@ -5,6 +5,7 @@ from apps.sharing.views import (
     PublicShareInfoView,
     PublicShareAuthView,
     PublicShareDownloadView,
+    PublicShareContentView,
 )
 
 urlpatterns = [
@@ -15,4 +16,5 @@ urlpatterns = [
     path("public/shares/<str:token>", PublicShareInfoView.as_view(), name="public-share-info"),
     path("public/shares/<str:token>/auth", PublicShareAuthView.as_view(), name="public-share-auth"),
     path("public/shares/<str:token>/download", PublicShareDownloadView.as_view(), name="public-share-download"),
+    path("public/shares/<str:token>/content", PublicShareContentView.as_view(), name="public-share-content"),
 ]

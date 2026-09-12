@@ -20,7 +20,6 @@ import {
   AlertTriangle,
   ArrowRight,
 } from "lucide-vue-next";
-import UploadTray from "../features/files/UploadTray.vue";
 
 const router = useRouter();
 const authStore = useAuthStore();
@@ -300,9 +299,6 @@ onMounted(() => {
       <main class="flex-1 overflow-y-auto p-6 bg-slate-50">
         <router-view />
       </main>
-
-      <!-- Floating Upload Tray -->
-      <UploadTray />
     </div>
   </div>
 </template>

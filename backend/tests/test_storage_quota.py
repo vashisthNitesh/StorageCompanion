@@ -82,3 +82,31 @@ def test_upload_part_relay(auth_client, subscribed_user):
     assert relay_res.data["status"] == "success"
     assert relay_res.data["part_number"] == 1
     assert "etag" in relay_res.data
+
+
+@pytest.mark.django_db
+def test_node_content_streaming_and_download_info(auth_client, subscribed_user):
+    from apps.storage.models import Node, FileVersion
+
+    node = Node.objects.create(
+        owner=subscribed_user,
+        type=Node.TYPE_FILE,
+        encrypted_name="ZW5j",
+        name_nonce="123456",
+        size_bytes=100,
+    )
+    FileVersion.objects.create(
+        node=node,
+        version_no=1,
+        object_key="mock_key_1",
+        size_bytes=100,
+        wrapped_file_key="key",
+        content_nonce="nonce",
+    )
+
+    # Download info must route via authenticated stream endpoint and return part_size
+    dl_res = auth_client.get(f"/api/v1/nodes/{node.id}/download")
+    assert dl_res.status_code == 200
+    assert dl_res.data["download_url"] == f"/api/v1/nodes/{node.id}/content"
+    assert dl_res.data["part_size"] == 8 * 1024 * 1024
+    assert dl_res.data["size_bytes"] == 100

@@ -387,10 +387,19 @@ def abort_multipart_upload(upload_id: str, user):
         upload.save(update_fields=["status"])
 
 
+import urllib3
+
+http_pool = urllib3.PoolManager(
+    maxsize=10,
+    timeout=urllib3.Timeout(connect=5.0, read=60.0),
+    retries=urllib3.Retry(total=2, backoff_factor=0.5),
+)
+
+
 def relay_upload_part(upload: Upload, part_number: int, chunk_bytes: bytes) -> str:
     """
     Relays an encrypted chunk directly to SpaceByte / S3 upstream when client direct-upload
-    fails or is blocked by CORS/network policies.
+    fails or is blocked by CORS/network policies. Uses connection pooling for high throughput.
     """
     presigned_url = None
     if isinstance(upload.parts, list):
@@ -436,24 +445,40 @@ def relay_upload_part(upload: Upload, part_number: int, chunk_bytes: bytes) -> s
     if not presigned_url or presigned_url.startswith("https://mock-s3.local") or ("mock" in presigned_url and "spacebyte" not in presigned_url):
         return f'"{part_number}"'
 
-    req = urllib.request.Request(
-        presigned_url,
-        data=chunk_bytes,
-        headers={"Content-Type": "application/octet-stream"},
-        method="PUT",
-    )
     try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
+        resp = http_pool.request(
+            "PUT",
+            presigned_url,
+            body=chunk_bytes,
+            headers={"Content-Type": "application/octet-stream"},
+        )
+        if resp.status in (200, 201, 204):
             etag = resp.headers.get("ETag") or f'"{part_number}"'
             return etag.strip()
-    except Exception as e:
-        logger.error("Failed to relay upload part %s to upstream: %s", part_number, e)
+        logger.error("Upstream returned HTTP %s for part %s", resp.status, part_number)
         return f'"{part_number}"'
+    except Exception as e:
+        logger.error("Failed to relay upload part %s to upstream via pool: %s", part_number, e)
+        # Fallback to standard urllib
+        try:
+            req = urllib.request.Request(
+                presigned_url,
+                data=chunk_bytes,
+                headers={"Content-Type": "application/octet-stream"},
+                method="PUT",
+            )
+            with urllib.request.urlopen(req, timeout=60) as fallback_resp:
+                etag = fallback_resp.headers.get("ETag") or f'"{part_number}"'
+                return etag.strip()
+        except Exception as fallback_e:
+            logger.error("Fallback relay also failed for part %s: %s", part_number, fallback_e)
+            return f'"{part_number}"'
 
 
 def get_download_info(node: Node, user, version_no: int | None = None) -> dict:
     """
-    Generates a download URL from SpaceByte or presigned S3 URL along with the encrypted File Key and nonce.
+    Generates a download URL from SpaceByte or presigned S3 URL along with the encrypted File Key, nonce, and part_size.
+    Always provides the authenticated content stream URL as the primary download_url to prevent 401 and CORS errors.
     """
     if node.owner != user:
         raise PermissionDenied("You do not have permission to access this file.")
@@ -469,27 +494,34 @@ def get_download_info(node: Node, user, version_no: int | None = None) -> dict:
     if not version:
         raise NotFound("File version not found.")
 
+    part_size = 16 * 1024 * 1024 if version.size_bytes > 5 * 1024 * 1024 * 1024 else 8 * 1024 * 1024
+
     if node.spacebyte_hash:
         sb_client = get_spacebyte_client()
-        download_url = sb_client.get_download_url(node.spacebyte_hash)
+        direct_download_url = sb_client.get_download_url(node.spacebyte_hash)
     else:
         s3 = get_s3_client()
         try:
-            download_url = s3.generate_presigned_url(
+            direct_download_url = s3.generate_presigned_url(
                 ClientMethod="get_object",
                 Params={"Bucket": settings.S3_BUCKET_NAME, "Key": version.object_key},
                 ExpiresIn=settings.PRESIGNED_URL_TTL,
             )
         except Exception:
-            download_url = f"{settings.S3_ENDPOINT_URL}/{settings.S3_BUCKET_NAME}/{version.object_key}"
+            direct_download_url = f"{settings.S3_ENDPOINT_URL}/{settings.S3_BUCKET_NAME}/{version.object_key}"
+
+    # Primary download URL routes through authenticated backend streaming proxy
+    stream_url = f"/api/v1/nodes/{node.id}/content" + (f"?v={version.version_no}" if version_no else "")
 
     return {
         "node_id": str(node.id),
         "version_no": version.version_no,
         "size_bytes": version.size_bytes,
+        "part_size": part_size,
         "wrapped_file_key": version.wrapped_file_key,
         "content_nonce": version.content_nonce,
-        "download_url": download_url,
+        "download_url": stream_url,
+        "direct_url": direct_download_url,
         "expires_in": settings.PRESIGNED_URL_TTL,
         "upstream": "spacebyte" if node.spacebyte_hash else "s3",
     }
