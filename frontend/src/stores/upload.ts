@@ -39,14 +39,14 @@ function uploadPartWithProgress(
       (typeof window !== "undefined" && url.startsWith(window.location.origin));
     xhr.withCredentials = isSameOrigin;
 
-    // Reset stall timer on progress to allow large chunks on slower connections
+    // Inactivity timer: only triggers if zero bytes are transferred for 60 seconds
     let stallTimer: any = null;
     function resetStallTimer() {
       if (stallTimer) clearTimeout(stallTimer);
       stallTimer = setTimeout(() => {
         xhr.abort();
         resolve({ ok: false, status: 408, etag: "" });
-      }, 30000); // 30 seconds of zero data progress before considering stalled
+      }, 60000); // 60s of complete inactivity before considering stalled
     }
     resetStallTimer();
 
@@ -55,6 +55,15 @@ function uploadPartWithProgress(
       if (e.lengthComputable) {
         onProgress(e.loaded, e.total);
       }
+    };
+
+    // When client completes sending all bytes over the network, give the server up to 90s to commit chunk and respond
+    xhr.upload.onload = () => {
+      if (stallTimer) clearTimeout(stallTimer);
+      stallTimer = setTimeout(() => {
+        xhr.abort();
+        resolve({ ok: false, status: 408, etag: "" });
+      }, 90000);
     };
 
     xhr.onload = () => {
@@ -277,10 +286,17 @@ export const useUploadStore = defineStore("upload", () => {
             partNumber
           );
 
-          // Find presigned URL if available
-          const presignedUrl = initData.presigned_urls
+          // Find presigned URL if available (filter out localhost if client is remote)
+          let presignedUrl = initData.presigned_urls
             ? initData.presigned_urls.find((p: { part_number: number; url: string }) => p.part_number === partNumber)?.url
             : null;
+
+          if (presignedUrl && (presignedUrl.includes("localhost") || presignedUrl.includes("127.0.0.1"))) {
+            const isLocalClient = typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+            if (!isLocalClient) {
+              presignedUrl = null;
+            }
+          }
 
           let retries = 5;
           let etag = "";

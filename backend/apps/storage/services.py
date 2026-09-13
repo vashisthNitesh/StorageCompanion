@@ -442,7 +442,13 @@ def relay_upload_part(upload: Upload, part_number: int, chunk_bytes: bytes) -> s
             except Exception:
                 presigned_url = f"{settings.S3_ENDPOINT_URL}/{settings.S3_BUCKET_NAME}/{upload.object_key}?uploadId={upload.upload_id}&partNumber={part_number}"
 
-    if not presigned_url or presigned_url.startswith("https://mock-s3.local") or ("mock" in presigned_url and "spacebyte" not in presigned_url):
+    if (
+        not presigned_url
+        or presigned_url.startswith("https://mock-s3.local")
+        or ("mock" in presigned_url and "spacebyte" not in presigned_url)
+        or ("localhost" in presigned_url and not settings.DEBUG)
+        or ("127.0.0.1" in presigned_url and not settings.DEBUG)
+    ):
         return f'"{part_number}"'
 
     try:
