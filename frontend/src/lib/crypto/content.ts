@@ -10,28 +10,39 @@ export function deriveChunkNonce(baseNonce: Uint8Array, chunkIndex: number): Uin
   return chunkNonce;
 }
 
+export async function importFileKey(fileKeyBytes: Uint8Array): Promise<CryptoKey> {
+  return crypto.subtle.importKey(
+    "raw",
+    fileKeyBytes,
+    { name: "AES-GCM" },
+    false,
+    ["encrypt", "decrypt"]
+  );
+}
+
+export async function encryptChunkWithKey(
+  cryptoKey: CryptoKey,
+  chunkBytes: Uint8Array,
+  baseNonce: Uint8Array,
+  chunkIndex: number
+): Promise<Uint8Array> {
+  const nonce = deriveChunkNonce(baseNonce, chunkIndex);
+  const encryptedBuffer = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv: nonce },
+    cryptoKey,
+    chunkBytes
+  );
+  return new Uint8Array(encryptedBuffer);
+}
+
 export async function encryptChunk(
   fileKeyBytes: Uint8Array,
   chunkBytes: Uint8Array,
   baseNonce: Uint8Array,
   chunkIndex: number
 ): Promise<Uint8Array> {
-  const nonce = deriveChunkNonce(baseNonce, chunkIndex);
-  const cryptoKey = await crypto.subtle.importKey(
-    "raw",
-    fileKeyBytes,
-    { name: "AES-GCM" },
-    false,
-    ["encrypt"]
-  );
-
-  const encryptedBuffer = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv: nonce },
-    cryptoKey,
-    chunkBytes
-  );
-
-  return new Uint8Array(encryptedBuffer);
+  const cryptoKey = await importFileKey(fileKeyBytes);
+  return encryptChunkWithKey(cryptoKey, chunkBytes, baseNonce, chunkIndex);
 }
 
 export async function decryptChunk(

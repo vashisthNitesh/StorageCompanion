@@ -170,7 +170,7 @@ class PublicShareContentView(APIView):
             s3_obj = s3.get_object(**params)
             status_code = 206 if "Range" in params else 200
             streaming_resp = StreamingHttpResponse(
-                s3_obj["Body"].iter_chunks(chunk_size=128 * 1024),
+                s3_obj["Body"].iter_chunks(chunk_size=256 * 1024),
                 status=status_code,
                 content_type="application/octet-stream",
             )
@@ -192,7 +192,7 @@ class PublicShareContentView(APIView):
                     range_header=range_header,
                 )
                 streaming_resp = StreamingHttpResponse(
-                    iter(lambda: upstream_resp.read(128 * 1024), b""),
+                    iter(lambda: upstream_resp.read(256 * 1024), b""),
                     status=resp_status,
                     content_type=resp_headers.get("Content-Type", "application/octet-stream"),
                 )

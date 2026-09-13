@@ -34,10 +34,26 @@ export function useFileDownload() {
         size_bytes: number;
         part_size?: number;
         direct_url?: string;
+        upstream?: string;
       }>(`/api/v1/nodes/${node.id}/download`);
 
-      // 2. Fetch encrypted bytes via authenticated content stream endpoint
-      const res = await apiFetch(downloadData.download_url);
+      // 2. Fetch encrypted bytes: try fast direct edge download first, falling back to authenticated proxy
+      let res: Response | null = null;
+      if (downloadData.direct_url && downloadData.upstream === "s3") {
+        try {
+          const directRes = await fetch(downloadData.direct_url, { method: "GET" });
+          if (directRes.ok) {
+            res = directRes;
+          }
+        } catch {
+          // Fall back to authenticated backend proxy stream
+        }
+      }
+
+      if (!res) {
+        res = await apiFetch(downloadData.download_url);
+      }
+
       if (!res.ok) {
         let errMessage = `Failed to fetch file bytes from storage (${res.status})`;
         try {

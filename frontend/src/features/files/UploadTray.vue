@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   AlertCircle,
   Loader2,
+  RotateCw,
 } from "lucide-vue-next";
 
 const uploadStore = useUploadStore();
@@ -96,9 +97,22 @@ watch(
               {{ item.name }}
             </span>
             <div class="flex items-center space-x-2">
-              <span v-if="item.status === 'uploading' && item.speedMBs > 0" class="text-brand-600 font-mono text-[10px] font-semibold">
-                {{ item.speedMBs }} MB/s
+              <span
+                v-if="item.status === 'uploading' && item.speedMBs > 0"
+                class="text-brand-600 font-mono text-[10px] font-semibold"
+                :title="`${(item.speedMBs * 8).toFixed(1)} Megabits/s (Mbps)`"
+              >
+                {{ item.speedMBs }} MB/s <span class="text-slate-400 font-normal">({{ (item.speedMBs * 8).toFixed(1) }} Mbps)</span>
               </span>
+              <button
+                v-if="item.status === 'error'"
+                class="px-2 py-0.5 bg-brand-50 hover:bg-brand-100 text-brand-700 rounded-md text-[10px] font-semibold transition-colors flex items-center space-x-1"
+                @click="uploadStore.retryUpload(item.id)"
+                title="Resume upload without restarting from zero"
+              >
+                <RotateCw class="w-2.5 h-2.5" />
+                <span>Retry</span>
+              </button>
               <button
                 class="p-1 hover:bg-slate-200 rounded-lg text-slate-400 hover:text-slate-700 transition-colors"
                 @click="uploadStore.cancelUpload(item.id)"
@@ -140,9 +154,7 @@ watch(
                 <template v-else-if="item.status === 'completing'">Verifying & finalizing vault...</template>
                 <template v-else-if="item.status === 'completed'">Vault upload secured</template>
                 <template v-else-if="item.status === 'error'">{{ item.errorMessage || 'Upload failed' }}</template>
-                <template v-else>
-                  {{ formatBytes(item.completedBytes) }} / {{ formatBytes(item.size) }}
-                </template>
+                <span v-else>{{ formatBytes(item.completedBytes) }} / {{ formatBytes(item.size) }}</span>
               </span>
             </div>
             <span class="font-bold text-slate-700">{{ item.progress }}%</span>
