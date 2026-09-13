@@ -92,14 +92,14 @@ watch(
           :key="item.id"
           class="p-2.5 hover:bg-slate-50 rounded-xl transition-colors space-y-1.5"
         >
-          <div class="flex items-center justify-between text-xs">
-            <span class="font-medium text-slate-800 truncate max-w-[200px]" :title="item.name">
+          <div class="flex items-center justify-between text-xs gap-2">
+            <span class="font-medium text-slate-800 truncate min-w-0" :title="item.name">
               {{ item.name }}
             </span>
-            <div class="flex items-center space-x-2">
+            <div class="flex items-center space-x-2 shrink-0">
               <span
                 v-if="item.status === 'uploading' && item.speedMBs > 0"
-                class="text-brand-600 font-mono text-[10px] font-semibold"
+                class="text-brand-600 font-mono text-[10px] font-semibold whitespace-nowrap"
                 :title="`${(item.speedMBs * 8).toFixed(1)} Megabits/s (Mbps)`"
               >
                 {{ item.speedMBs }} MB/s <span class="text-slate-400 font-normal">({{ (item.speedMBs * 8).toFixed(1) }} Mbps)</span>
