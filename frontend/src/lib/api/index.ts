@@ -70,8 +70,12 @@ export async function apiFetch(
   const headers = new Headers(options.headers || {});
   const currentToken = getAccessToken();
 
-  // Attach Bearer token for relative endpoints or same-origin API routes
-  if (currentToken && (endpoint.startsWith("/") || endpoint.includes("/api/"))) {
+  const isSameOrigin =
+    endpoint.startsWith("/") ||
+    (typeof window !== "undefined" && endpoint.startsWith(window.location.origin));
+
+  // Attach Bearer token only for relative endpoints or same-origin API routes
+  if (currentToken && isSameOrigin) {
     if (!headers.has("Authorization")) {
       headers.set("Authorization", `Bearer ${currentToken}`);
     }
@@ -80,13 +84,18 @@ export async function apiFetch(
   const config: RequestInit = {
     ...options,
     headers,
-    credentials: "include", // send httpOnly refresh cookie
+    ...(isSameOrigin ? { credentials: "include" } : {}), // send httpOnly refresh cookie only to same origin
   };
 
   let response = await fetch(endpoint, config);
 
-  // If 401 Unauthorized and not already refreshing, attempt token refresh
-  if (response.status === 401 && !endpoint.includes("/auth/refresh") && !endpoint.includes("/auth/login")) {
+  // If 401 Unauthorized on internal endpoint and not already refreshing, attempt token refresh
+  if (
+    isSameOrigin &&
+    response.status === 401 &&
+    !endpoint.includes("/auth/refresh") &&
+    !endpoint.includes("/auth/login")
+  ) {
     const refreshData = await refreshAccessToken();
     if (refreshData?.access_token) {
       headers.set("Authorization", `Bearer ${refreshData.access_token}`);

@@ -36,13 +36,17 @@ export function useFileDownload() {
         direct_url?: string;
       }>(`/api/v1/nodes/${node.id}/download`);
 
-      // 2. Fetch encrypted bytes via authenticated content stream endpoint (with fallback)
-      let res = await apiFetch(downloadData.download_url);
-      if (!res.ok && downloadData.direct_url && downloadData.direct_url !== downloadData.download_url) {
-        res = await apiFetch(downloadData.direct_url);
-      }
+      // 2. Fetch encrypted bytes via authenticated content stream endpoint
+      const res = await apiFetch(downloadData.download_url);
       if (!res.ok) {
-        throw new Error(`Failed to fetch file bytes from storage (${res.status})`);
+        let errMessage = `Failed to fetch file bytes from storage (${res.status})`;
+        try {
+          const errJson = await res.json();
+          if (errJson.error) {
+            errMessage = errJson.error;
+          }
+        } catch {}
+        throw new Error(errMessage);
       }
 
       const encryptedBuffer = await res.arrayBuffer();

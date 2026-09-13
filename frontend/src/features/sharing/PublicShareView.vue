@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
 import { useRoute } from "vue-router";
-import { apiRequest } from "../../lib/api";
+import { apiRequest, apiFetch } from "../../lib/api";
 import { decryptFile } from "../../lib/crypto/content";
 import { base64ToUint8Array, hexToUint8Array } from "../../lib/crypto/kdf";
 import { Cloud, Lock, Download, AlertCircle, FileText, CheckCircle2 } from "lucide-vue-next";
@@ -69,8 +69,15 @@ async function downloadAndDecrypt() {
     const downloadData = await apiRequest(`/api/v1/public/shares/${token}/download${pwQuery}`);
 
     // Download encrypted payload
-    const res = await fetch(downloadData.download_url);
-    if (!res.ok) throw new Error("Failed to download encrypted bytes from storage.");
+    const res = await apiFetch(downloadData.download_url);
+    if (!res.ok) {
+      let errMessage = "Failed to download encrypted bytes from storage.";
+      try {
+        const errJson = await res.json();
+        if (errJson.error) errMessage = errJson.error;
+      } catch {}
+      throw new Error(errMessage);
+    }
 
     const encryptedBuffer = await res.arrayBuffer();
     const encryptedBytes = new Uint8Array(encryptedBuffer);

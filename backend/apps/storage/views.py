@@ -236,24 +236,22 @@ class NodeContentView(APIView):
         # If SpaceByte hash is available, stream from SpaceByte with Bearer token
         if node.spacebyte_hash:
             sb_client = get_spacebyte_client()
-            upstream_url = sb_client.get_download_url(node.spacebyte_hash)
-            headers = sb_client._headers(content_type="")
-            if "HTTP_RANGE" in request.META:
-                headers["Range"] = request.META["HTTP_RANGE"]
-
-            req = urllib.request.Request(upstream_url, headers=headers)
+            range_header = request.META.get("HTTP_RANGE")
             try:
-                upstream_resp = urllib.request.urlopen(req, timeout=60)
+                upstream_resp, resp_status, resp_headers = sb_client.download_stream(
+                    node.spacebyte_hash,
+                    range_header=range_header,
+                )
                 streaming_resp = StreamingHttpResponse(
                     iter(lambda: upstream_resp.read(128 * 1024), b""),
-                    status=upstream_resp.status,
-                    content_type="application/octet-stream",
+                    status=resp_status,
+                    content_type=resp_headers.get("Content-Type", "application/octet-stream"),
                 )
-                if upstream_resp.headers.get("Content-Length"):
-                    streaming_resp["Content-Length"] = upstream_resp.headers.get("Content-Length")
-                if upstream_resp.headers.get("Content-Range"):
-                    streaming_resp["Content-Range"] = upstream_resp.headers.get("Content-Range")
-                streaming_resp["Accept-Ranges"] = "bytes"
+                if resp_headers.get("Content-Length"):
+                    streaming_resp["Content-Length"] = resp_headers["Content-Length"]
+                if resp_headers.get("Content-Range"):
+                    streaming_resp["Content-Range"] = resp_headers["Content-Range"]
+                streaming_resp["Accept-Ranges"] = resp_headers.get("Accept-Ranges", "bytes")
                 streaming_resp["Access-Control-Allow-Origin"] = "*"
                 return streaming_resp
             except Exception as e:
@@ -263,7 +261,20 @@ class NodeContentView(APIView):
                         return _stream_s3()
                     except Exception as s3_err:
                         logger.error("S3 fallback stream also failed: %s", s3_err)
-                return Response({"error": "Failed to stream file from storage."}, status=status.HTTP_502_BAD_GATEWAY)
+
+                if not sb_client.is_configured:
+                    return Response(
+                        {
+                            "error": "SpaceByte upstream storage is not configured (SPACEBYTE_ACCESS_TOKEN is missing or empty in .env). Please configure it to preview/download SpaceByte files.",
+                            "code": "spacebyte_not_configured",
+                        },
+                        status=status.HTTP_502_BAD_GATEWAY,
+                    )
+
+                return Response(
+                    {"error": f"Failed to stream file from storage upstream: {str(e)}"},
+                    status=status.HTTP_502_BAD_GATEWAY,
+                )
         else:
             try:
                 return _stream_s3()

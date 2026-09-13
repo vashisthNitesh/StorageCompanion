@@ -82,3 +82,99 @@ def test_storage_pool_status_api(subscribed_user):
     assert "billing_intervals_supported" in data
     assert "monthly" in data["billing_intervals_supported"]
     assert "yearly" in data["billing_intervals_supported"]
+
+
+@pytest.mark.django_db
+def test_no_auth_redirect_handler_strips_auth():
+    from apps.storage.spacebyte import NoAuthRedirectHandler
+    import urllib.request
+
+    handler = NoAuthRedirectHandler()
+    req = urllib.request.Request(
+        "https://spacebyte.in/api/v1/file-entries/download/test",
+        headers={"Authorization": "Bearer sample_token", "User-Agent": "test"},
+    )
+    # Simulate redirect to S3 / Cloudflare R2 presigned URL
+    new_req = handler.redirect_request(
+        req,
+        None,
+        302,
+        "Found",
+        {"Location": "https://account.r2.cloudflarestorage.com/bucket/file?X-Amz-Signature=123"},
+        "https://account.r2.cloudflarestorage.com/bucket/file?X-Amz-Signature=123",
+    )
+    assert new_req is not None
+    assert "Authorization" not in new_req.headers
+    assert "authorization" not in new_req.headers
+
+
+@pytest.mark.django_db
+def test_download_stream_unconfigured():
+    from apps.storage.spacebyte import SpaceByteClient, SpaceByteError
+
+    client = SpaceByteClient(access_token="")
+    with pytest.raises(SpaceByteError) as exc_info:
+        client.download_stream("sampleHash")
+    assert exc_info.value.status_code == 401
+
+
+@pytest.mark.django_db
+def test_node_content_view_spacebyte_streaming(subscribed_user):
+    import io
+    from unittest.mock import patch
+    from apps.storage.models import Node, FileVersion
+
+    # Create node with spacebyte_hash
+    node = Node.objects.create(
+        owner=subscribed_user,
+        type=Node.TYPE_FILE,
+        encrypted_name="ZW5jcnlwdGVkX25hbWU=",
+        name_nonce="1122334455667788",
+        size_bytes=100,
+        spacebyte_hash="mock_hash_123",
+    )
+    FileVersion.objects.create(
+        node=node,
+        version_no=1,
+        object_key="mock_key",
+        size_bytes=100,
+        wrapped_file_key="mock_wrapped",
+        content_nonce="mock_nonce",
+    )
+
+    api_client = APIClient()
+    api_client.force_authenticate(user=subscribed_user)
+
+    # 1. When SpaceByte is not configured
+    with patch("apps.storage.views.get_spacebyte_client") as mock_get_client:
+        mock_client = mock_get_client.return_value
+        mock_client.is_configured = False
+        mock_client.download_stream.side_effect = Exception("Not configured")
+
+        res = api_client.get(f"/api/v1/nodes/{node.id}/content")
+        assert res.status_code == 502
+        assert res.data["code"] == "spacebyte_not_configured"
+
+    # 2. When SpaceByte successfully streams
+    with patch("apps.storage.views.get_spacebyte_client") as mock_get_client:
+        mock_client = mock_get_client.return_value
+        mock_client.is_configured = True
+        mock_client.download_stream.return_value = (
+            io.BytesIO(b"encrypted file content bytes"),
+            200,
+            {
+                "Content-Length": "28",
+                "Content-Range": "",
+                "Content-Type": "application/octet-stream",
+                "Accept-Ranges": "bytes",
+            },
+        )
+
+        res = api_client.get(f"/api/v1/nodes/{node.id}/content")
+        assert res.status_code == 200
+        assert res["Content-Length"] == "28"
+        assert res["Accept-Ranges"] == "bytes"
+        # Read streaming content
+        content = b"".join(res.streaming_content)
+        assert content == b"encrypted file content bytes"
+

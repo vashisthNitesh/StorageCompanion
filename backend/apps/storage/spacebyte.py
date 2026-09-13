@@ -1,3 +1,4 @@
+import io
 import json
 import logging
 import urllib.error
@@ -8,6 +9,23 @@ from typing import Any
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
+
+
+class NoAuthRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """
+    HTTP redirect handler that strips the Authorization header upon redirecting
+    to S3 / Cloudflare R2 presigned URLs. This avoids S3/R2 returning:
+    '400 Bad Request: Only one auth mechanism allowed'.
+    """
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        new_req = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if new_req is not None:
+            new_req.headers.pop("Authorization", None)
+            new_req.headers.pop("authorization", None)
+            if hasattr(new_req, "unredirected_hdrs"):
+                new_req.unredirected_hdrs.pop("Authorization", None)
+                new_req.unredirected_hdrs.pop("authorization", None)
+        return new_req
 
 
 class SpaceByteError(Exception):
@@ -259,6 +277,89 @@ class SpaceByteClient:
         Returns the SpaceByte download endpoint for one or more file entry hashes.
         """
         return f"{self.base_url}/file-entries/download/{hashes}"
+
+    def download_stream(
+        self,
+        hashes: str,
+        range_header: str | None = None,
+        timeout: int = 60,
+    ) -> tuple[Any, int, dict[str, str]]:
+        """
+        Streams an upstream file from SpaceByte.
+        Handles:
+        - Bearer token authentication to SpaceByte API
+        - Accept: */* (prevents upstream from returning JSON error formatting)
+        - Presigned S3/R2 redirect handling without leaking Bearer token to S3/R2
+        - Range header forwarding for streaming preview seeking
+        - JSON response detection (if SpaceByte returns a JSON redirect or error)
+
+        Returns:
+            (file_stream, status_code, response_headers)
+        """
+        if not self.is_configured:
+            logger.warning("SpaceByte access token is not configured (SPACEBYTE_ACCESS_TOKEN is missing or empty).")
+            raise SpaceByteError(
+                "SpaceByte access token is not configured in environment.",
+                status_code=401,
+            )
+
+        url = self.get_download_url(hashes)
+        headers = {
+            "Accept": "*/*",
+            "User-Agent": "StorageCompanion-SpaceByte/1.0",
+        }
+        if self.access_token:
+            headers["Authorization"] = f"Bearer {self.access_token}"
+        if range_header:
+            headers["Range"] = range_header
+
+        req = urllib.request.Request(url, headers=headers)
+        opener = urllib.request.build_opener(NoAuthRedirectHandler())
+
+        try:
+            resp = opener.open(req, timeout=timeout)
+            content_type = resp.headers.get("Content-Type", "")
+
+            # If SpaceByte returned JSON (e.g. JSON with direct presigned URL)
+            if "application/json" in content_type:
+                body = resp.read()
+                try:
+                    data = json.loads(body.decode("utf-8"))
+                    direct_url = data.get("url") or data.get("downloadUrl") or data.get("download_url")
+                    if direct_url:
+                        sec_headers = {
+                            "Accept": "*/*",
+                            "User-Agent": "StorageCompanion-SpaceByte/1.0",
+                        }
+                        if range_header:
+                            sec_headers["Range"] = range_header
+                        sec_req = urllib.request.Request(direct_url, headers=sec_headers)
+                        resp = opener.open(sec_req, timeout=timeout)
+                    else:
+                        resp = io.BytesIO(body)
+                except Exception:
+                    resp = io.BytesIO(body)
+
+            resp_headers = {
+                "Content-Length": resp.headers.get("Content-Length", ""),
+                "Content-Range": resp.headers.get("Content-Range", ""),
+                "Content-Type": resp.headers.get("Content-Type", "application/octet-stream"),
+                "Accept-Ranges": resp.headers.get("Accept-Ranges", "bytes"),
+            }
+            return resp, resp.status, resp_headers
+
+        except urllib.error.HTTPError as e:
+            raw_err = e.read().decode("utf-8", errors="ignore")
+            logger.error("SpaceByte download HTTPError [%s] for hash %s: %s", e.code, hashes, raw_err[:300])
+            raise SpaceByteError(
+                message=f"SpaceByte HTTP Error {e.code}: {raw_err[:200]}",
+                status_code=e.code,
+                response_body=raw_err,
+            ) from e
+        except Exception as e:
+            logger.error("SpaceByte download connection error for hash %s: %s", hashes, str(e))
+            raise SpaceByteError(f"Failed to connect to SpaceByte for download: {str(e)}") from e
+
 
     def get_entries(
         self,
