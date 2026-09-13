@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { ref, computed, reactive } from "vue";
-import { apiRequest, getAccessToken } from "../lib/api";
+import { apiRequest, getAccessToken, refreshAccessToken } from "../lib/api";
 import { useAuthStore } from "./auth";
 import { useFilesStore } from "./files";
 import { generateFileKey, generateRandomBytes, wrapKey } from "../lib/crypto/keys";
@@ -298,7 +298,7 @@ export const useUploadStore = defineStore("upload", () => {
             }
           }
 
-          let retries = 5;
+          let retries = 50; // Resilient retry loop that never gives up on network drops
           let etag = "";
           let uploaded = false;
           let attempt = 0;
@@ -306,6 +306,23 @@ export const useUploadStore = defineStore("upload", () => {
           while (retries > 0 && !uploaded) {
             attempt++;
             if ((uploadItem.status as string) === "paused") return;
+
+            // Handle browser offline state
+            if (typeof navigator !== "undefined" && !navigator.onLine) {
+              uploadItem.errorMessage = `Network offline. Waiting for connection...`;
+              await new Promise<void>((resolve) => {
+                const onOnline = () => {
+                  window.removeEventListener("online", onOnline);
+                  resolve();
+                };
+                window.addEventListener("online", onOnline);
+                setTimeout(resolve, 5000);
+              });
+            }
+
+            if (attempt > 1) {
+              uploadItem.errorMessage = `Reconnecting chunk ${partNumber} (attempt ${attempt})...`;
+            }
 
             // 1. Try direct presigned upload to R2/S3 (fastest, zero server load)
             if (presignedUrl) {
@@ -324,12 +341,13 @@ export const useUploadStore = defineStore("upload", () => {
               if (directRes.ok) {
                 etag = directRes.etag || `"${partNumber}"`;
                 uploaded = true;
+                uploadItem.errorMessage = undefined;
                 break;
               }
             }
 
             // 2. Fallback: relay through backend API endpoint
-            const token = getAccessToken();
+            let token = getAccessToken();
             const relayHeaders: Record<string, string> = {
               "Content-Type": "application/octet-stream",
             };
@@ -352,14 +370,19 @@ export const useUploadStore = defineStore("upload", () => {
             if (relayRes.ok) {
               etag = relayRes.etag || relayRes.responseJson?.etag || `"${partNumber}"`;
               uploaded = true;
+              uploadItem.errorMessage = undefined;
               break;
             } else {
               retries--;
+              if (relayRes.status === 401) {
+                // Access token expired mid-upload: automatically refresh it!
+                await refreshAccessToken().catch(() => {});
+              }
               if (retries === 0) {
                 throw new Error(`Failed to upload part ${partNumber}. Check network and click Retry.`);
               }
-              // Exponential backoff
-              const backoff = Math.min(10000, 1000 * Math.pow(1.8, attempt - 1));
+              // Exponential backoff capped at 10s
+              const backoff = Math.min(10000, 1000 * Math.pow(1.5, Math.min(attempt - 1, 8)));
               await new Promise((r) => setTimeout(r, backoff));
             }
           }

@@ -141,19 +141,23 @@ watch(
           <!-- Status & Transferred Indicator -->
           <div class="flex items-center justify-between text-[10px] text-slate-500 font-mono">
             <div class="flex items-center space-x-1.5 max-w-[260px] truncate">
-              <Loader2 v-if="item.status === 'encrypting' || item.status === 'completing'" class="w-3 h-3 text-brand-600 animate-spin shrink-0" />
+              <Loader2 v-if="item.status === 'encrypting' || item.status === 'completing' || (item.status === 'uploading' && item.errorMessage)" class="w-3 h-3 text-amber-600 animate-spin shrink-0" />
               <CheckCircle2 v-else-if="item.status === 'completed'" class="w-3 h-3 text-emerald-600 shrink-0" />
               <AlertCircle v-else-if="item.status === 'error'" class="w-3 h-3 text-rose-500 shrink-0" />
 
               <span
                 class="truncate"
-                :class="{ 'text-rose-600 font-medium': item.status === 'error' }"
-                :title="item.status === 'error' && item.errorMessage ? item.errorMessage : item.status"
+                :class="{
+                  'text-rose-600 font-medium': item.status === 'error',
+                  'text-amber-600 font-medium': item.status === 'uploading' && item.errorMessage
+                }"
+                :title="item.errorMessage || item.status"
               >
                 <template v-if="item.status === 'encrypting'">Encrypting chunks client-side...</template>
                 <template v-else-if="item.status === 'completing'">Verifying & finalizing vault...</template>
                 <template v-else-if="item.status === 'completed'">Vault upload secured</template>
                 <template v-else-if="item.status === 'error'">{{ item.errorMessage || 'Upload failed' }}</template>
+                <span v-else-if="item.errorMessage">{{ item.errorMessage }}</span>
                 <span v-else>{{ formatBytes(item.completedBytes) }} / {{ formatBytes(item.size) }}</span>
               </span>
             </div>
