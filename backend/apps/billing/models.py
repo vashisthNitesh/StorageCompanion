@@ -28,12 +28,15 @@ class Plan(BaseModel):
 
 class Subscription(BaseModel):
     STATUS_CHOICES = [
-        ("trialing", "Trialing"),
         ("active", "Active"),
+        ("extended", "Extended by Admin"),
+        ("trialing", "Trialing"),
         ("past_due", "Past Due"),
-        ("grace_period", "Grace Period (30 days)"),
+        ("grace_period", "Grace Period (90 days)"),
+        ("expired", "Expired (90-Day Retention)"),
+        ("suspended", "Suspended"),
+        ("purged", "Data Purged (90-Day Lapsed)"),
         ("canceled", "Canceled"),
-        ("expired", "Expired"),
     ]
 
     user = models.OneToOneField(
@@ -61,51 +64,74 @@ class Subscription(BaseModel):
 
     @property
     def is_in_grace_period(self):
-        """Returns True if subscription is currently in an active grace period."""
-        if self.status == "grace_period":
+        """Returns True if subscription has expired but is within the 90-day data retention period."""
+        if self.status in ["grace_period", "expired", "past_due"]:
             if self.grace_period_ends_at:
                 return timezone.now() <= self.grace_period_ends_at
+            if self.current_period_end:
+                return timezone.now() <= (self.current_period_end + timezone.timedelta(days=90))
             return True
         return False
 
     @property
+    def retention_days_remaining(self):
+        """Returns the number of days remaining until permanent 90-day data purge."""
+        if not self.is_in_grace_period:
+            return 0
+        now = timezone.now()
+        target = self.grace_period_ends_at or (self.current_period_end + timezone.timedelta(days=90) if self.current_period_end else None)
+        if not target or now > target:
+            return 0
+        diff = target - now
+        return max(0, diff.days + (1 if diff.seconds > 0 else 0))
+
+    @property
+    def days_until_expiration(self):
+        """Returns days remaining on active period (or negative if lapsed)."""
+        if not self.current_period_end:
+            return 0
+        diff = self.current_period_end - timezone.now()
+        return diff.days
+
+    @property
     def is_expired(self):
-        """Returns True if subscription has lapsed beyond valid billing or grace periods."""
-        if self.status in ["expired", "canceled"]:
+        """Returns True if subscription and its 90-day grace retention have fully lapsed."""
+        if self.status in ["purged"]:
             return True
         now = timezone.now()
-        if self.status == "grace_period" and self.grace_period_ends_at and now > self.grace_period_ends_at:
-            return True
-        if self.status in ["active", "trialing"] and self.current_period_end and now > self.current_period_end:
+        target_grace = self.grace_period_ends_at or (self.current_period_end + timezone.timedelta(days=90) if self.current_period_end else None)
+        if target_grace and now > target_grace:
             return True
         return False
 
     @property
     def is_valid(self):
         """
-        Returns True if user currently has valid storage access (active, trialing, or in grace period).
-        Users in grace period have read access to protect their data without deleting.
+        Returns True if user currently has valid storage access (active, extended, or in 90-day grace period).
+        Users in grace period have read/download access to protect their data without deleting.
         """
+        if self.status == "purged":
+            return False
+        if not self.user.is_active:
+            return False
         now = timezone.now()
-        if self.status in ["active", "trialing"]:
+        if self.status in ["active", "extended", "trialing"]:
             if self.current_period_end and now > self.current_period_end:
-                return False
+                return self.is_in_grace_period
             return True
-        if self.status == "grace_period":
-            if self.grace_period_ends_at and now > self.grace_period_ends_at:
-                return False
-            return True
+        if self.status in ["grace_period", "expired", "past_due", "canceled"]:
+            return self.is_in_grace_period
         return False
 
     @property
     def can_upload(self):
         """
-        During grace period, past due, or expired states, uploads are blocked.
-        Only active/trialing subscriptions within their billing cycle can upload.
+        During 90-day grace retention period or expired states, uploads are blocked.
+        Only active/extended subscriptions within their billing cycle can upload.
         """
-        if not self.is_valid:
+        if not self.user.is_active:
             return False
-        if self.status not in ["active", "trialing"]:
+        if self.status not in ["active", "extended", "trialing"]:
             return False
         if self.current_period_end and timezone.now() > self.current_period_end:
             return False

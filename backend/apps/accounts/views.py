@@ -135,19 +135,26 @@ class RefreshTokenView(APIView):
         try:
             token = RefreshToken(refresh_token)
             new_access_token = str(token.access_token)
+            user_id = token.payload.get(settings.SIMPLE_JWT["USER_ID_CLAIM"])
+            user = User.objects.get(id=user_id)
+            user_data = UserSerializer(user).data
             
             # Rotate refresh token if configured
             if settings.SIMPLE_JWT.get("ROTATE_REFRESH_TOKENS", True):
                 token.blacklist()
-                user_id = token.payload.get(settings.SIMPLE_JWT["USER_ID_CLAIM"])
-                user = User.objects.get(id=user_id)
                 new_refresh = RefreshToken.for_user(user)
-                response = Response({"access_token": new_access_token})
+                response = Response({
+                    "access_token": new_access_token,
+                    "user": user_data,
+                })
                 set_refresh_cookie(response, str(new_refresh))
                 return response
 
-            return Response({"access_token": new_access_token})
-        except TokenError as e:
+            return Response({
+                "access_token": new_access_token,
+                "user": user_data,
+            })
+        except (TokenError, User.DoesNotExist) as e:
             response = Response({"error": str(e)}, status=status.HTTP_401_UNAUTHORIZED)
             clear_refresh_cookie(response)
             return response

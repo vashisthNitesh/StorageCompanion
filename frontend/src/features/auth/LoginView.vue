@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { ref, onMounted } from "vue";
 import { useRouter, useRoute } from "vue-router";
 import { useAuthStore } from "../../stores/auth";
 import { Lock, AlertTriangle, ArrowRight, RefreshCw } from "lucide-vue-next";
@@ -13,6 +13,13 @@ const password = ref("");
 const totpCode = ref("");
 const mfaRequired = ref(false);
 const errorMessage = ref("");
+
+onMounted(() => {
+  if (authStore.isAuthenticated) {
+    const target = authStore.isMasterAdmin ? "/app/admin" : "/app/files";
+    router.replace((route.query.redirect as string) || target);
+  }
+});
 
 async function handleLogin() {
   errorMessage.value = "";

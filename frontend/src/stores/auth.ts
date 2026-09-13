@@ -1,12 +1,13 @@
 import { defineStore } from "pinia";
 import { ref, computed } from "vue";
-import { apiRequest, setAccessToken, getAccessToken } from "../lib/api";
+import { apiRequest, setAccessToken, getAccessToken, refreshAccessToken } from "../lib/api";
 import {
   generateRandomSalt,
   deriveKEK,
   DEFAULT_KDF_PARAMS,
   uint8ArrayToHex,
   uint8ArrayToBase64,
+  base64ToUint8Array,
 } from "../lib/crypto/kdf";
 import {
   generateMasterKey,
@@ -37,6 +38,12 @@ export interface UserProfile {
     status: string;
     plan_name: string | null;
     plan_code: string | null;
+    is_in_grace_period?: boolean;
+    retention_days_remaining?: number;
+    days_until_expiration?: number;
+    can_upload?: boolean;
+    current_period_end?: string | null;
+    grace_period_ends_at?: string | null;
   };
   quota?: {
     bytes_used: number;
@@ -45,10 +52,34 @@ export interface UserProfile {
   };
 }
 
+const VAULT_KEY_STORAGE_KEY = "sc_vault_mk";
+
+function saveMasterKeyToSession(key: Uint8Array | null) {
+  if (typeof window === "undefined" || !window.sessionStorage) return;
+  if (key) {
+    sessionStorage.setItem(VAULT_KEY_STORAGE_KEY, uint8ArrayToBase64(key));
+  } else {
+    sessionStorage.removeItem(VAULT_KEY_STORAGE_KEY);
+  }
+}
+
+function loadMasterKeyFromSession(): Uint8Array | null {
+  if (typeof window === "undefined" || !window.sessionStorage) return null;
+  const stored = sessionStorage.getItem(VAULT_KEY_STORAGE_KEY);
+  if (!stored) return null;
+  try {
+    return base64ToUint8Array(stored);
+  } catch {
+    sessionStorage.removeItem(VAULT_KEY_STORAGE_KEY);
+    return null;
+  }
+}
+
 export const useAuthStore = defineStore("auth", () => {
   const user = ref<UserProfile | null>(null);
   const masterKey = ref<Uint8Array | null>(null);
   const isLoading = ref<boolean>(false);
+  const isInitialized = ref<boolean>(false);
   const pendingRecoveryPhrase = ref<string[] | null>(null);
 
   const isAuthenticated = computed(() => !!user.value && !!getAccessToken());
@@ -106,6 +137,7 @@ export const useAuthStore = defineStore("auth", () => {
       setAccessToken(response.access_token);
       user.value = response.user;
       masterKey.value = newMasterKey;
+      saveMasterKeyToSession(newMasterKey);
       pendingRecoveryPhrase.value = recoveryWords;
 
       return { user: response.user, recoveryWords };
@@ -145,6 +177,7 @@ export const useAuthStore = defineStore("auth", () => {
             response.user.kdf_params || DEFAULT_KDF_PARAMS
           );
           masterKey.value = await unwrapKey(kek, response.user.wrapped_master_key);
+          saveMasterKeyToSession(masterKey.value);
         } catch (err) {
           console.warn("Could not unwrap master key:", err);
           // For staff/admin accounts, allow portal access even if key derivation fails
@@ -170,6 +203,7 @@ export const useAuthStore = defineStore("auth", () => {
       user.value.kdf_params || DEFAULT_KDF_PARAMS
     );
     masterKey.value = await unwrapKey(kek, user.value.wrapped_master_key);
+    saveMasterKeyToSession(masterKey.value);
   }
 
   async function fetchProfile() {
@@ -180,7 +214,74 @@ export const useAuthStore = defineStore("auth", () => {
       user.value = null;
       masterKey.value = null;
       setAccessToken(null);
+      saveMasterKeyToSession(null);
     }
+  }
+
+  let initPromise: Promise<boolean> | null = null;
+
+  async function initAuth(): Promise<boolean> {
+    if (isInitialized.value) {
+      return isAuthenticated.value;
+    }
+    if (initPromise) {
+      return initPromise;
+    }
+
+    initPromise = (async () => {
+      try {
+        // 1. Restore masterKey from sessionStorage if present
+        if (!masterKey.value) {
+          const restoredKey = loadMasterKeyFromSession();
+          if (restoredKey) {
+            masterKey.value = restoredKey;
+          }
+        }
+
+        // 2. If we already have an access token, verify and fetch profile
+        const existingToken = getAccessToken();
+        if (existingToken) {
+          try {
+            const profile = await apiRequest<UserProfile>("/api/v1/auth/me");
+            user.value = profile;
+            return true;
+          } catch {
+            // Access token might be invalid or expired; try refresh next
+          }
+        }
+
+        // 3. Attempt silent refresh using the HTTP-only cookie
+        const refreshData = await refreshAccessToken();
+        if (refreshData?.access_token) {
+          if (refreshData.user) {
+            user.value = refreshData.user;
+          } else {
+            const profile = await apiRequest<UserProfile>("/api/v1/auth/me");
+            user.value = profile;
+          }
+          return true;
+        }
+
+        // Neither access token nor refresh token worked
+        user.value = null;
+        masterKey.value = null;
+        setAccessToken(null);
+        saveMasterKeyToSession(null);
+        return false;
+      } catch (err) {
+        console.warn("Auth initialization failed:", err);
+        user.value = null;
+        masterKey.value = null;
+        setAccessToken(null);
+        saveMasterKeyToSession(null);
+        return false;
+      } finally {
+        isInitialized.value = true;
+        initPromise = null;
+      }
+    })();
+
+    return initPromise;
   }
 
   async function logout() {
@@ -192,6 +293,7 @@ export const useAuthStore = defineStore("auth", () => {
       user.value = null;
       masterKey.value = null;
       setAccessToken(null);
+      saveMasterKeyToSession(null);
     }
   }
 
@@ -203,6 +305,7 @@ export const useAuthStore = defineStore("auth", () => {
     user,
     masterKey,
     isLoading,
+    isInitialized,
     pendingRecoveryPhrase,
     isAuthenticated,
     isVaultUnlocked,
@@ -212,6 +315,7 @@ export const useAuthStore = defineStore("auth", () => {
     login,
     unlockVault,
     fetchProfile,
+    initAuth,
     logout,
     clearRecoveryPhrase,
   };

@@ -92,8 +92,13 @@ export const router = createRouter({
   },
 });
 
-router.beforeEach((to, _from, next) => {
+router.beforeEach(async (to, _from, next) => {
   const authStore = useAuthStore();
+
+  // Initialize auth session before making route decisions
+  if (!authStore.isInitialized) {
+    await authStore.initAuth();
+  }
 
   if (to.meta.requiresAuth) {
     if (!authStore.isAuthenticated) {
@@ -104,6 +109,12 @@ router.beforeEach((to, _from, next) => {
     // Admin Route Protection: only master admin can access /app/admin
     if (to.meta.requiresAdmin && !authStore.isMasterAdmin) {
       next({ path: "/app/files" });
+      return;
+    }
+
+    // Superadmin restriction: redirect away from customer vault/billing pages to admin dashboard
+    if (authStore.isMasterAdmin && (to.path === "/app" || to.path === "/app/files" || to.path === "/app/shared" || to.path === "/app/billing")) {
+      next({ path: "/app/admin" });
       return;
     }
 
@@ -120,11 +131,16 @@ router.beforeEach((to, _from, next) => {
 
     next();
   } else {
-    // If already logged in and subscribed, redirect away from auth pages
-    if (authStore.isAuthenticated && (authStore.hasActiveSubscription || authStore.isMasterAdmin) && (to.name === "login" || to.name === "register")) {
-      next({ path: authStore.isMasterAdmin ? "/app/admin" : "/app/files" });
-    } else {
-      next();
+    // If already logged in, redirect away from auth pages
+    if (authStore.isAuthenticated && (to.name === "login" || to.name === "register")) {
+      if (authStore.hasActiveSubscription || authStore.isMasterAdmin) {
+        next({ path: authStore.isMasterAdmin ? "/app/admin" : "/app/files" });
+      } else {
+        next({ path: "/app/billing" });
+      }
+      return;
     }
+
+    next();
   }
 });

@@ -25,6 +25,15 @@ import {
   Sparkles,
   ShoppingBag,
   X,
+  Trash2,
+  Calendar,
+  RotateCcw,
+  Timer,
+  AlertOctagon,
+  Info,
+  ShieldCheck,
+  MinusCircle,
+  PlusCircle,
 } from "lucide-vue-next";
 
 const authStore = useAuthStore();
@@ -65,6 +74,29 @@ const upgradeCustomLimitGB = ref<number | null>(null);
 const isUpgrading = ref(false);
 const upgradeMessage = ref("");
 const upgradeError = ref("");
+
+// Validity adjustment modal state
+const showValidityModal = ref(false);
+const selectedUserForValidity = ref<any>(null);
+const validityAction = ref<"reduce" | "extend" | "set_date" | "set_status">("reduce");
+const validityDays = ref<number>(7);
+const validityCustomDate = ref<string>("");
+const validityNewStatus = ref<string>("active");
+const isValidityUpdating = ref(false);
+const validityMessage = ref("");
+const validityError = ref("");
+
+// Purge data modal state
+const showPurgeModal = ref(false);
+const selectedUserForPurge = ref<any>(null);
+const isPurging = ref(false);
+const purgeMessage = ref("");
+const purgeError = ref("");
+
+// Lifecycle processing state
+const isRunningLifecycle = ref(false);
+const lifecycleResultMsg = ref("");
+const lifecycleErrorMsg = ref("");
 
 // Fetch KPI & Analytics Data
 async function fetchKPIs() {
@@ -107,6 +139,13 @@ async function fetchUsers() {
   } finally {
     isLoadingUsers.value = false;
   }
+}
+
+// Quick status filter change
+function setStatusFilter(statusVal: string) {
+  selectedStatusFilter.value = statusVal;
+  usersData.value.page = 1;
+  fetchUsers();
 }
 
 // Open Plan Upgrade Modal
@@ -152,6 +191,128 @@ async function submitPlanUpgrade() {
   }
 }
 
+// Open Validity Adjustment Modal
+function openValidityModal(user: any, defaultAction: "reduce" | "extend" = "reduce") {
+  selectedUserForValidity.value = user;
+  validityAction.value = defaultAction;
+  validityDays.value = defaultAction === "reduce" ? 7 : 30;
+  if (user.plan?.current_period_end) {
+    try {
+      const d = new Date(user.plan.current_period_end);
+      validityCustomDate.value = d.toISOString().slice(0, 16);
+    } catch {
+      validityCustomDate.value = "";
+    }
+  } else {
+    validityCustomDate.value = "";
+  }
+  validityNewStatus.value = user.plan?.status || "active";
+  validityMessage.value = "";
+  validityError.value = "";
+  showValidityModal.value = true;
+}
+
+// Submit Validity Adjustment (Reduce, Extend, Set Date, Override Status)
+async function submitValidityAdjustment() {
+  if (!selectedUserForValidity.value) return;
+  isValidityUpdating.value = true;
+  validityError.value = "";
+  validityMessage.value = "";
+
+  const payload: any = {
+    action: validityAction.value,
+  };
+
+  if (validityAction.value === "reduce" || validityAction.value === "extend") {
+    payload.days = validityDays.value;
+  } else if (validityAction.value === "set_date") {
+    payload.expiry_date = validityCustomDate.value;
+  } else if (validityAction.value === "set_status") {
+    payload.status = validityNewStatus.value;
+  }
+
+  try {
+    const res = await apiRequest<any>(
+      `/api/v1/admin/users/${selectedUserForValidity.value.id}/validity/`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }
+    );
+    validityMessage.value = res.message || "Subscription validity updated successfully.";
+    await fetchUsers();
+    await fetchKPIs();
+    await fetchPoolStatus();
+    setTimeout(() => {
+      showValidityModal.value = false;
+    }, 1200);
+  } catch (err: any) {
+    validityError.value = err.message || "Failed to update validity.";
+  } finally {
+    isValidityUpdating.value = false;
+  }
+}
+
+// Open Purge User Data Modal
+function openPurgeModal(user: any) {
+  selectedUserForPurge.value = user;
+  purgeMessage.value = "";
+  purgeError.value = "";
+  showPurgeModal.value = true;
+}
+
+// Submit Purge User Vault Data
+async function submitPurgeUser() {
+  if (!selectedUserForPurge.value) return;
+  isPurging.value = true;
+  purgeMessage.value = "";
+  purgeError.value = "";
+  try {
+    const res = await apiRequest<any>(
+      `/api/v1/admin/users/${selectedUserForPurge.value.id}/purge-data/`,
+      { method: "POST" }
+    );
+    purgeMessage.value = res.message || "User vault data purged successfully.";
+    await fetchUsers();
+    await fetchKPIs();
+    await fetchPoolStatus();
+    setTimeout(() => {
+      showPurgeModal.value = false;
+    }, 1500);
+  } catch (err: any) {
+    purgeError.value = err.message || "Failed to purge user data.";
+  } finally {
+    isPurging.value = false;
+  }
+}
+
+// Trigger Background Subscription Lifecycle & 90-Day Retention Purge
+async function triggerLifecycle() {
+  isRunningLifecycle.value = true;
+  lifecycleResultMsg.value = "";
+  lifecycleErrorMsg.value = "";
+  try {
+    const res = await apiRequest<any>("/api/v1/admin/process-lifecycle/", {
+      method: "POST",
+    });
+    const s = res.summary || {};
+    lifecycleResultMsg.value = `${res.message || "Lifecycle check completed."} Lapsed to 90-Day Grace: ${s.expired_count ?? 0}, Retention Purged: ${s.purged_count ?? 0}`;
+    await fetchUsers();
+    await fetchKPIs();
+    await fetchPoolStatus();
+    setTimeout(() => {
+      lifecycleResultMsg.value = "";
+    }, 7000);
+  } catch (err: any) {
+    lifecycleErrorMsg.value = err.message || "Failed to run lifecycle check.";
+    setTimeout(() => {
+      lifecycleErrorMsg.value = "";
+    }, 6000);
+  } finally {
+    isRunningLifecycle.value = false;
+  }
+}
+
 // Toggle User Status (Suspend / Activate)
 async function toggleUserStatus(user: any) {
   try {
@@ -161,6 +322,7 @@ async function toggleUserStatus(user: any) {
     );
     user.is_active = res.is_active;
     await fetchKPIs();
+    await fetchUsers();
   } catch (err: any) {
     alert(err.message || "Failed to toggle user status.");
   }
@@ -202,7 +364,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="space-y-6 max-w-7xl pb-12 text-slate-900 selection:bg-indigo-600 selection:text-white">
+  <div class="space-y-6 max-w-7xl pb-16 text-slate-900 selection:bg-indigo-600 selection:text-white">
     <!-- Top Admin Header -->
     <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
       <div class="space-y-1">
@@ -220,12 +382,24 @@ onMounted(async () => {
           </div>
         </div>
         <p class="text-xs text-slate-500">
-          Global oversight of upstream SpaceByte storage, user subscription tiers, and system activity metrics.
+          Global oversight of upstream SpaceByte storage, user subscription retention & validity, and platform governance.
         </p>
       </div>
 
-      <!-- Timeframe Toggle (Daily / Weekly / Monthly / Yearly) -->
-      <div class="flex items-center space-x-3">
+      <!-- Lifecycle Trigger & Timeframe Toggle -->
+      <div class="flex flex-wrap items-center gap-3">
+        <!-- Manual Lifecycle Trigger Button -->
+        <button
+          @click="triggerLifecycle"
+          :disabled="isRunningLifecycle"
+          class="px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs transition-all shadow-xs flex items-center space-x-2 cursor-pointer disabled:opacity-50"
+          title="Checks subscriptions for lapse, initiates 90-day retention grace, and purges expired data."
+        >
+          <RotateCcw class="w-3.5 h-3.5" :class="{ 'animate-spin': isRunningLifecycle }" />
+          <span>{{ isRunningLifecycle ? 'Checking...' : 'Run Retention Lifecycle' }}</span>
+        </button>
+
+        <!-- Timeframe Toggle -->
         <div class="inline-flex items-center p-1 rounded-2xl bg-slate-100 border border-slate-200 text-xs shadow-2xs">
           <button
             @click="selectedPeriod = 'daily'"
@@ -259,12 +433,39 @@ onMounted(async () => {
 
         <button
           @click="fetchKPIs"
-          class="p-2 rounded-xl bg-slate-50 border border-slate-200 hover:bg-slate-100 text-slate-600 transition-colors"
+          class="p-2 rounded-xl bg-slate-50 border border-slate-200 hover:bg-slate-100 text-slate-600 transition-colors cursor-pointer"
           title="Refresh KPIs"
         >
           <RefreshCw class="w-4 h-4" :class="{ 'animate-spin': isLoadingKPIs }" />
         </button>
       </div>
+    </div>
+
+    <!-- Lifecycle Process Notification Banners -->
+    <div
+      v-if="lifecycleResultMsg"
+      class="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center justify-between shadow-xs transition-all"
+    >
+      <div class="flex items-center space-x-2.5">
+        <CheckCircle2 class="w-4 h-4 text-emerald-600 shrink-0" />
+        <span class="font-medium">{{ lifecycleResultMsg }}</span>
+      </div>
+      <button @click="lifecycleResultMsg = ''" class="text-emerald-600 hover:text-emerald-900">
+        <X class="w-4 h-4" />
+      </button>
+    </div>
+
+    <div
+      v-if="lifecycleErrorMsg"
+      class="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center justify-between shadow-xs transition-all"
+    >
+      <div class="flex items-center space-x-2.5">
+        <AlertTriangle class="w-4 h-4 text-rose-600 shrink-0" />
+        <span class="font-medium">{{ lifecycleErrorMsg }}</span>
+      </div>
+      <button @click="lifecycleErrorMsg = ''" class="text-rose-600 hover:text-rose-900">
+        <X class="w-4 h-4" />
+      </button>
     </div>
 
     <!-- 4 KPI Summary Cards -->
@@ -281,7 +482,7 @@ onMounted(async () => {
             +{{ kpisData?.kpis?.new_users || 0 }} in {{ selectedPeriod }}
           </span>
         </div>
-        <p class="text-[11px] text-slate-400">All authenticated vault accounts</p>
+        <p class="text-[11px] text-slate-400">All customer vault accounts</p>
       </div>
 
       <!-- Active Users in Timeframe -->
@@ -325,7 +526,7 @@ onMounted(async () => {
           <span class="text-2xl font-extrabold text-slate-900 font-mono">₹{{ (kpisData?.kpis?.monthly_recurring_revenue || 0).toLocaleString() }}</span>
           <span class="text-[10px] text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded font-bold uppercase">Estimated</span>
         </div>
-        <p class="text-[11px] text-slate-400">Sum of active subscription plans</p>
+        <p class="text-[11px] text-slate-400">Sum of active customer subscriptions</p>
       </div>
     </div>
 
@@ -335,7 +536,7 @@ onMounted(async () => {
         <div class="space-y-1.5 max-w-2xl">
           <div class="flex items-center space-x-2">
             <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-indigo-500/20 text-indigo-300 border border-indigo-400/30">
-              Master Admin Exclusivity
+              Master Admin Pool Monitor
             </span>
             <span
               class="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider"
@@ -348,7 +549,7 @@ onMounted(async () => {
             SpaceByte 1 TB Upstream Storage Pool Monitor
           </h2>
           <p class="text-xs text-slate-300 leading-relaxed">
-            This upstream pool monitor is strictly hidden from basic users. As Master Admin, monitor total storage utilized across all users, inspect live capacity, and decide whether to purchase additional upstream capacity.
+            As Master Admin, monitor total storage utilized across all users, inspect live capacity, evaluate data retention lifecycle, and purchase additional upstream capacity when committed quotas fill up.
           </p>
         </div>
 
@@ -365,7 +566,6 @@ onMounted(async () => {
 
       <!-- Capacity Usage Bars & Metrics -->
       <div class="space-y-3 pt-2">
-        <!-- Dual Bars: Physical vs Committed -->
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div class="space-y-1.5 bg-white/5 p-3 rounded-xl border border-white/10">
             <div class="flex items-center justify-between text-xs">
@@ -394,7 +594,7 @@ onMounted(async () => {
                 :style="{ width: `${Math.min(100, poolData?.committed_percent || 0)}%` }"
               ></div>
             </div>
-            <div class="text-[10px] text-slate-400">Storage capacity promised to {{ poolData?.active_subscribers_count || 0 }} active subscribers.</div>
+            <div class="text-[10px] text-slate-400">Storage capacity promised to active subscribers.</div>
           </div>
         </div>
       </div>
@@ -572,16 +772,16 @@ onMounted(async () => {
       </div>
     </div>
 
-    <!-- User Management Table & Plan Upgrade Actions -->
+    <!-- User Management Table, Status Filters & Plan Validity Control -->
     <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-5">
-      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div>
           <h3 class="text-base font-bold text-slate-900 tracking-tight flex items-center space-x-2">
             <Users class="w-4 h-4 text-indigo-600" />
-            <span>User Management & Plan Control</span>
+            <span>User Management & Plan Validity Control</span>
           </h3>
           <p class="text-xs text-slate-500">
-            Manage all registered users, upgrade or adjust storage quotas, and toggle account states.
+            Manage customer accounts, extend or reduce subscription validity, monitor 90-day data retention countdowns, and override quotas.
           </p>
         </div>
 
@@ -613,17 +813,72 @@ onMounted(async () => {
             <option value="mega">Mega Pack (1 TB)</option>
           </select>
 
-          <!-- Status filter -->
+          <!-- Status filter dropdown -->
           <select
             v-model="selectedStatusFilter"
             @change="fetchUsers"
             class="px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-700 focus:outline-none focus:border-indigo-500"
           >
             <option value="">All Statuses</option>
-            <option value="active">Active Only</option>
+            <option value="active">Active Subscriptions</option>
+            <option value="extended">Extended Validity</option>
+            <option value="expired">Expired (90-Day Grace)</option>
             <option value="suspended">Suspended Only</option>
+            <option value="purged">Purged (Wiped)</option>
           </select>
         </div>
+      </div>
+
+      <!-- Quick Status Filter Pills -->
+      <div class="flex flex-wrap items-center gap-1.5 pt-1 border-t border-slate-100">
+        <span class="text-[11px] font-semibold text-slate-400 mr-1">Quick Filter:</span>
+        <button
+          @click="setStatusFilter('')"
+          class="px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer"
+          :class="selectedStatusFilter === '' ? 'bg-slate-900 text-white shadow-xs' : 'bg-slate-100 hover:bg-slate-200 text-slate-600'"
+        >
+          All ({{ usersData.total_count }})
+        </button>
+        <button
+          @click="setStatusFilter('active')"
+          class="px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer flex items-center space-x-1"
+          :class="selectedStatusFilter === 'active' ? 'bg-emerald-600 text-white shadow-xs' : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200'"
+        >
+          <CheckCircle2 class="w-3 h-3" />
+          <span>Active</span>
+        </button>
+        <button
+          @click="setStatusFilter('extended')"
+          class="px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer flex items-center space-x-1"
+          :class="selectedStatusFilter === 'extended' ? 'bg-indigo-600 text-white shadow-xs' : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200'"
+        >
+          <Sparkles class="w-3 h-3" />
+          <span>Extended</span>
+        </button>
+        <button
+          @click="setStatusFilter('expired')"
+          class="px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer flex items-center space-x-1"
+          :class="selectedStatusFilter === 'expired' ? 'bg-amber-600 text-white shadow-xs' : 'bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200'"
+        >
+          <Timer class="w-3 h-3" />
+          <span>Expired (90-Day Retention)</span>
+        </button>
+        <button
+          @click="setStatusFilter('suspended')"
+          class="px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer flex items-center space-x-1"
+          :class="selectedStatusFilter === 'suspended' ? 'bg-rose-600 text-white shadow-xs' : 'bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200'"
+        >
+          <UserX class="w-3 h-3" />
+          <span>Suspended</span>
+        </button>
+        <button
+          @click="setStatusFilter('purged')"
+          class="px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer flex items-center space-x-1"
+          :class="selectedStatusFilter === 'purged' ? 'bg-slate-700 text-white shadow-xs' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300'"
+        >
+          <Trash2 class="w-3 h-3" />
+          <span>Data Purged</span>
+        </button>
       </div>
 
       <!-- Users Table -->
@@ -633,9 +888,9 @@ onMounted(async () => {
             <tr class="border-b border-slate-200 text-slate-500 font-semibold uppercase text-[10px] tracking-wider bg-slate-50/70">
               <th class="py-3 px-4 rounded-l-xl">User Profile</th>
               <th class="py-3 px-4">Subscription Plan</th>
+              <th class="py-3 px-4">Plan Status & Retention</th>
+              <th class="py-3 px-4">Validity / Expiration</th>
               <th class="py-3 px-4">Storage Consumed</th>
-              <th class="py-3 px-4">Account Status</th>
-              <th class="py-3 px-4">Joined Date</th>
               <th class="py-3 px-4 text-right rounded-r-xl">Actions</th>
             </tr>
           </thead>
@@ -671,14 +926,83 @@ onMounted(async () => {
                 <div class="space-y-0.5">
                   <div class="font-semibold text-slate-900">{{ user.plan.name }}</div>
                   <div class="text-[10px] text-slate-500 uppercase tracking-wider font-mono">
-                    {{ user.plan.billing_interval }} • {{ user.plan.status }}
+                    {{ user.plan.billing_interval }}
+                  </div>
+                </div>
+              </td>
+
+              <!-- Plan Status & Retention Window -->
+              <td class="py-3 px-4">
+                <div class="space-y-1">
+                  <!-- Active -->
+                  <div v-if="user.plan.status === 'active'" class="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200">
+                    <CheckCircle2 class="w-3 h-3" />
+                    <span>Active</span>
+                  </div>
+
+                  <!-- Extended -->
+                  <div v-else-if="user.plan.status === 'extended'" class="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider bg-indigo-50 text-indigo-700 border border-indigo-200">
+                    <Sparkles class="w-3 h-3" />
+                    <span>Extended</span>
+                  </div>
+
+                  <!-- Expired / Grace Period with 90-day countdown -->
+                  <div v-else-if="user.plan.status === 'expired' || user.plan.status === 'grace_period'" class="space-y-0.5">
+                    <div class="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-amber-50 text-amber-800 border border-amber-300 animate-pulse">
+                      <Timer class="w-3 h-3 text-amber-600" />
+                      <span>Expired</span>
+                    </div>
+                    <div class="text-[10px] text-amber-700 font-medium flex items-center space-x-1">
+                      <span>90-Day Grace:</span>
+                      <strong class="font-bold text-rose-700">{{ user.plan.retention_days_remaining }} days to purge</strong>
+                    </div>
+                  </div>
+
+                  <!-- Suspended -->
+                  <div v-else-if="user.plan.status === 'suspended' || !user.is_active" class="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider bg-rose-50 text-rose-700 border border-rose-200">
+                    <UserX class="w-3 h-3" />
+                    <span>Suspended</span>
+                  </div>
+
+                  <!-- Purged -->
+                  <div v-else-if="user.plan.status === 'purged'" class="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider bg-slate-100 text-slate-600 border border-slate-200">
+                    <Trash2 class="w-3 h-3" />
+                    <span>Data Purged</span>
+                  </div>
+
+                  <!-- None -->
+                  <div v-else class="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider bg-slate-100 text-slate-500 border border-slate-200">
+                    <span>No Plan</span>
+                  </div>
+                </div>
+              </td>
+
+              <!-- Validity / Expiration Details -->
+              <td class="py-3 px-4">
+                <div class="space-y-0.5 text-slate-700 font-mono text-[11px]">
+                  <div v-if="user.plan.current_period_end">
+                    <span class="text-slate-900 font-semibold">{{ new Date(user.plan.current_period_end).toLocaleDateString() }}</span>
+                  </div>
+                  <div v-else class="text-slate-400">No End Date</div>
+
+                  <!-- Countdown or status hint -->
+                  <div class="text-[10px]">
+                    <span v-if="user.plan.days_until_expiration > 0" class="text-emerald-700">
+                      {{ user.plan.days_until_expiration }} days remaining
+                    </span>
+                    <span v-else-if="user.plan.status === 'purged'" class="text-slate-400">
+                      Files removed
+                    </span>
+                    <span v-else class="text-rose-600 font-bold">
+                      Lapsed {{ Math.abs(user.plan.days_until_expiration) }} days ago
+                    </span>
                   </div>
                 </div>
               </td>
 
               <!-- Storage Used vs Quota -->
               <td class="py-3 px-4">
-                <div class="space-y-1 max-w-[160px]">
+                <div class="space-y-1 max-w-[150px]">
                   <div class="flex justify-between text-[11px] font-mono">
                     <span class="text-slate-700 font-semibold">{{ user.storage.used_formatted }}</span>
                     <span class="text-slate-400">/ {{ user.storage.limit_formatted }}</span>
@@ -687,52 +1011,56 @@ onMounted(async () => {
                     <div
                       class="h-full rounded-full transition-all"
                       :class="user.storage.percent_used > 85 ? 'bg-rose-500' : 'bg-blue-600'"
-                      :style="{ width: `${user.storage.percent_used}%` }"
+                      :style="{ width: `${Math.min(user.storage.percent_used, 100)}%` }"
                     ></div>
                   </div>
                 </div>
               </td>
 
-              <!-- Status -->
-              <td class="py-3 px-4">
-                <span
-                  class="px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider"
-                  :class="user.is_active ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-rose-50 text-rose-700 border border-rose-200'"
-                >
-                  {{ user.is_active ? 'Active' : 'Suspended' }}
-                </span>
-              </td>
-
-              <!-- Joined -->
-              <td class="py-3 px-4 text-slate-500 text-[11px]">
-                {{ new Date(user.date_joined).toLocaleDateString() }}
-              </td>
-
               <!-- Action Buttons -->
               <td class="py-3 px-4 text-right">
-                <div class="flex items-center justify-end space-x-2">
+                <div class="flex items-center justify-end space-x-1.5">
+                  <!-- Adjust Validity Button (Reduce / Extend) -->
+                  <button
+                    v-if="!user.is_staff && !user.is_superuser"
+                    @click="openValidityModal(user, 'reduce')"
+                    class="px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 font-semibold text-[11px] transition-colors border border-amber-200 cursor-pointer flex items-center space-x-1"
+                    title="Adjust or reduce subscription validity period"
+                  >
+                    <Clock class="w-3.5 h-3.5 text-amber-700" />
+                    <span>Validity</span>
+                  </button>
+
+                  <!-- Change Plan Button -->
                   <button
                     v-if="!user.is_staff && !user.is_superuser"
                     @click="openUpgradeModal(user)"
-                    class="px-3 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-semibold text-xs transition-colors border border-indigo-200 cursor-pointer"
+                    class="px-2.5 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-semibold text-[11px] transition-colors border border-indigo-200 cursor-pointer flex items-center space-x-1"
+                    title="Change subscription tier or storage quota"
                   >
-                    Change Plan
+                    <Sliders class="w-3.5 h-3.5 text-indigo-600" />
+                    <span>Plan</span>
                   </button>
-                  <span
-                    v-else
-                    class="px-2.5 py-1 text-[10px] font-mono text-indigo-600 font-semibold bg-indigo-50 rounded-lg border border-indigo-100"
-                  >
-                    System Manager
-                  </span>
 
+                  <!-- Manual Purge Data Button (if user is expired or purged) -->
                   <button
-                    v-if="!user.is_staff"
+                    v-if="!user.is_staff && !user.is_superuser"
+                    @click="openPurgeModal(user)"
+                    class="p-1 rounded-lg text-slate-400 hover:text-rose-600 transition-colors"
+                    title="Purge user files and reclaim storage"
+                  >
+                    <Trash2 class="w-3.5 h-3.5" />
+                  </button>
+
+                  <!-- Toggle Suspend/Activate -->
+                  <button
+                    v-if="!user.is_staff && !user.is_superuser"
                     @click="toggleUserStatus(user)"
                     class="p-1 rounded-lg text-slate-400 hover:text-slate-700 transition-colors"
-                    :title="user.is_active ? 'Suspend User' : 'Activate User'"
+                    :title="user.is_active ? 'Suspend User Account' : 'Activate User Account'"
                   >
-                    <UserX v-if="user.is_active" class="w-4 h-4 text-rose-500" />
-                    <UserCheck v-else class="w-4 h-4 text-emerald-600" />
+                    <UserX v-if="user.is_active" class="w-3.5 h-3.5 text-rose-500" />
+                    <UserCheck v-else class="w-3.5 h-3.5 text-emerald-600" />
                   </button>
                 </div>
               </td>
@@ -779,6 +1107,289 @@ onMounted(async () => {
       </div>
     </div>
 
+    <!-- ADJUST VALIDITY MODAL (Reduce / Extend / Date / Status) -->
+    <div
+      v-if="showValidityModal"
+      class="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4"
+    >
+      <div class="bg-white max-w-lg w-full rounded-2xl border border-slate-200 shadow-2xl p-6 space-y-5">
+        <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+          <div class="flex items-center space-x-2">
+            <Clock class="w-5 h-5 text-amber-600" />
+            <h3 class="text-base font-bold text-slate-900">Adjust Subscription Validity</h3>
+          </div>
+          <button @click="showValidityModal = false" class="text-slate-400 hover:text-slate-700 cursor-pointer">
+            <X class="w-5 h-5" />
+          </button>
+        </div>
+
+        <!-- Target User Info -->
+        <div class="p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs space-y-1">
+          <div class="flex items-center justify-between">
+            <span class="text-slate-500">Customer:</span>
+            <span class="font-bold text-slate-900">{{ selectedUserForValidity?.full_name }} ({{ selectedUserForValidity?.email }})</span>
+          </div>
+          <div class="flex items-center justify-between font-mono text-[11px]">
+            <span class="text-slate-500">Current Expiry:</span>
+            <span class="font-bold text-slate-800">
+              {{ selectedUserForValidity?.plan?.current_period_end ? new Date(selectedUserForValidity.plan.current_period_end).toLocaleString() : 'No expiry set' }}
+            </span>
+          </div>
+          <div class="flex items-center justify-between font-mono text-[11px]">
+            <span class="text-slate-500">Status:</span>
+            <span class="font-bold uppercase" :class="selectedUserForValidity?.plan?.status === 'active' ? 'text-emerald-700' : 'text-amber-700'">
+              {{ selectedUserForValidity?.plan?.status }}
+            </span>
+          </div>
+        </div>
+
+        <!-- Action Mode Tabs (Reduce Validity vs Extend Validity vs Custom Date vs Direct Status) -->
+        <div class="grid grid-cols-4 gap-1 p-1 bg-slate-100 rounded-xl text-xs font-semibold">
+          <button
+            type="button"
+            @click="validityAction = 'reduce'"
+            class="py-2 px-1 rounded-lg text-center transition-all cursor-pointer truncate"
+            :class="validityAction === 'reduce' ? 'bg-white text-amber-800 shadow-xs font-bold' : 'text-slate-600 hover:text-slate-900'"
+          >
+            Reduce Days
+          </button>
+          <button
+            type="button"
+            @click="validityAction = 'extend'"
+            class="py-2 px-1 rounded-lg text-center transition-all cursor-pointer truncate"
+            :class="validityAction === 'extend' ? 'bg-white text-indigo-700 shadow-xs font-bold' : 'text-slate-600 hover:text-slate-900'"
+          >
+            Extend Days
+          </button>
+          <button
+            type="button"
+            @click="validityAction = 'set_date'"
+            class="py-2 px-1 rounded-lg text-center transition-all cursor-pointer truncate"
+            :class="validityAction === 'set_date' ? 'bg-white text-blue-700 shadow-xs font-bold' : 'text-slate-600 hover:text-slate-900'"
+          >
+            Exact Date
+          </button>
+          <button
+            type="button"
+            @click="validityAction = 'set_status'"
+            class="py-2 px-1 rounded-lg text-center transition-all cursor-pointer truncate"
+            :class="validityAction === 'set_status' ? 'bg-white text-slate-900 shadow-xs font-bold' : 'text-slate-600 hover:text-slate-900'"
+          >
+            Set Status
+          </button>
+        </div>
+
+        <!-- Tab 1: Reduce Validity -->
+        <div v-if="validityAction === 'reduce'" class="space-y-3">
+          <div class="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs leading-relaxed space-y-1">
+            <div class="font-bold flex items-center space-x-1.5 text-amber-800">
+              <MinusCircle class="w-4 h-4 text-amber-600" />
+              <span>Reduce Plan Validity</span>
+            </div>
+            <p class="text-[11px]">
+              Deducts days from the customer's current validity. If reduced past today, the customer enters the <strong>90-Day Retention Grace Period</strong>. During grace, file uploads are paused while existing files are protected for 90 days before final deletion.
+            </p>
+          </div>
+
+          <div class="space-y-2">
+            <label class="block text-xs font-semibold text-slate-700">Days to Reduce</label>
+            <div class="flex items-center space-x-2">
+              <button
+                type="button"
+                v-for="d in [3, 7, 15, 30]"
+                :key="d"
+                @click="validityDays = d"
+                class="px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all cursor-pointer"
+                :class="validityDays === d ? 'bg-amber-100 border-amber-400 text-amber-900' : 'border-slate-200 text-slate-600 hover:bg-slate-50'"
+              >
+                -{{ d }} Days
+              </button>
+            </div>
+            <input
+              type="number"
+              v-model.number="validityDays"
+              min="1"
+              max="365"
+              placeholder="Enter days to subtract"
+              class="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-900 focus:outline-none focus:border-amber-500 font-mono"
+            />
+          </div>
+        </div>
+
+        <!-- Tab 2: Extend Validity -->
+        <div v-else-if="validityAction === 'extend'" class="space-y-3">
+          <div class="p-3 rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-900 text-xs leading-relaxed space-y-1">
+            <div class="font-bold flex items-center space-x-1.5 text-indigo-800">
+              <PlusCircle class="w-4 h-4 text-indigo-600" />
+              <span>Extend Plan Validity</span>
+            </div>
+            <p class="text-[11px]">
+              Adds days onto the subscription period and marks the subscription status as <strong>Extended</strong>. If the account was in grace period or expired, full upload capabilities are restored and data retention is fully re-secured.
+            </p>
+          </div>
+
+          <div class="space-y-2">
+            <label class="block text-xs font-semibold text-slate-700">Days to Extend</label>
+            <div class="flex items-center space-x-2">
+              <button
+                type="button"
+                v-for="d in [7, 30, 90, 365]"
+                :key="d"
+                @click="validityDays = d"
+                class="px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all cursor-pointer"
+                :class="validityDays === d ? 'bg-indigo-100 border-indigo-400 text-indigo-900' : 'border-slate-200 text-slate-600 hover:bg-slate-50'"
+              >
+                +{{ d }} Days
+              </button>
+            </div>
+            <input
+              type="number"
+              v-model.number="validityDays"
+              min="1"
+              max="3650"
+              placeholder="Enter days to add"
+              class="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-900 focus:outline-none focus:border-indigo-500 font-mono"
+            />
+          </div>
+        </div>
+
+        <!-- Tab 3: Set Exact Date -->
+        <div v-else-if="validityAction === 'set_date'" class="space-y-3">
+          <div class="p-3 rounded-xl bg-blue-50 border border-blue-200 text-blue-900 text-xs leading-relaxed space-y-1">
+            <div class="font-bold flex items-center space-x-1.5 text-blue-800">
+              <Calendar class="w-4 h-4 text-blue-600" />
+              <span>Set Specific Expiration Datetime</span>
+            </div>
+            <p class="text-[11px]">
+              Explicitly specify the new subscription cutoff time. If set to a past date, the 90-day retention countdown initiates immediately.
+            </p>
+          </div>
+
+          <div class="space-y-2">
+            <label class="block text-xs font-semibold text-slate-700">Target Expiration Datetime</label>
+            <input
+              type="datetime-local"
+              v-model="validityCustomDate"
+              class="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-900 focus:outline-none focus:border-blue-500 font-mono"
+            />
+          </div>
+        </div>
+
+        <!-- Tab 4: Direct Status Override -->
+        <div v-else-if="validityAction === 'set_status'" class="space-y-3">
+          <div class="p-3 rounded-xl bg-slate-100 border border-slate-200 text-slate-800 text-xs leading-relaxed space-y-1">
+            <div class="font-bold flex items-center space-x-1.5 text-slate-900">
+              <ShieldCheck class="w-4 h-4 text-slate-700" />
+              <span>Direct Status Override</span>
+            </div>
+            <p class="text-[11px]">
+              Forcefully assign a status to the user's subscription record.
+            </p>
+          </div>
+
+          <div class="space-y-2">
+            <label class="block text-xs font-semibold text-slate-700">Select Status</label>
+            <select
+              v-model="validityNewStatus"
+              class="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-900 focus:outline-none focus:border-slate-500 font-semibold"
+            >
+              <option value="active">Active (Normal paid customer)</option>
+              <option value="extended">Extended (Admin granted extension)</option>
+              <option value="expired">Expired (Initiates 90-day retention countdown)</option>
+              <option value="suspended">Suspended (Locks account)</option>
+              <option value="purged">Purged (Data wipe marker)</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Success & Error feedback -->
+        <div v-if="validityMessage" class="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center space-x-2">
+          <CheckCircle2 class="w-4 h-4 text-emerald-600 shrink-0" />
+          <span>{{ validityMessage }}</span>
+        </div>
+
+        <div v-if="validityError" class="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center space-x-2">
+          <AlertTriangle class="w-4 h-4 text-rose-600 shrink-0" />
+          <span>{{ validityError }}</span>
+        </div>
+
+        <div class="pt-2 flex items-center justify-end space-x-2.5">
+          <button
+            @click="showValidityModal = false"
+            class="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold cursor-pointer"
+          >
+            Cancel
+          </button>
+          <button
+            @click="submitValidityAdjustment"
+            :disabled="isValidityUpdating"
+            class="px-5 py-2 rounded-xl text-white text-xs font-bold transition-all shadow-sm flex items-center space-x-1.5 cursor-pointer disabled:opacity-50"
+            :class="validityAction === 'reduce' ? 'bg-amber-600 hover:bg-amber-500' : 'bg-indigo-600 hover:bg-indigo-500'"
+          >
+            <RefreshCw v-if="isValidityUpdating" class="w-3.5 h-3.5 animate-spin" />
+            <span>{{ isValidityUpdating ? 'Updating...' : 'Save Validity' }}</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- PURGE USER DATA CONFIRMATION MODAL -->
+    <div
+      v-if="showPurgeModal"
+      class="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4"
+    >
+      <div class="bg-white max-w-md w-full rounded-2xl border border-rose-200 shadow-2xl p-6 space-y-4">
+        <div class="flex items-center space-x-3 text-rose-600">
+          <div class="w-10 h-10 rounded-xl bg-rose-100 flex items-center justify-center">
+            <AlertOctagon class="w-5 h-5 text-rose-600" />
+          </div>
+          <div>
+            <h3 class="text-base font-bold text-slate-900">Purge Vault Storage Data</h3>
+            <p class="text-xs text-rose-600 font-medium">Irreversible 90-Day Retention Action</p>
+          </div>
+        </div>
+
+        <div class="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-900 space-y-2">
+          <p>
+            Are you sure you want to permanently delete all uploaded encrypted files, folder hierarchies, and reclaim upstream SpaceByte storage for:
+          </p>
+          <div class="font-bold text-slate-900 font-mono bg-white/70 p-2 rounded-lg border border-rose-200">
+            {{ selectedUserForPurge?.full_name }} ({{ selectedUserForPurge?.email }})
+          </div>
+          <p class="text-[11px] text-rose-700">
+            This permanently resets their storage quota to 0. This operation cannot be undone.
+          </p>
+        </div>
+
+        <div v-if="purgeMessage" class="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center space-x-2">
+          <CheckCircle2 class="w-4 h-4 text-emerald-600 shrink-0" />
+          <span>{{ purgeMessage }}</span>
+        </div>
+
+        <div v-if="purgeError" class="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center space-x-2">
+          <AlertTriangle class="w-4 h-4 text-rose-600 shrink-0" />
+          <span>{{ purgeError }}</span>
+        </div>
+
+        <div class="pt-2 flex items-center justify-end space-x-2.5">
+          <button
+            @click="showPurgeModal = false"
+            class="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold cursor-pointer"
+          >
+            Cancel
+          </button>
+          <button
+            @click="submitPurgeUser"
+            :disabled="isPurging"
+            class="px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold transition-all shadow-sm flex items-center space-x-1.5 cursor-pointer disabled:opacity-50"
+          >
+            <RefreshCw v-if="isPurging" class="w-3.5 h-3.5 animate-spin" />
+            <span>{{ isPurging ? 'Purging...' : 'Confirm Permanent Purge' }}</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- Capacity Purchase Modal -->
     <div
       v-if="showBuyCapacityModal"
@@ -790,7 +1401,7 @@ onMounted(async () => {
             <Server class="w-5 h-5 text-indigo-600" />
             <h3 class="text-base font-bold text-slate-900">Purchase Upstream SpaceByte Capacity</h3>
           </div>
-          <button @click="showBuyCapacityModal = false" class="text-slate-400 hover:text-slate-700">
+          <button @click="showBuyCapacityModal = false" class="text-slate-400 hover:text-slate-700 cursor-pointer">
             <X class="w-5 h-5" />
           </button>
         </div>
@@ -829,7 +1440,7 @@ onMounted(async () => {
         <div class="pt-2 flex justify-end">
           <button
             @click="showBuyCapacityModal = false"
-            class="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold"
+            class="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold cursor-pointer"
           >
             Close
           </button>
@@ -848,7 +1459,7 @@ onMounted(async () => {
             <Sliders class="w-5 h-5 text-indigo-600" />
             <h3 class="text-base font-bold text-slate-900">Manage User Plan & Quota</h3>
           </div>
-          <button @click="showUpgradeModal = false" class="text-slate-400 hover:text-slate-700">
+          <button @click="showUpgradeModal = false" class="text-slate-400 hover:text-slate-700 cursor-pointer">
             <X class="w-5 h-5" />
           </button>
         </div>
@@ -882,7 +1493,7 @@ onMounted(async () => {
               <button
                 type="button"
                 @click="upgradeBillingInterval = 'monthly'"
-                class="py-2 px-3 rounded-xl text-xs font-semibold border transition-all"
+                class="py-2 px-3 rounded-xl text-xs font-semibold border transition-all cursor-pointer"
                 :class="upgradeBillingInterval === 'monthly' ? 'bg-indigo-50 border-indigo-400 text-indigo-700 shadow-xs' : 'border-slate-200 text-slate-600'"
               >
                 Monthly
@@ -890,7 +1501,7 @@ onMounted(async () => {
               <button
                 type="button"
                 @click="upgradeBillingInterval = 'yearly'"
-                class="py-2 px-3 rounded-xl text-xs font-semibold border transition-all"
+                class="py-2 px-3 rounded-xl text-xs font-semibold border transition-all cursor-pointer"
                 :class="upgradeBillingInterval === 'yearly' ? 'bg-indigo-50 border-indigo-400 text-indigo-700 shadow-xs' : 'border-slate-200 text-slate-600'"
               >
                 Yearly

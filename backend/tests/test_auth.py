@@ -45,4 +45,6 @@ def test_refresh_token_cookie_rotation(api_client, subscribed_user):
     res = api_client.post("/api/v1/auth/refresh")
     assert res.status_code == 200
     assert "access_token" in res.data
+    assert "user" in res.data
+    assert res.data["user"]["email"] == subscribed_user.email
     assert api_client.cookies.get("refresh_token") is not None

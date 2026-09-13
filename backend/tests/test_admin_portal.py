@@ -163,3 +163,63 @@ def test_super_admin_has_no_pack():
     )
     assert res.status_code == 400
     assert "Super Admin is the platform administrator" in res.data["error"]
+
+
+@pytest.mark.django_db
+def test_admin_validity_adjustments_and_retention(subscribed_user):
+    call_command("create_master_admin")
+    admin_user = User.objects.get(email="nitesh-vashisth@smartspacedata.com")
+
+    client = APIClient()
+    client.force_authenticate(user=admin_user)
+
+    # 1. Reduce validity by 40 days (forcing subscription into expired + 90-day retention grace)
+    res_reduce = client.post(
+        f"/api/v1/admin/users/{subscribed_user.id}/validity/",
+        {"action": "reduce", "days": 40},
+        format="json",
+    )
+    assert res_reduce.status_code == 200
+    sub_data = res_reduce.json()["subscription"]
+    assert sub_data["status"] == "expired"
+    assert sub_data["retention_days_remaining"] > 0
+    assert sub_data["can_upload"] is False
+    assert sub_data["is_valid"] is True  # Read access preserved during 90-day grace
+
+    # Check status filter 'expired'
+    res_filter_expired = client.get("/api/v1/admin/users/?status=expired")
+    assert res_filter_expired.status_code == 200
+    assert any(u["id"] == str(subscribed_user.id) for u in res_filter_expired.json()["results"])
+
+    # 2. Extend validity by 30 days (re-secures subscription)
+    res_extend = client.post(
+        f"/api/v1/admin/users/{subscribed_user.id}/validity/",
+        {"action": "extend", "days": 30},
+        format="json",
+    )
+    assert res_extend.status_code == 200
+    sub_data2 = res_extend.json()["subscription"]
+    assert sub_data2["status"] == "extended"
+    assert sub_data2["can_upload"] is True
+    assert sub_data2["grace_period_ends_at"] is None
+
+    # Check status filter 'extended'
+    res_filter_extended = client.get("/api/v1/admin/users/?status=extended")
+    assert res_filter_extended.status_code == 200
+    assert any(u["id"] == str(subscribed_user.id) for u in res_filter_extended.json()["results"])
+
+    # 3. Trigger Lifecycle process
+    res_lifecycle = client.post("/api/v1/admin/process-lifecycle/")
+    assert res_lifecycle.status_code == 200
+    assert res_lifecycle.json()["success"] is True
+
+    # 4. Manual Purge Data
+    res_purge = client.post(f"/api/v1/admin/users/{subscribed_user.id}/purge-data/")
+    assert res_purge.status_code == 200
+    assert res_purge.json()["success"] is True
+
+    # Check status filter 'purged'
+    res_filter_purged = client.get("/api/v1/admin/users/?status=purged")
+    assert res_filter_purged.status_code == 200
+    assert any(u["id"] == str(subscribed_user.id) for u in res_filter_purged.json()["results"])
+

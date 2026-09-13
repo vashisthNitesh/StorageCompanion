@@ -64,6 +64,12 @@ class UserSerializer(serializers.ModelSerializer):
             "status": subscription.status,
             "plan_name": subscription.plan.name if subscription.plan else None,
             "plan_code": subscription.plan.code if subscription.plan else None,
+            "current_period_end": subscription.current_period_end.isoformat() if subscription.current_period_end else None,
+            "grace_period_ends_at": subscription.grace_period_ends_at.isoformat() if subscription.grace_period_ends_at else None,
+            "is_in_grace_period": bool(subscription.is_in_grace_period),
+            "retention_days_remaining": subscription.retention_days_remaining,
+            "days_until_expiration": subscription.days_until_expiration,
+            "can_upload": bool(subscription.can_upload),
         }
 
     def get_quota(self, obj):

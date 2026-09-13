@@ -244,35 +244,69 @@ def process_webhook_event(payload: dict, event_id: str) -> bool:
     return True
 
 
+def purge_user_vault_data(user: User) -> int:
+    """
+    Permanently deletes all encrypted vault files and folders for a user
+    whose 90-day data retention window has lapsed without subscription renewal.
+    Reclaims storage quota completely.
+    """
+    from apps.storage.models import Node
+    # Delete all file/folder nodes owned by user (cascades to FileVersion, chunks)
+    deleted_count, _ = Node.objects.filter(owner=user).delete()
+
+    quota = StorageQuota.objects.filter(user=user).first()
+    if quota:
+        quota.bytes_used = 0
+        quota.bytes_limit = 0
+        quota.save(update_fields=["bytes_used", "bytes_limit"])
+
+    AuditLog.objects.create(
+        user=user,
+        action="user.data_purged_90_days",
+        target_type="user",
+        target_id=str(user.id),
+        metadata={
+            "reason": "90_day_unpaid_retention_lapsed",
+            "nodes_deleted": deleted_count,
+        },
+    )
+    return deleted_count
+
+
 @transaction.atomic
 def process_expired_subscriptions() -> dict:
     """
     Evaluates subscription lifecycle transitions:
     1. Subscriptions that reached current_period_end:
-       - If cancel_at_period_end is True, marks as canceled and reclaims unused reserved quota.
-       - Otherwise, moves to grace_period (15 days read-only) with can_upload blocked.
-    2. Subscriptions in grace_period whose grace window has elapsed:
-       - Moves to expired and reclaims unused reserved quota while preserving stored files.
+       - Moves to expired (90 days read-only retention) with uploads blocked.
+       - grace_period_ends_at set to 90 days from expiration.
+       - Reclaims unused reserved pool quota while preserving existing encrypted files.
+    2. Subscriptions in expired / grace_period whose 90-day retention window has elapsed:
+       - Permanently purges user files, resets quota, and marks status as 'purged'.
     """
     now = timezone.now()
     summary = {
+        "transitioned_to_expired_grace": 0,
         "transitioned_to_grace_period": 0,
-        "transitioned_to_canceled": 0,
         "transitioned_to_expired": 0,
+        "transitioned_to_canceled": 0,
+        "purged_after_90_days": 0,
     }
 
-    # 1. Process active/trialing subscriptions past their billing cycle
+    # 1. Process active/extended/trialing subscriptions past their billing cycle
     lapsed_subs = Subscription.objects.select_for_update().filter(
-        status__in=["active", "trialing"],
+        status__in=["active", "extended", "trialing"],
         current_period_end__lt=now,
     )
 
     for sub in lapsed_subs:
         if sub.cancel_at_period_end:
             sub.status = "canceled"
-            sub.save(update_fields=["status"])
+            # 90-day retention still applies to preserve data before deletion
+            sub.grace_period_ends_at = sub.current_period_end + timedelta(days=90)
+            sub.save(update_fields=["status", "grace_period_ends_at"])
 
-            # Reclaim unused quota into pool while protecting existing files
+            # Reclaim unused pool quota while protecting existing files
             quota = StorageQuota.objects.filter(user=sub.user).first()
             if quota:
                 quota.bytes_limit = max(0, quota.bytes_used)
@@ -283,50 +317,63 @@ def process_expired_subscriptions() -> dict:
                 action="subscription.canceled_period_end",
                 target_type="subscription",
                 target_id=str(sub.id),
-                metadata={"plan": sub.plan.code, "reason": "cancel_at_period_end"},
+                metadata={
+                    "plan": sub.plan.code,
+                    "retention_days": 90,
+                    "grace_period_ends_at": sub.grace_period_ends_at.isoformat(),
+                },
             )
             summary["transitioned_to_canceled"] += 1
         else:
-            sub.status = "grace_period"
-            sub.grace_period_ends_at = now + timedelta(days=15)
+            sub.status = "expired"
+            sub.grace_period_ends_at = sub.current_period_end + timedelta(days=90)
             sub.save(update_fields=["status", "grace_period_ends_at"])
+
+            # Reclaim unused pool quota
+            quota = StorageQuota.objects.filter(user=sub.user).first()
+            if quota:
+                quota.bytes_limit = max(0, quota.bytes_used)
+                quota.save(update_fields=["bytes_limit"])
 
             AuditLog.objects.create(
                 user=sub.user,
-                action="subscription.entered_grace_period",
+                action="subscription.entered_90_day_retention",
                 target_type="subscription",
                 target_id=str(sub.id),
                 metadata={
                     "plan": sub.plan.code,
-                    "grace_period_days": 15,
+                    "retention_days": 90,
                     "grace_period_ends_at": sub.grace_period_ends_at.isoformat(),
                 },
             )
+            summary["transitioned_to_expired_grace"] += 1
             summary["transitioned_to_grace_period"] += 1
+            summary["transitioned_to_expired"] += 1
 
-    # 2. Process grace period subscriptions that have exceeded the 15-day window
-    expired_grace_subs = Subscription.objects.select_for_update().filter(
-        status="grace_period",
+    # 2. Process expired/grace subscriptions that have exceeded the 90-day retention window
+    purge_candidates = Subscription.objects.select_for_update().filter(
+        status__in=["expired", "grace_period", "canceled", "past_due"],
         grace_period_ends_at__lt=now,
     )
 
-    for sub in expired_grace_subs:
-        sub.status = "expired"
-        sub.save(update_fields=["status"])
+    for sub in purge_candidates:
+        # 90 days expired without subscription renewal -> purge vault data
+        deleted_nodes = purge_user_vault_data(sub.user)
 
-        # Reclaim unused quota allocation into pool while keeping uploaded data intact
-        quota = StorageQuota.objects.filter(user=sub.user).first()
-        if quota:
-            quota.bytes_limit = max(0, quota.bytes_used)
-            quota.save(update_fields=["bytes_limit"])
+        sub.status = "purged"
+        sub.save(update_fields=["status"])
 
         AuditLog.objects.create(
             user=sub.user,
-            action="subscription.expired",
+            action="subscription.vault_purged_90_days",
             target_type="subscription",
             target_id=str(sub.id),
-            metadata={"plan": sub.plan.code, "reason": "grace_period_exhausted"},
+            metadata={
+                "plan": sub.plan.code,
+                "reason": "90_days_retention_elapsed_without_renewal",
+                "nodes_deleted": deleted_nodes,
+            },
         )
-        summary["transitioned_to_expired"] += 1
+        summary["purged_after_90_days"] += 1
 
     return summary

@@ -6,7 +6,9 @@ import UploadTray from "./features/files/UploadTray.vue";
 const authStore = useAuthStore();
 
 onMounted(async () => {
-  await authStore.fetchProfile();
+  if (!authStore.isInitialized) {
+    await authStore.initAuth();
+  }
 });
 </script>
 

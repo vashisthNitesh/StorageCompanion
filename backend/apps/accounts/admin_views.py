@@ -303,9 +303,15 @@ class AdminUsersListView(APIView):
             queryset = queryset.filter(subscription__plan__code=plan_filter)
 
         if status_filter == "active":
-            queryset = queryset.filter(is_active=True)
+            queryset = queryset.filter(is_active=True, subscription__status="active")
+        elif status_filter == "extended":
+            queryset = queryset.filter(is_active=True, subscription__status="extended")
+        elif status_filter == "expired":
+            queryset = queryset.filter(subscription__status__in=["expired", "grace_period"])
         elif status_filter == "suspended":
-            queryset = queryset.filter(is_active=False)
+            queryset = queryset.filter(models.Q(is_active=False) | models.Q(subscription__status="suspended"))
+        elif status_filter == "purged":
+            queryset = queryset.filter(subscription__status="purged")
 
         total_count = queryset.count()
 
@@ -341,9 +347,16 @@ class AdminUsersListView(APIView):
                 "plan": {
                     "code": sub.plan.code if sub and sub.plan else "none",
                     "name": sub.plan.name if sub and sub.plan else "No Active Plan",
-                    "status": sub.status if sub else "inactive",
+                    "status": sub.status if sub else ("suspended" if not user.is_active else "none"),
                     "billing_interval": sub.billing_interval if sub else "monthly",
+                    "current_period_start": sub.current_period_start.isoformat() if sub and sub.current_period_start else None,
                     "current_period_end": sub.current_period_end.isoformat() if sub and sub.current_period_end else None,
+                    "grace_period_ends_at": sub.grace_period_ends_at.isoformat() if sub and sub.grace_period_ends_at else None,
+                    "is_in_grace_period": bool(sub.is_in_grace_period) if sub else False,
+                    "retention_days_remaining": sub.retention_days_remaining if sub else 0,
+                    "days_until_expiration": sub.days_until_expiration if sub else 0,
+                    "can_upload": bool(sub.can_upload) if sub else False,
+                    "is_valid": bool(sub.is_valid) if sub else False,
                 },
                 "storage": {
                     "bytes_used": bytes_used,
@@ -468,4 +481,205 @@ class AdminUserStatusToggleView(APIView):
             "success": True,
             "message": f"Account for {target_user.email} has been {state_str}.",
             "is_active": target_user.is_active,
+        })
+
+
+class AdminUserSubscriptionValidityView(APIView):
+    """
+    Allows Master Admin to adjust a user's subscription validity:
+    - Reduce validity (shorten current_period_end or immediately force into 90-day retention grace)
+    - Extend validity (add days to current_period_end and mark as 'extended')
+    - Set specific expiration date
+    - Change subscription status directly (active, extended, expired, suspended, purged)
+    """
+    permission_classes = [permissions.IsAuthenticated, permissions.IsAdminUser]
+
+    def post(self, request, user_id):
+        target_user = get_object_or_404(User, id=user_id)
+        if target_user.is_staff or target_user.is_superuser:
+            return Response(
+                {"error": "Super Admin is the platform administrator and does not hold a customer storage pack."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        sub = getattr(target_user, "subscription", None)
+        if not sub:
+            # If no subscription exists, assign default entry plan
+            default_plan = Plan.objects.filter(is_active=True).first()
+            if not default_plan:
+                return Response({"error": "No active plans configured on the platform."}, status=status.HTTP_400_BAD_REQUEST)
+            now = timezone.now()
+            sub = Subscription.objects.create(
+                user=target_user,
+                plan=default_plan,
+                provider="admin_assigned",
+                status="active",
+                billing_interval="monthly",
+                current_period_start=now,
+                current_period_end=now + timedelta(days=30),
+            )
+            quota, _ = StorageQuota.objects.get_or_create(user=target_user)
+            quota.bytes_limit = default_plan.storage_bytes
+            quota.save(update_fields=["bytes_limit"])
+
+        action = request.data.get("action", "extend").strip().lower()
+        days = request.data.get("days")
+        expiry_date_str = request.data.get("expiry_date")
+        new_status = request.data.get("status", "").strip().lower()
+
+        now = timezone.now()
+        original_end = sub.current_period_end
+        original_status = sub.status
+
+        # 1. Reduce validity
+        if action == "reduce":
+            days_count = int(days) if days is not None else 7
+            sub.current_period_end = sub.current_period_end - timedelta(days=days_count)
+            # If reduced past now, subscription enters 90-day retention grace window
+            if sub.current_period_end <= now:
+                sub.status = "expired"
+                sub.grace_period_ends_at = sub.current_period_end + timedelta(days=90)
+            else:
+                sub.grace_period_ends_at = None
+            sub.save()
+
+        # 2. Extend validity
+        elif action == "extend":
+            days_count = int(days) if days is not None else 30
+            base_time = max(sub.current_period_end, now) if sub.current_period_end else now
+            sub.current_period_end = base_time + timedelta(days=days_count)
+            sub.status = "extended"
+            sub.grace_period_ends_at = None
+            # Ensure quota limit is valid
+            quota = StorageQuota.objects.filter(user=target_user).first()
+            if quota and quota.bytes_limit <= 0 and sub.plan:
+                quota.bytes_limit = sub.plan.storage_bytes
+                quota.save(update_fields=["bytes_limit"])
+            sub.save()
+
+        # 3. Set exact expiry date
+        elif action == "set_date" and expiry_date_str:
+            from dateutil.parser import parse as parse_date
+            try:
+                parsed_dt = parse_date(expiry_date_str)
+                if timezone.is_naive(parsed_dt):
+                    parsed_dt = timezone.make_aware(parsed_dt)
+                sub.current_period_end = parsed_dt
+                if parsed_dt <= now:
+                    sub.status = "expired"
+                    sub.grace_period_ends_at = parsed_dt + timedelta(days=90)
+                else:
+                    if sub.status in ["expired", "grace_period"]:
+                        sub.status = "extended"
+                    sub.grace_period_ends_at = None
+                sub.save()
+            except Exception as e:
+                return Response({"error": f"Invalid date format: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
+
+        # 4. Status override if specified
+        if new_status and new_status in dict(Subscription.STATUS_CHOICES):
+            sub.status = new_status
+            if new_status == "expired":
+                sub.grace_period_ends_at = now + timedelta(days=90)
+            elif new_status in ["active", "extended"]:
+                sub.grace_period_ends_at = None
+                if sub.current_period_end <= now:
+                    sub.current_period_end = now + timedelta(days=30)
+            elif new_status == "suspended":
+                target_user.is_active = False
+                target_user.save(update_fields=["is_active"])
+            sub.save()
+
+        # Audit log
+        AuditLog.objects.create(
+            user=request.user,
+            action="admin.subscription_validity_adjusted",
+            target_type="subscription",
+            target_id=str(sub.id),
+            metadata={
+                "target_user_email": target_user.email,
+                "action": action,
+                "days": days,
+                "old_end": original_end.isoformat() if original_end else None,
+                "new_end": sub.current_period_end.isoformat() if sub.current_period_end else None,
+                "old_status": original_status,
+                "new_status": sub.status,
+            },
+        )
+
+        return Response({
+            "success": True,
+            "message": f"Successfully updated subscription validity for {target_user.email}.",
+            "subscription": {
+                "status": sub.status,
+                "current_period_end": sub.current_period_end.isoformat() if sub.current_period_end else None,
+                "grace_period_ends_at": sub.grace_period_ends_at.isoformat() if sub.grace_period_ends_at else None,
+                "retention_days_remaining": sub.retention_days_remaining,
+                "days_until_expiration": sub.days_until_expiration,
+                "can_upload": sub.can_upload,
+                "is_valid": sub.is_valid,
+            }
+        })
+
+
+class AdminTriggerLifecycleProcessView(APIView):
+    """
+    Allows Master Admin to manually trigger the subscription expiration and 90-day data purge cycle.
+    """
+    permission_classes = [permissions.IsAuthenticated, permissions.IsAdminUser]
+
+    def post(self, request):
+        from apps.billing.services import process_expired_subscriptions
+        summary = process_expired_subscriptions()
+        AuditLog.objects.create(
+            user=request.user,
+            action="admin.triggered_lifecycle_purge",
+            target_type="system",
+            target_id="subscription_lifecycle",
+            metadata=summary,
+        )
+        return Response({
+            "success": True,
+            "message": "Subscription lifecycle processing completed.",
+            "summary": summary,
+        })
+
+
+class AdminUserPurgeDataView(APIView):
+    """
+    Allows Master Admin to immediately purge vault data for an expired user.
+    """
+    permission_classes = [permissions.IsAuthenticated, permissions.IsAdminUser]
+
+    def post(self, request, user_id):
+        target_user = get_object_or_404(User, id=user_id)
+        if target_user.is_staff or target_user.is_superuser:
+            return Response(
+                {"error": "Cannot purge Master Administrator account."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        from apps.billing.services import purge_user_vault_data
+        deleted_count = purge_user_vault_data(target_user)
+
+        sub = getattr(target_user, "subscription", None)
+        if sub:
+            sub.status = "purged"
+            sub.save(update_fields=["status"])
+
+        AuditLog.objects.create(
+            user=request.user,
+            action="admin.manual_vault_purged",
+            target_type="user",
+            target_id=str(target_user.id),
+            metadata={
+                "target_user_email": target_user.email,
+                "deleted_nodes": deleted_count,
+            },
+        )
+
+        return Response({
+            "success": True,
+            "message": f"Purged {deleted_count} vault nodes and reclaimed storage for {target_user.email}.",
+            "nodes_deleted": deleted_count,
         })
