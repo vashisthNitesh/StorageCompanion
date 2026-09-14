@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { ref, watch, computed } from "vue";
 import { apiRequest, apiFetch } from "../../lib/api";
 import { useAuthStore } from "../../stores/auth";
 import { decryptFile } from "../../lib/crypto/content";
 import { unwrapKey } from "../../lib/crypto/keys";
 import { hexToUint8Array } from "../../lib/crypto/kdf";
+import { useFileDownload } from "./useFileDownload";
 import {
   X,
   Download,
@@ -28,6 +29,8 @@ const props = defineProps<{
 const emit = defineEmits(["close"]);
 
 const authStore = useAuthStore();
+const { downloadFile, isDownloading, getProgress, getStatusText } = useFileDownload();
+
 const isLoading = ref(false);
 const error = ref("");
 const previewUrl = ref<string | null>(null);
@@ -35,6 +38,14 @@ const textContent = ref<string | null>(null);
 const docHtml = ref<string | null>(null);
 const decryptedData = ref<Uint8Array | null>(null);
 const fileType = ref<"image" | "video" | "audio" | "text" | "pdf" | "docx" | "doc" | "unknown">("unknown");
+
+const isLargeMedia = computed(() => {
+  if (!props.node) return false;
+  const size = props.node.size_bytes || 0;
+  const ext = props.node.name?.split(".").pop()?.toLowerCase() || "";
+  // Files > 100 MB or MKV containers cannot be reliably decoded inside browser DOM
+  return size > 100 * 1024 * 1024 || ext === "mkv" || ext === "iso";
+});
 
 watch(
   [() => props.node, () => props.isOpen],
@@ -84,6 +95,15 @@ async function loadAndDecryptPreview(node: any) {
   error.value = "";
   cleanup();
 
+  const type = detectType(node.name);
+  fileType.value = type;
+
+  // If this is a large media file (> 100 MB or MKV), avoid in-memory heap crash and present direct download
+  if (isLargeMedia.value) {
+    isLoading.value = false;
+    return;
+  }
+
   try {
     if (!authStore.masterKey) throw new Error("Vault is locked");
 
@@ -100,14 +120,15 @@ async function loadAndDecryptPreview(node: any) {
 
     // 2. Fetch encrypted bytes: try fast direct edge download first, falling back to authenticated proxy
     let res: Response | null = null;
-    if (downloadData.direct_url && downloadData.upstream === "s3") {
+    if (downloadData.direct_url) {
       try {
         const directRes = await fetch(downloadData.direct_url, { method: "GET" });
-        if (directRes.ok) {
+        if (directRes.ok && directRes.body) {
           res = directRes;
         }
       } catch {
         // Fall back to proxy
+        res = null;
       }
     }
 
@@ -116,7 +137,7 @@ async function loadAndDecryptPreview(node: any) {
     }
 
     if (!res.ok) {
-      let errMessage = `Failed to fetch file bytes from storage (${res.status})`;
+      let errMessage = `Failed to fetch file from storage (${res.status})`;
       try {
         const errJson = await res.json();
         if (errJson.error) {
@@ -242,6 +263,16 @@ function openInNewTab() {
             <span class="hidden sm:inline">New Tab</span>
           </button>
           <button
+            v-if="isLargeMedia && node"
+            @click="downloadFile(node)"
+            :disabled="isDownloading(node.id)"
+            class="btn-primary px-3.5 py-1.5 rounded-lg text-xs font-semibold text-white flex items-center space-x-1.5 shadow-xs disabled:opacity-50"
+          >
+            <Loader2 v-if="isDownloading(node.id)" class="w-3.5 h-3.5 animate-spin" />
+            <Download v-else class="w-3.5 h-3.5" />
+            <span>{{ isDownloading(node.id) ? (getStatusText(node.id) || 'Downloading...') : 'Download Decrypted' }}</span>
+          </button>
+          <button
             v-if="previewUrl || textContent || docHtml || decryptedData"
             @click="handleDownload"
             class="btn-primary px-3.5 py-1.5 rounded-lg text-xs font-semibold text-white flex items-center space-x-1.5 shadow-xs"
@@ -274,6 +305,52 @@ function openInNewTab() {
           >
             Retry Decryption
           </button>
+        </div>
+
+        <!-- Large Media / Video (> 100 MB or MKV) Screen -->
+        <div v-else-if="isLargeMedia && node" class="p-8 rounded-2xl bg-white border border-slate-200 shadow-md text-center space-y-5 max-w-lg w-full">
+          <div class="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-100 flex items-center justify-center mx-auto text-blue-600 shadow-xs">
+            <FileVideo v-if="fileType === 'video' || node.name?.toLowerCase().endsWith('.mkv')" class="w-8 h-8" />
+            <FileArchive v-else-if="['zip', 'rar', 'tar', 'gz', '7z', 'iso'].includes(node.name?.split('.').pop()?.toLowerCase())" class="w-8 h-8" />
+            <FileIcon v-else class="w-8 h-8" />
+          </div>
+
+          <div class="space-y-1.5">
+            <h4 class="text-base font-bold text-slate-900 truncate" :title="node.name">{{ node.name }}</h4>
+            <div class="flex items-center justify-center space-x-2 text-xs text-slate-500">
+              <span class="font-mono font-semibold text-slate-800">{{ formatBytes(node.size_bytes || 0) }}</span>
+              <span>•</span>
+              <span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+                AES-256-GCM E2EE
+              </span>
+            </div>
+            <p class="text-xs text-slate-500 pt-2 leading-relaxed max-w-md mx-auto">
+              <span v-if="node.name?.toLowerCase().endsWith('.mkv')">
+                High-definition Matroska (.mkv) video files cannot be decoded in the browser modal.
+              </span>
+              <span v-else>
+                Large files ({{ formatBytes(node.size_bytes || 0) }}) are protected and streamed directly.
+              </span>
+              Download and decrypt this file to your computer for high-performance offline playback in VLC, QuickTime, or your preferred player.
+            </p>
+          </div>
+
+          <div class="pt-2 flex flex-col items-center space-y-2">
+            <button
+              @click="downloadFile(node)"
+              :disabled="isDownloading(node.id)"
+              class="btn-primary px-5 py-2.5 rounded-xl text-white font-semibold text-xs shadow-md flex items-center space-x-2 disabled:opacity-60 transition-all hover:scale-[1.02]"
+            >
+              <Loader2 v-if="isDownloading(node.id)" class="w-4 h-4 animate-spin" />
+              <Download v-else class="w-4 h-4" />
+              <span>
+                {{ isDownloading(node.id) ? (getStatusText(node.id) || 'Downloading...') : `Download & Decrypt (${formatBytes(node.size_bytes || 0)})` }}
+              </span>
+            </button>
+            <span v-if="isDownloading(node.id)" class="text-[11px] text-blue-600 font-mono font-medium">
+              Progress: {{ getProgress(node.id) }}%
+            </span>
+          </div>
         </div>
 
         <!-- Render Image -->

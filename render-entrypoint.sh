@@ -21,7 +21,7 @@ python manage.py create_master_admin || true
 
 # 4. Start Gunicorn in the background on 127.0.0.1:8000
 echo "==> Starting Gunicorn on 127.0.0.1:8000..."
-gunicorn config.asgi:application --bind 127.0.0.1:8000 --workers 2 -k uvicorn.workers.UvicornWorker &
+gunicorn config.asgi:application --bind 127.0.0.1:8000 --workers 2 -k uvicorn.workers.UvicornWorker --timeout 600 --keep-alive 65 &
 
 # 5. Start Nginx in the foreground on $PORT
 echo "==> Starting Nginx on port ${PORT}..."

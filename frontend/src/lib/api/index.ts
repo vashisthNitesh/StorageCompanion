@@ -123,9 +123,18 @@ export async function apiRequest<T = any>(
     try {
       errorData = await response.json();
     } catch {
-      errorData = { detail: response.statusText };
+      errorData = { detail: response.statusText || `HTTP ${response.status}` };
     }
-    const err: any = new Error(errorData.error || errorData.message || errorData.detail || "Request failed");
+    const fallbackMessage =
+      response.status === 502
+        ? "Server temporary gateway error (502). Storage stream may be busy, please retry."
+        : response.status === 504
+        ? "Server gateway timeout (504). Transfer took too long."
+        : `Request failed (${response.status})`;
+
+    const err: any = new Error(
+      errorData.error || errorData.message || errorData.detail || fallbackMessage
+    );
     err.status = response.status;
     err.data = errorData;
     throw err;

@@ -504,7 +504,8 @@ def get_download_info(node: Node, user, version_no: int | None = None) -> dict:
 
     if node.spacebyte_hash:
         sb_client = get_spacebyte_client()
-        direct_download_url = sb_client.get_download_url(node.spacebyte_hash)
+        resolved_url = sb_client.resolve_direct_download_url(node.spacebyte_hash)
+        direct_download_url = resolved_url or sb_client.get_download_url(node.spacebyte_hash)
     else:
         s3 = get_s3_client()
         try:

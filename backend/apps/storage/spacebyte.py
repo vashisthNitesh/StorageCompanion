@@ -278,11 +278,70 @@ class SpaceByteClient:
         """
         return f"{self.base_url}/file-entries/download/{hashes}"
 
+    def resolve_direct_download_url(self, hashes: str, timeout: int = 15) -> str | None:
+        """
+        Resolves the final presigned S3/R2 direct download URL from SpaceByte without downloading the body.
+        Follows HTTP 302/307 redirects or inspects JSON response to get the direct presigned URL.
+        Returns None if resolution fails or if storage is direct-stream only.
+        """
+        if not self.is_configured:
+            return None
+
+        url = self.get_download_url(hashes)
+        headers = {
+            "Accept": "*/*",
+            "User-Agent": "StorageCompanion-SpaceByte/1.0",
+        }
+        if self.access_token:
+            headers["Authorization"] = f"Bearer {self.access_token}"
+
+        class RedirectCatch(urllib.request.HTTPRedirectHandler):
+            def __init__(self):
+                super().__init__()
+                self.redirect_url = None
+
+            def http_error_302(self, req, fp, code, msg, headers):
+                self.redirect_url = headers.get("Location")
+                return None
+
+            http_error_301 = http_error_302
+            http_error_303 = http_error_302
+            http_error_307 = http_error_302
+            http_error_308 = http_error_302
+
+        handler = RedirectCatch()
+        opener = urllib.request.build_opener(handler)
+        req = urllib.request.Request(url, headers=headers)
+
+        try:
+            resp = opener.open(req, timeout=timeout)
+            if handler.redirect_url:
+                return handler.redirect_url
+
+            content_type = resp.headers.get("Content-Type", "")
+            if "application/json" in content_type:
+                body = resp.read(64 * 1024)
+                data = json.loads(body.decode("utf-8"))
+                return data.get("url") or data.get("downloadUrl") or data.get("download_url")
+
+            final_url = resp.geturl()
+            if final_url and final_url != url:
+                return final_url
+
+            return None
+        except urllib.error.HTTPError as e:
+            if e.code in (301, 302, 303, 307, 308):
+                return e.headers.get("Location")
+            return None
+        except Exception as e:
+            logger.debug("Could not resolve direct SpaceByte download URL for hash %s: %s", hashes, e)
+            return None
+
     def download_stream(
         self,
         hashes: str,
         range_header: str | None = None,
-        timeout: int = 60,
+        timeout: int = 300,
     ) -> tuple[Any, int, dict[str, str]]:
         """
         Streams an upstream file from SpaceByte.

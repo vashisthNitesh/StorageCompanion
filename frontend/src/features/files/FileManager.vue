@@ -41,7 +41,7 @@ const router = useRouter();
 const filesStore = useFilesStore();
 const uploadStore = useUploadStore();
 const authStore = useAuthStore();
-const { isDownloading, downloadFile } = useFileDownload();
+const { isDownloading, downloadFile, getProgress, getStatusText } = useFileDownload();
 
 const isDraggingOver = ref(false);
 const showCreateFolderModal = ref(false);
@@ -637,11 +637,12 @@ onUnmounted(() => {
                 <!-- Direct Download Button with Tooltip -->
                 <button
                   @click.stop="downloadFile(file)"
-                  class="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+                  class="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors flex items-center space-x-1"
                   :title="`Download ${file.name}`"
                 >
                   <Loader2 v-if="isDownloading(file.id)" class="w-3.5 h-3.5 text-blue-600 animate-spin" />
                   <Download v-else class="w-3.5 h-3.5" />
+                  <span v-if="isDownloading(file.id)" class="text-[10px] font-mono text-blue-600 font-semibold">{{ getProgress(file.id) }}%</span>
                 </button>
 
                 <!-- More Button -->
@@ -698,7 +699,7 @@ onUnmounted(() => {
                 >
                   <Loader2 v-if="isDownloading(file.id)" class="w-3 h-3 animate-spin" />
                   <Download v-else class="w-3 h-3" />
-                  <span>Download</span>
+                  <span>{{ isDownloading(file.id) ? (getStatusText(file.id) || 'Downloading...') : 'Download' }}</span>
                 </button>
               </div>
             </div>
@@ -764,11 +765,12 @@ onUnmounted(() => {
               <!-- Direct Download Action -->
               <button
                 @click.stop="downloadFile(file)"
-                class="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+                class="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors flex items-center space-x-1"
                 :title="`Download ${file.name}`"
               >
                 <Loader2 v-if="isDownloading(file.id)" class="w-3.5 h-3.5 text-blue-600 animate-spin" />
                 <Download v-else class="w-3.5 h-3.5" />
+                <span v-if="isDownloading(file.id)" class="text-[10px] font-mono text-blue-600 font-semibold">{{ getProgress(file.id) }}%</span>
               </button>
 
               <!-- Preview Action -->

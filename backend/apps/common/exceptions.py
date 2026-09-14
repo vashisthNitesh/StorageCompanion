@@ -38,9 +38,18 @@ def custom_exception_handler(exc, context):
     response = exception_handler(exc, context)
     if response is not None:
         if isinstance(response.data, dict) and "error" not in response.data:
+            detail = response.data.get("detail")
+            if not detail:
+                for k, v in response.data.items():
+                    if isinstance(v, list) and len(v) > 0:
+                        detail = f"{k}: {v[0]}" if k != "non_field_errors" else str(v[0])
+                        break
+                    elif isinstance(v, str):
+                        detail = f"{k}: {v}"
+                        break
             response.data = {
                 "success": False,
-                "error": response.data.get("detail", "Request failed"),
+                "error": detail or "Request failed",
                 "details": response.data,
                 "status_code": response.status_code,
             }

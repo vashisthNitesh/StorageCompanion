@@ -242,8 +242,22 @@ class NodeContentView(APIView):
                     node.spacebyte_hash,
                     range_header=range_header,
                 )
+                def _stream_generator(upstream_file, chunk_size=256 * 1024):
+                    try:
+                        while True:
+                            chunk = upstream_file.read(chunk_size)
+                            if not chunk:
+                                break
+                            yield chunk
+                    finally:
+                        if hasattr(upstream_file, "close"):
+                            try:
+                                upstream_file.close()
+                            except Exception:
+                                pass
+
                 streaming_resp = StreamingHttpResponse(
-                    iter(lambda: upstream_resp.read(256 * 1024), b""),
+                    _stream_generator(upstream_resp),
                     status=resp_status,
                     content_type=resp_headers.get("Content-Type", "application/octet-stream"),
                 )
