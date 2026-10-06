@@ -2,7 +2,7 @@
 import { ref } from "vue";
 import { apiRequest } from "../../lib/api";
 import { useAuthStore } from "../../stores/auth";
-import { generateLinkKey, wrapKey } from "../../lib/crypto/keys";
+import { generateLinkKey, wrapKey, unwrapKey } from "../../lib/crypto/keys";
 import { uint8ArrayToBase64 } from "../../lib/crypto/kdf";
 import { X, Copy, Check, Link, Lock, Calendar, AlertCircle } from "lucide-vue-next";
 
@@ -30,12 +30,20 @@ async function generatePublicLink() {
   try {
     if (!authStore.masterKey) throw new Error("Vault is locked");
 
+    if (props.node.type === "folder") {
+      throw new Error("Folder links aren't supported yet. Share individual files instead.");
+    }
+
     // 1. Generate random 256-bit link key
     const linkKey = generateLinkKey();
 
-    // 2. Wrap the node's File Key with this link key
-    // For folder or file, wrap linkKey with masterKey for storage
-    const wrappedKey = await wrapKey(authStore.masterKey, linkKey);
+    // 2. Wrap the file's content key with the link key so the recipient (who only has the
+    //    link key from the URL fragment) can decrypt. The old code wrapped the *link key* with
+    //    the owner's master key and never shared the file key, so no shared file could ever
+    //    be decrypted by its recipient.
+    const dl = await apiRequest<{ wrapped_file_key: string }>(`/api/v1/nodes/${props.node.id}/download`);
+    const fileKey = await unwrapKey(authStore.masterKey, dl.wrapped_file_key);
+    const wrappedKey = await wrapKey(linkKey, fileKey);
 
     // 3. Request share creation on backend
     const res = await apiRequest<{
@@ -56,7 +64,9 @@ async function generatePublicLink() {
     // 4. Construct URL with key in fragment (#)
     const linkKeyBase64 = uint8ArrayToBase64(linkKey);
     const origin = window.location.origin;
-    shareUrl.value = `${origin}/s/${res.raw_token}#key=${encodeURIComponent(linkKeyBase64)}`;
+    // The file name also travels only in the fragment (never sent to the server)
+    const nameParam = props.node.name ? `&name=${encodeURIComponent(props.node.name)}` : "";
+    shareUrl.value = `${origin}/s/${res.raw_token}#key=${encodeURIComponent(linkKeyBase64)}${nameParam}`;
   } catch (err: any) {
     errorMessage.value = err.message || "Failed to create share link.";
   } finally {

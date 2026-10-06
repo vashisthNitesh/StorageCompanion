@@ -1,10 +1,26 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
 import { apiRequest } from "../../lib/api";
+import { useAuthStore } from "../../stores/auth";
+import { decryptName } from "../../lib/crypto/names";
 import { Share2, Link, Trash2, ExternalLink, ShieldCheck } from "lucide-vue-next";
 
 const shares = ref<any[]>([]);
 const isLoading = ref(true);
+const loadError = ref("");
+const authStore = useAuthStore();
+
+// Names are end-to-end encrypted; the API only returns ciphertext (node_details.encrypted_name),
+// so the list used to fall back to printing the raw node UUID.
+async function displayName(share: any): Promise<string> {
+  const nd = share.node_details;
+  if (!nd?.encrypted_name || !authStore.masterKey) return "Encrypted file (unlock vault to see name)";
+  try {
+    return await decryptName(authStore.masterKey, nd.encrypted_name, nd.name_nonce);
+  } catch {
+    return "Encrypted file";
+  }
+}
 
 onMounted(async () => {
   await fetchShares();
@@ -13,16 +29,24 @@ onMounted(async () => {
 async function fetchShares() {
   isLoading.value = true;
   try {
+    loadError.value = "";
     const data = await apiRequest("/api/v1/shares");
-    shares.value = Array.isArray(data) ? data : data.results || [];
+    const list = Array.isArray(data) ? data : data.results || [];
+    shares.value = await Promise.all(list.map(async (s: any) => ({ ...s, display_name: await displayName(s) })));
+  } catch (err: any) {
+    loadError.value = err?.message || "Could not load your shared links.";
   } finally {
     isLoading.value = false;
   }
 }
 
 async function revokeShare(id: string) {
-  await apiRequest(`/api/v1/shares/${id}`, { method: "DELETE" });
-  shares.value = shares.value.filter((s) => s.id !== id);
+  try {
+    await apiRequest(`/api/v1/shares/${id}`, { method: "DELETE" });
+    shares.value = shares.value.filter((s) => s.id !== id);
+  } catch (err: any) {
+    loadError.value = err?.message || "Could not revoke the link.";
+  }
 }
 </script>
 
@@ -33,6 +57,8 @@ async function revokeShare(id: string) {
       <p class="text-xs text-slate-500">Zero-knowledge links created by you. Keys reside in the URL fragment.</p>
     </div>
 
+    <div v-if="loadError" class="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs">{{ loadError }}</div>
+
     <div v-if="isLoading" class="text-xs text-slate-500">
       Loading shared items...
     </div>
@@ -41,7 +67,7 @@ async function revokeShare(id: string) {
       <Share2 class="w-10 h-10 text-slate-400 mx-auto" />
       <div class="text-sm font-bold text-slate-900">No active shares</div>
       <p class="text-xs text-slate-500 max-w-xs mx-auto">
-        Right click on any file in My Files to generate a secure public link.
+        Open the ⋮ menu on any file in My Files and choose Share to create a secure link.
       </p>
     </div>
 
@@ -56,7 +82,7 @@ async function revokeShare(id: string) {
             <Link class="w-4 h-4" />
           </div>
           <div>
-            <div class="font-bold text-slate-900">Node: {{ share.node_details?.name || share.node }}</div>
+            <div class="font-bold text-slate-900">{{ share.display_name }}</div>
             <div class="text-[11px] text-slate-500 flex items-center space-x-2 mt-0.5 font-mono">
               <span>Downloads: {{ share.download_count }} / {{ share.max_downloads || '∞' }}</span>
               <span v-if="share.has_password" class="text-amber-700 font-bold">• Password Protected</span>

@@ -3,6 +3,7 @@ import { ref, onMounted } from "vue";
 import { useRoute } from "vue-router";
 import { apiRequest, apiFetch } from "../../lib/api";
 import { decryptFile } from "../../lib/crypto/content";
+import { unwrapKey } from "../../lib/crypto/keys";
 import { base64ToUint8Array, hexToUint8Array } from "../../lib/crypto/kdf";
 import { Cloud, Lock, Download, AlertCircle, FileText, CheckCircle2 } from "lucide-vue-next";
 
@@ -18,6 +19,7 @@ const isDownloading = ref(false);
 const downloadSuccess = ref(false);
 
 let linkKeyBytes: Uint8Array | null = null;
+let sharedFileName: string | null = null;
 
 onMounted(async () => {
   // Extract key from fragment: #key=...
@@ -27,6 +29,8 @@ onMounted(async () => {
     try {
       const decodedKeyBase64 = decodeURIComponent(match[1]);
       linkKeyBytes = base64ToUint8Array(decodedKeyBase64);
+      const nameMatch = hash.match(/name=([^&]+)/);
+      if (nameMatch) sharedFileName = decodeURIComponent(nameMatch[1]).replace(/[\\/]/g, "_");
     } catch {
       error.value = "Invalid or corrupted decryption key in link fragment.";
     }
@@ -83,16 +87,22 @@ async function downloadAndDecrypt() {
     const encryptedBytes = new Uint8Array(encryptedBuffer);
     const baseNonce = hexToUint8Array(downloadData.content_nonce);
 
-    // Decrypt content using linkKeyBytes (supports multi-chunk files)
+    // The share stores the file key wrapped with the link key from the URL fragment
+    let fileKey: Uint8Array;
+    try {
+      fileKey = await unwrapKey(linkKeyBytes, downloadData.wrapped_key);
+    } catch {
+      throw new Error("This link's key doesn't match the file. Links created before the sharing fix must be re-created by the owner.");
+    }
     const partSize = downloadData.part_size || (8 * 1024 * 1024);
-    const decryptedBytes = await decryptFile(linkKeyBytes, encryptedBytes, baseNonce, partSize);
+    const decryptedBytes = await decryptFile(fileKey, encryptedBytes, baseNonce, partSize);
 
     // Trigger browser file download
     const blob = new Blob([decryptedBytes], { type: "application/octet-stream" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `Decrypted-File-${token.slice(0, 8)}`;
+    a.download = sharedFileName || `Decrypted-File-${token.slice(0, 8)}`;
     a.click();
     URL.revokeObjectURL(url);
     downloadSuccess.value = true;
