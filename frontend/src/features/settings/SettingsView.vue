@@ -2,8 +2,8 @@
 import { ref, onMounted } from "vue";
 import { useAuthStore } from "../../stores/auth";
 import { apiRequest } from "../../lib/api";
-import { deriveKEK, DEFAULT_KDF_PARAMS } from "../../lib/crypto/kdf";
-import { wrapKey } from "../../lib/crypto/keys";
+import { deriveKEK, DEFAULT_KDF_PARAMS, generateRandomSalt } from "../../lib/crypto/kdf";
+import { wrapKey, generateMasterKey } from "../../lib/crypto/keys";
 import {
   Shield,
   Key,
@@ -33,6 +33,10 @@ const mfaSecret = ref("");
 const mfaVerifyCode = ref("");
 const mfaMessage = ref("");
 const mfaError = ref("");
+const mfaBusy = ref(false);
+const mfaBackupCodes = ref<string[]>([]);
+const mfaDisablePassword = ref("");
+const showMfaDisable = ref(false);
 
 // Sessions
 const sessions = ref<any[]>([]);
@@ -60,21 +64,50 @@ async function handleChangePassword() {
   passwordMessage.value = "";
   passwordError.value = "";
 
+  // Explicit validation (the form uses novalidate so every problem gets a visible message)
+  if (!currentPassword.value || !newPassword.value || !confirmNewPassword.value) {
+    passwordError.value = "Please fill in your current password and the new password twice.";
+    return;
+  }
+  if (newPassword.value.length < 10) {
+    passwordError.value = "New password must be at least 10 characters.";
+    return;
+  }
   if (newPassword.value !== confirmNewPassword.value) {
     passwordError.value = "New passwords do not match.";
     return;
   }
-  if (!authStore.masterKey) {
-    passwordError.value = "Vault must be unlocked to change password.";
+  if (newPassword.value === currentPassword.value) {
+    passwordError.value = "New password must be different from the current password.";
     return;
   }
 
   isChangingPassword.value = true;
   try {
-    // 1. Derive new KEK with new password
-    const newKek = await deriveKEK(newPassword.value, authStore.user!.kdf_salt, DEFAULT_KDF_PARAMS);
+    // The vault key is needed to re-wrap it under the new password. Previously a locked vault
+    // (new tab, or admin accounts which have no usable vault) failed with "Vault must be
+    // unlocked" before the server was even asked. Unlock with the current password instead.
+    let masterKey = authStore.masterKey;
+    if (!masterKey) {
+      try {
+        await authStore.unlockVault(currentPassword.value);
+        masterKey = authStore.masterKey;
+      } catch {
+        if (!authStore.isMasterAdmin) {
+          throw new Error("Current password is incorrect.");
+        }
+        // Admin portal accounts store no files; give them a fresh vault key. The server still
+        // verifies the current password before accepting the change.
+        masterKey = generateMasterKey();
+      }
+    }
+    if (!masterKey) throw new Error("Could not unlock your vault. Please log out and back in.");
+
+    // 1. Derive new KEK with new password and a fresh salt
+    const newSalt = generateRandomSalt();
+    const newKek = await deriveKEK(newPassword.value, newSalt, DEFAULT_KDF_PARAMS);
     // 2. Re-wrap Master Key with new KEK (does NOT re-encrypt files!)
-    const newWrappedMasterKey = await wrapKey(newKek, authStore.masterKey);
+    const newWrappedMasterKey = await wrapKey(newKek, masterKey);
 
     await apiRequest("/api/v1/auth/password", {
       method: "POST",
@@ -82,17 +115,18 @@ async function handleChangePassword() {
         current_password: currentPassword.value,
         new_password: newPassword.value,
         new_wrapped_master_key: newWrappedMasterKey,
-        new_kdf_salt: authStore.user!.kdf_salt,
+        new_kdf_salt: newSalt,
         new_kdf_params: DEFAULT_KDF_PARAMS,
       }),
     });
 
-    passwordMessage.value = "Password changed and Master Key re-wrapped successfully!";
+    await authStore.fetchProfile();
+    passwordMessage.value = "Password changed. Your files stay encrypted with the same keys.";
     currentPassword.value = "";
     newPassword.value = "";
     confirmNewPassword.value = "";
   } catch (err: any) {
-    passwordError.value = err.message || "Failed to update password.";
+    passwordError.value = err?.message || "Failed to update password.";
   } finally {
     isChangingPassword.value = false;
   }
@@ -100,30 +134,82 @@ async function handleChangePassword() {
 
 async function startMfaEnroll() {
   mfaError.value = "";
+  mfaMessage.value = "";
+  mfaBusy.value = true;
   try {
-    const data = await apiRequest<{ qr_code: string; secret: string }>("/api/v1/auth/mfa/enroll", {
-      method: "POST",
-    });
+    const data = await apiRequest<{ qr_code: string; secret: string; backup_codes?: string[] }>(
+      "/api/v1/auth/mfa/enroll",
+      { method: "POST" }
+    );
+    if (!data?.qr_code || !data?.secret) throw new Error("The server did not return an authenticator QR code.");
     mfaQrCode.value = data.qr_code;
     mfaSecret.value = data.secret;
+    mfaBackupCodes.value = data.backup_codes || [];
+    mfaVerifyCode.value = "";
     mfaStep.value = "enrolling";
   } catch (err: any) {
-    mfaError.value = err.message || "Failed to start MFA setup.";
+    mfaError.value = err?.message || "Failed to start MFA setup.";
+  } finally {
+    mfaBusy.value = false;
   }
+}
+
+function cancelMfaEnroll() {
+  mfaStep.value = "initial";
+  mfaQrCode.value = "";
+  mfaSecret.value = "";
+  mfaBackupCodes.value = [];
+  mfaVerifyCode.value = "";
+  mfaError.value = "";
 }
 
 async function verifyMfa() {
   mfaError.value = "";
+  const code = mfaVerifyCode.value.replace(/\s+/g, "");
+  if (!/^\d{6}$/.test(code)) {
+    mfaError.value = "Enter the 6-digit code from your authenticator app.";
+    return;
+  }
+  mfaBusy.value = true;
   try {
     await apiRequest("/api/v1/auth/mfa/verify", {
       method: "POST",
-      body: JSON.stringify({ code: mfaVerifyCode.value }),
+      body: JSON.stringify({ code }),
     });
-    mfaMessage.value = "Two-Factor Authentication is now enabled!";
+    mfaMessage.value = "Two-Factor Authentication is now enabled. Keep your backup codes somewhere safe.";
     mfaStep.value = "initial";
+    mfaQrCode.value = "";
+    mfaSecret.value = "";
     await authStore.fetchProfile();
   } catch (err: any) {
-    mfaError.value = err.message || "Invalid verification code.";
+    mfaError.value = err?.message || "Invalid verification code.";
+  } finally {
+    mfaBusy.value = false;
+  }
+}
+
+async function disableMfa() {
+  mfaError.value = "";
+  mfaMessage.value = "";
+  if (!mfaDisablePassword.value) {
+    mfaError.value = "Enter your password to turn off two-factor authentication.";
+    return;
+  }
+  mfaBusy.value = true;
+  try {
+    await apiRequest("/api/v1/auth/mfa/disable", {
+      method: "POST",
+      body: JSON.stringify({ password: mfaDisablePassword.value }),
+    });
+    mfaDisablePassword.value = "";
+    showMfaDisable.value = false;
+    mfaBackupCodes.value = [];
+    mfaMessage.value = "Two-Factor Authentication has been turned off.";
+    await authStore.fetchProfile();
+  } catch (err: any) {
+    mfaError.value = err?.message || "Could not disable two-factor authentication.";
+  } finally {
+    mfaBusy.value = false;
   }
 }
 
@@ -157,7 +243,7 @@ async function revokeSession(sessionId: string) {
         {{ passwordError }}
       </div>
 
-      <form @submit.prevent="handleChangePassword" class="space-y-3 max-w-md">
+      <form @submit.prevent="handleChangePassword" novalidate class="space-y-3 max-w-md">
         <input
           type="password"
           v-model="currentPassword"
@@ -209,42 +295,87 @@ async function revokeSession(sessionId: string) {
         {{ mfaError }}
       </div>
 
-      <div v-if="authStore.user?.mfa_enabled" class="flex items-center space-x-2 text-emerald-700 text-xs font-bold">
-        <CheckCircle2 class="w-4 h-4 text-emerald-600" />
-        <span>Two-Factor Authentication is Active</span>
+      <div v-if="mfaBackupCodes.length && authStore.user?.mfa_enabled" class="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs space-y-2">
+        <p class="font-bold">Backup codes: each one works once if you lose your phone. They won't be shown again.</p>
+        <div class="grid grid-cols-2 gap-1 font-mono">
+          <span v-for="code in mfaBackupCodes" :key="code">{{ code }}</span>
+        </div>
+      </div>
+
+      <div v-if="authStore.user?.mfa_enabled" class="space-y-3">
+        <div class="flex items-center space-x-2 text-emerald-700 text-xs font-bold">
+          <CheckCircle2 class="w-4 h-4 text-emerald-600" />
+          <span>Two-Factor Authentication is Active</span>
+        </div>
+        <button
+          v-if="!showMfaDisable"
+          type="button"
+          @click="showMfaDisable = true"
+          class="px-4 py-2 rounded-xl bg-white hover:bg-rose-50 text-rose-700 font-semibold text-xs border border-rose-200 transition-colors"
+        >
+          Turn off two-factor authentication
+        </button>
+        <form v-else @submit.prevent="disableMfa" novalidate class="flex flex-wrap gap-2 max-w-md">
+          <input
+            type="password"
+            v-model="mfaDisablePassword"
+            placeholder="Current password"
+            class="flex-1 min-w-0 px-3.5 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-900 focus:bg-white focus:outline-none focus:border-brand-500"
+          />
+          <button type="submit" :disabled="mfaBusy" class="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-semibold text-xs disabled:opacity-60">
+            {{ mfaBusy ? 'Turning off...' : 'Confirm' }}
+          </button>
+          <button type="button" @click="showMfaDisable = false; mfaDisablePassword = ''" class="px-3 py-2 rounded-xl text-slate-600 text-xs hover:bg-slate-100">
+            Cancel
+          </button>
+        </form>
       </div>
 
       <div v-else-if="mfaStep === 'initial'">
         <button
+          type="button"
           @click="startMfaEnroll"
-          class="px-5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold text-xs border border-slate-200 transition-colors"
+          :disabled="mfaBusy"
+          class="px-5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold text-xs border border-slate-200 transition-colors disabled:opacity-60"
         >
-          Enable Authenticator App
+          {{ mfaBusy ? 'Preparing QR code...' : 'Enable Authenticator App' }}
         </button>
       </div>
 
       <!-- Enrollment Step -->
       <div v-else-if="mfaStep === 'enrolling'" class="space-y-4 max-w-sm">
+        <p class="text-xs text-slate-600">
+          Scan this QR code with Google Authenticator, 1Password, Authy or similar, then enter the 6-digit code to finish.
+        </p>
         <div class="p-3 bg-white border border-slate-200 rounded-2xl inline-block shadow-xs">
           <img :src="mfaQrCode" alt="MFA QR Code" class="w-44 h-44" />
         </div>
-        <div class="text-xs text-slate-600">
+        <div class="text-xs text-slate-600 break-all">
           Manual code: <code class="text-brand-700 font-mono font-bold">{{ mfaSecret }}</code>
         </div>
         <div class="flex space-x-2">
           <input
             type="text"
+            inputmode="numeric"
+            autocomplete="one-time-code"
+            maxlength="7"
             v-model="mfaVerifyCode"
+            @keyup.enter="verifyMfa"
             placeholder="6-digit code"
-            class="flex-1 px-3.5 py-2 rounded-xl bg-slate-50 border border-slate-200 text-center font-mono text-slate-900 text-sm focus:bg-white focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
+            class="flex-1 min-w-0 px-3.5 py-2 rounded-xl bg-slate-50 border border-slate-200 text-center font-mono text-slate-900 text-sm focus:bg-white focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
           />
           <button
+            type="button"
             @click="verifyMfa"
-            class="btn-primary px-4 py-2 rounded-xl text-white font-semibold text-xs shadow-xs"
+            :disabled="mfaBusy"
+            class="btn-primary px-4 py-2 rounded-xl text-white font-semibold text-xs shadow-xs disabled:opacity-60"
           >
-            Verify & Enable
+            {{ mfaBusy ? 'Verifying...' : 'Verify & Enable' }}
           </button>
         </div>
+        <button type="button" @click="cancelMfaEnroll" class="text-xs text-slate-500 hover:text-slate-700 underline">
+          Cancel setup
+        </button>
       </div>
     </div>
 

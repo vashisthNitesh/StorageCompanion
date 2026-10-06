@@ -234,6 +234,13 @@ class MFAEnrollView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
+        # Re-enrolling used to overwrite the confirmed device with an unconfirmed one while
+        # mfa_enabled stayed True, locking the user out at the next login.
+        if request.user.mfa_enabled:
+            return Response(
+                {"error": "Two-factor authentication is already enabled. Disable it first to re-enroll."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         device_data = setup_totp_mfa(request.user)
         return Response(device_data)
 

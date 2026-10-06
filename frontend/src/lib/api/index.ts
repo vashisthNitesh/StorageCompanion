@@ -132,8 +132,10 @@ export async function apiRequest<T = any>(
         ? "Server gateway timeout (504). Transfer took too long."
         : `Request failed (${response.status})`;
 
+    const pick = (v: any): string | null =>
+      typeof v === "string" && v ? v : v && typeof v === "object" && typeof v.message === "string" ? v.message : null;
     const err: any = new Error(
-      errorData.error || errorData.message || errorData.detail || fallbackMessage
+      pick(errorData.error) || pick(errorData.message) || pick(errorData.detail) || fallbackMessage
     );
     err.status = response.status;
     err.data = errorData;
