@@ -98,6 +98,34 @@ def check_quota_available(user, needed_bytes: int):
     return quota
 
 
+def check_max_file_size(user, size_bytes: int):
+    """Enforces the subscription plan's max single-file size (Plan.max_file_size)."""
+    subscription = getattr(user, "subscription", None)
+    plan = getattr(subscription, "plan", None) if subscription else None
+    max_size = getattr(plan, "max_file_size", 0) or 0
+    if max_size and size_bytes > max_size:
+        raise QuotaExceededException(
+            detail={
+                "error": "file_too_large",
+                "message": f"This file exceeds your plan's maximum file size of {round(max_size / (1024 ** 3), 2)} GB.",
+                "code": "FILE_TOO_LARGE",
+                "max_file_size": max_size,
+            }
+        )
+
+
+def is_descendant_or_self(candidate_parent: Node | None, node: Node) -> bool:
+    """True when candidate_parent is `node` itself or lies anywhere beneath it (would create a cycle)."""
+    seen = set()
+    current = candidate_parent
+    while current is not None and current.id not in seen:
+        if current.id == node.id:
+            return True
+        seen.add(current.id)
+        current = current.parent
+    return False
+
+
 def create_folder(user, encrypted_name: str, name_nonce: str, parent_id: str | None = None) -> Node:
     parent = None
     if parent_id:
@@ -137,12 +165,19 @@ def init_multipart_upload(
     Checks quota first and returns presigned PUT URLs for all parts.
     """
     check_quota_available(user, size_bytes)
+    check_max_file_size(user, size_bytes)
 
     parent = None
     if parent_id:
         parent = Node.objects.filter(id=parent_id, owner=user, type=Node.TYPE_FOLDER, deleted_at__isnull=True).first()
         if not parent:
             raise NotFound("Parent folder not found.")
+
+    # New version of an existing file: the target node must belong to the caller (prevents
+    # overwriting another user's file by passing their node id).
+    if node_id:
+        if not Node.objects.filter(id=node_id, owner=user, type=Node.TYPE_FILE, deleted_at__isnull=True).exists():
+            raise NotFound("File not found.")
 
     # Determine chunk size: 8 MB default, 16 MB for files > 5 GB
     part_size = 16 * 1024 * 1024 if size_bytes > 5 * 1024 * 1024 * 1024 else 8 * 1024 * 1024
@@ -268,7 +303,7 @@ def complete_multipart_upload(
     spacebyte_entry = None
     if upload.spacebyte_upload_id:
         try:
-            sb_parts = [{"PartNumber": p["part_number"], "ETag": p.get("etag", f'"{p["part_number"]}"')} for p in sorted(parts, key=lambda x: x["part_number"])]
+            sb_parts = [{"PartNumber": p["part_number"], "ETag": (p.get("etag") or f'"{p["part_number"]}"')} for p in sorted(parts, key=lambda x: x["part_number"])]
             sb_client.complete_multipart_upload(upload.spacebyte_upload_id, upload.spacebyte_key, sb_parts)
             # Create/Register file entry in SpaceByte
             entry_res = sb_client.create_file_entry(
@@ -283,7 +318,7 @@ def complete_multipart_upload(
             logger.warning("SpaceByte complete multipart/entry warning: %s", e)
     else:
         s3 = get_s3_client()
-        s3_parts = [{"PartNumber": p["part_number"], "ETag": p.get("etag", f'"{p["part_number"]}"')} for p in sorted(parts, key=lambda x: x["part_number"])]
+        s3_parts = [{"PartNumber": p["part_number"], "ETag": (p.get("etag") or f'"{p["part_number"]}"')} for p in sorted(parts, key=lambda x: x["part_number"])]
         try:
             s3.complete_multipart_upload(
                 Bucket=settings.S3_BUCKET_NAME,
@@ -296,7 +331,10 @@ def complete_multipart_upload(
 
     parent = None
     if upload.parent_id:
-        parent = Node.objects.filter(id=upload.parent_id, owner=user).first()
+        parent = Node.objects.filter(id=upload.parent_id, owner=user, deleted_at__isnull=True).first()
+
+    if upload.node and upload.node.owner_id != user.id:
+        raise NotFound("File not found.")
 
     # Create or update Node
     if upload.node:

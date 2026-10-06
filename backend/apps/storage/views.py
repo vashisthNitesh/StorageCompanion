@@ -1,4 +1,5 @@
 import logging
+import uuid
 import urllib.error
 import urllib.request
 from django.conf import settings
@@ -8,7 +9,7 @@ from rest_framework import status, permissions, generics
 from rest_framework.parsers import BaseParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework.exceptions import NotFound, PermissionDenied
+from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 
 from apps.storage.models import Node, FileVersion, StorageQuota, Upload
 from apps.storage.serializers import (
@@ -28,11 +29,25 @@ from apps.storage.services import (
     relay_upload_part,
     get_download_info,
     get_s3_client,
+    is_descendant_or_self,
 )
 from apps.storage.spacebyte import get_spacebyte_client
 from apps.audit.models import AuditLog
 
 logger = logging.getLogger(__name__)
+
+
+def parse_version_param(request):
+    raw = request.query_params.get("v")
+    if raw in (None, ""):
+        return None
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        raise ValidationError({"v": "Version must be an integer."}) from None
+    if value < 1:
+        raise ValidationError({"v": "Version must be >= 1."})
+    return value
 
 
 class BinaryParser(BaseParser):
@@ -58,6 +73,10 @@ class NodeListView(generics.ListCreateAPIView):
 
         parent_param = self.request.query_params.get("parent")
         if parent_param:
+            try:
+                uuid.UUID(str(parent_param))
+            except ValueError:
+                raise ValidationError({"parent": "Must be a valid UUID."}) from None
             return queryset.filter(parent_id=parent_param)
         elif self.request.query_params.get("all") == "true":
             return queryset
@@ -103,9 +122,20 @@ class NodeDetailView(APIView):
             parent_id = data["parent"]
             parent = None
             if parent_id:
-                parent = Node.objects.filter(id=parent_id, owner=request.user, type=Node.TYPE_FOLDER).first()
+                parent = Node.objects.filter(
+                    id=parent_id,
+                    owner=request.user,
+                    type=Node.TYPE_FOLDER,
+                    deleted_at__isnull=True,
+                    trashed_at__isnull=True,
+                ).first()
                 if not parent:
                     return Response({"error": "Target parent folder not found."}, status=400)
+                if is_descendant_or_self(parent, node):
+                    return Response(
+                        {"error": "A folder cannot be moved into itself or one of its subfolders."},
+                        status=400,
+                    )
             node.parent = parent
 
         node.save()
@@ -171,11 +201,11 @@ class NodeDownloadView(APIView):
         if not node:
             raise NotFound("Node not found.")
 
-        version_no = request.query_params.get("v")
+        version_no = parse_version_param(request)
         download_info = get_download_info(
             node=node,
             user=request.user,
-            version_no=int(version_no) if version_no else None,
+            version_no=version_no,
         )
 
         AuditLog.objects.create(
@@ -203,10 +233,10 @@ class NodeContentView(APIView):
         if node.type != Node.TYPE_FILE:
             return Response({"error": "Folders cannot be streamed."}, status=status.HTTP_400_BAD_REQUEST)
 
-        version_no = request.query_params.get("v")
+        version_no = parse_version_param(request)
         versions = FileVersion.objects.filter(node=node)
         if version_no:
-            version = versions.filter(version_no=int(version_no)).first()
+            version = versions.filter(version_no=version_no).first()
         else:
             version = versions.order_by("-version_no").first()
 

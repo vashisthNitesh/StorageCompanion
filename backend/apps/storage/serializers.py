@@ -62,7 +62,7 @@ class PartSerializer(serializers.Serializer):
 
 
 class CompleteUploadSerializer(serializers.Serializer):
-    parts = serializers.ListField(child=serializers.DictField())
+    parts = serializers.ListField(child=PartSerializer())
     wrapped_file_key = serializers.CharField()
     content_nonce = serializers.CharField(max_length=64)
     checksum = serializers.CharField(required=False, allow_blank=True, default="")
