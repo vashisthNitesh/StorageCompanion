@@ -371,7 +371,7 @@ export const useUploadStore = defineStore("upload", () => {
             }
 
             // 2. Fallback: relay through backend API endpoint
-            let token = getAccessToken();
+            const token = getAccessToken();
             const relayHeaders: Record<string, string> = {
               "Content-Type": "application/octet-stream",
             };
