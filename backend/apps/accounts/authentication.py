@@ -14,10 +14,9 @@ class CookieJWTAuthentication(JWTAuthentication):
         raw_token = None
         if header is not None:
             raw_token = self.get_raw_token(header)
-        elif "token" in request.query_params:
-            raw_token = request.query_params["token"].encode("utf-8")
-        elif "access_token" in request.query_params:
-            raw_token = request.query_params["access_token"].encode("utf-8")
+        # NOTE: ?token= / ?access_token= query parameters are intentionally NOT accepted any more:
+        # URLs end up in proxy/access logs, browser history and Referer headers, leaking a
+        # 24-hour bearer token. The frontend never used them.
 
         if raw_token is None:
             return None

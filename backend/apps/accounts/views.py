@@ -134,15 +134,28 @@ class RefreshTokenView(APIView):
 
         try:
             token = RefreshToken(refresh_token)
-            new_access_token = str(token.access_token)
             user_id = token.payload.get(settings.SIMPLE_JWT["USER_ID_CLAIM"])
             user = User.objects.get(id=user_id)
+            if not user.is_active:
+                # Suspended users must not keep minting access tokens
+                raise TokenError("User account is disabled.")
+            old_jti = str(token.payload.get("jti"))
+            session = Session.objects.filter(token_jti=old_jti).first()
+            if session and session.revoked_at is not None:
+                # "Revoke session" in Settings must actually end that session
+                raise TokenError("Session has been revoked.")
+            new_access_token = str(token.access_token)
             user_data = UserSerializer(user).data
-            
+
             # Rotate refresh token if configured
             if settings.SIMPLE_JWT.get("ROTATE_REFRESH_TOKENS", True):
                 token.blacklist()
                 new_refresh = RefreshToken.for_user(user)
+                if session:
+                    # Keep the session linked to the live token so it can still be revoked later
+                    session.token_jti = str(new_refresh["jti"])
+                    session.last_seen = timezone.now()
+                    session.save(update_fields=["token_jti", "last_seen"])
                 response = Response({
                     "access_token": new_access_token,
                     "user": user_data,
@@ -315,6 +328,14 @@ class SessionRevokeView(APIView):
 
         session.revoked_at = timezone.now()
         session.save(update_fields=["revoked_at"])
+        # Blacklist the session's refresh token so it can't be used to get new access tokens
+        try:
+            from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, OutstandingToken
+
+            for ot in OutstandingToken.objects.filter(jti=session.token_jti):
+                BlacklistedToken.objects.get_or_create(token=ot)
+        except Exception:  # blacklist app not installed
+            pass
 
         AuditLog.objects.create(
             user=request.user,
