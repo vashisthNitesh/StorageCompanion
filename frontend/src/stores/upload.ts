@@ -3,6 +3,7 @@ import { ref, computed, reactive } from "vue";
 import { apiRequest, getAccessToken, refreshAccessToken } from "../lib/api";
 import { useAuthStore } from "./auth";
 import { useFilesStore } from "./files";
+import { uniqueName } from "../lib/util/names";
 import { generateFileKey, generateRandomBytes, wrapKey } from "../lib/crypto/keys";
 import { encryptName } from "../lib/crypto/names";
 import {
@@ -163,7 +164,7 @@ export const useUploadStore = defineStore("upload", () => {
         // 3. Encrypt filename with Master Key
         const { ciphertextBase64, nonceHex } = await encryptName(
           authStore.masterKey,
-          file.name
+          uploadItem.name
         );
 
         // 4. Request multipart upload from backend
@@ -198,7 +199,7 @@ export const useUploadStore = defineStore("upload", () => {
           fileKeyHex: uint8ArrayToHex(fileKey),
           baseNonceHex: uint8ArrayToHex(baseNonce),
           wrappedFileKey,
-          fileName: file.name,
+          fileName: uploadItem.name,
           fileSize: file.size,
           partSize: initData.part_size,
           totalParts: initData.total_parts,
@@ -434,7 +435,7 @@ export const useUploadStore = defineStore("upload", () => {
             fileKeyHex: uint8ArrayToHex(fileKey!),
             baseNonceHex: uint8ArrayToHex(baseNonce!),
             wrappedFileKey: wrappedFileKey!,
-            fileName: file.name,
+            fileName: uploadItem.name,
             fileSize: file.size,
             partSize,
             totalParts,
@@ -487,10 +488,17 @@ export const useUploadStore = defineStore("upload", () => {
   async function uploadFile(file: File, parentId: string | null = null) {
     if (!authStore.masterKey) throw new Error("Vault must be unlocked to upload.");
 
+    // Avoid silently creating two items with the same name in one folder: "a.txt" -> "a (1).txt"
+    const taken: string[] = uploads.value
+      .filter((u) => u.parentId === parentId && u.status !== "error")
+      .map((u) => u.name);
+    if (parentId === filesStore.currentParentId) taken.push(...filesStore.nodes.map((n) => n.name));
+    const finalName = uniqueName(file.name, taken);
+
     const uploadItem = reactive<ActiveUpload>({
       id: crypto.randomUUID(),
       file,
-      name: file.name,
+      name: finalName,
       size: file.size,
       progress: 0,
       speedMBs: 0,
