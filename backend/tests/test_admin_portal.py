@@ -5,6 +5,15 @@ from apps.accounts.models import User
 from apps.billing.models import Plan, Subscription
 from apps.storage.models import StorageQuota
 
+ADMIN_EMAIL = "master-admin@test.local"
+ADMIN_PASSWORD = "Test-Only-Admin-Pass-123"
+
+
+@pytest.fixture(autouse=True)
+def master_admin_env(monkeypatch):
+    monkeypatch.setenv("MASTER_ADMIN_EMAIL", ADMIN_EMAIL)
+    monkeypatch.setenv("MASTER_ADMIN_PASSWORD", ADMIN_PASSWORD)
+
 
 @pytest.mark.django_db
 def test_superuser_creation_and_login():
@@ -12,10 +21,10 @@ def test_superuser_creation_and_login():
 
     client = APIClient()
 
-    # 1. Login with username 'nitesh-vashisth'
+    # 1. Login with username part of the email
     res_user = client.post(
         "/api/v1/auth/login",
-        {"email": "nitesh-vashisth", "password": "vashisth@0000"},
+        {"email": "master-admin", "password": ADMIN_PASSWORD},
         format="json",
     )
     assert res_user.status_code == 200
@@ -23,10 +32,10 @@ def test_superuser_creation_and_login():
     assert res_user.data["user"]["is_superuser"] is True
     assert "access_token" in res_user.data
 
-    # 2. Login with email 'nitesh-vashisth@smartspacedata.com'
+    # 2. Login with full email
     res_email = client.post(
         "/api/v1/auth/login",
-        {"email": "nitesh-vashisth@smartspacedata.com", "password": "vashisth@0000"},
+        {"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD},
         format="json",
     )
     assert res_email.status_code == 200
@@ -48,7 +57,7 @@ def test_regular_user_blocked_from_admin_endpoints(subscribed_user):
 @pytest.mark.django_db
 def test_admin_kpis_and_periods(subscribed_user):
     call_command("create_master_admin")
-    admin_user = User.objects.get(email="nitesh-vashisth@smartspacedata.com")
+    admin_user = User.objects.get(email=ADMIN_EMAIL)
 
     client = APIClient()
     client.force_authenticate(user=admin_user)
@@ -71,7 +80,7 @@ def test_admin_kpis_and_periods(subscribed_user):
 @pytest.mark.django_db
 def test_admin_pool_status():
     call_command("create_master_admin")
-    admin_user = User.objects.get(email="nitesh-vashisth@smartspacedata.com")
+    admin_user = User.objects.get(email=ADMIN_EMAIL)
 
     client = APIClient()
     client.force_authenticate(user=admin_user)
@@ -89,7 +98,7 @@ def test_admin_pool_status():
 def test_admin_user_management_and_upgrade(subscribed_user):
     call_command("seed_demo")
     call_command("create_master_admin")
-    admin_user = User.objects.get(email="nitesh-vashisth@smartspacedata.com")
+    admin_user = User.objects.get(email=ADMIN_EMAIL)
 
     client = APIClient()
     client.force_authenticate(user=admin_user)
@@ -141,7 +150,7 @@ def test_admin_user_management_and_upgrade(subscribed_user):
 @pytest.mark.django_db
 def test_super_admin_has_no_pack():
     call_command("create_master_admin")
-    admin_user = User.objects.get(email="nitesh-vashisth@smartspacedata.com")
+    admin_user = User.objects.get(email=ADMIN_EMAIL)
 
     # Super admin does not have a customer subscription
     assert not Subscription.objects.filter(user=admin_user).exists()
@@ -168,7 +177,7 @@ def test_super_admin_has_no_pack():
 @pytest.mark.django_db
 def test_admin_validity_adjustments_and_retention(subscribed_user):
     call_command("create_master_admin")
-    admin_user = User.objects.get(email="nitesh-vashisth@smartspacedata.com")
+    admin_user = User.objects.get(email=ADMIN_EMAIL)
 
     client = APIClient()
     client.force_authenticate(user=admin_user)
@@ -223,3 +232,11 @@ def test_admin_validity_adjustments_and_retention(subscribed_user):
     assert res_filter_purged.status_code == 200
     assert any(u["id"] == str(subscribed_user.id) for u in res_filter_purged.json()["results"])
 
+
+
+@pytest.mark.django_db
+def test_create_master_admin_requires_env(monkeypatch):
+    monkeypatch.delenv("MASTER_ADMIN_EMAIL", raising=False)
+    monkeypatch.delenv("MASTER_ADMIN_PASSWORD", raising=False)
+    call_command("create_master_admin")
+    assert not User.objects.filter(is_superuser=True).exists()

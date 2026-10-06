@@ -13,25 +13,21 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         self.stdout.write("--- Starting System Data Cleanup ---")
 
-        # 1. Ensure master admin superuser (nitesh-vashisth) is preserved
-        admin_email = "nitesh-vashisth@smartspacedata.com"
-        admin_password = "vashisth@0000"
+        # 1. Ensure master admin superuser is preserved (credentials from environment only)
+        from apps.accounts.management.commands.create_master_admin import get_master_admin_credentials
+
+        admin_email, admin_password = get_master_admin_credentials()
+        if not admin_email or not admin_password:
+            self.stderr.write(
+                self.style.ERROR(
+                    "Refusing to run: set MASTER_ADMIN_EMAIL and MASTER_ADMIN_PASSWORD so the admin account is preserved."
+                )
+            )
+            return
 
         admin_user, _ = User.objects.update_or_create(
             email=admin_email,
-            defaults={
-                "full_name": "Nitesh Vashisth (Master Admin)",
-                "is_staff": True,
-                "is_superuser": True,
-                "is_active": True,
-                "wrapped_master_key": "eyJhbGciOiJYWUVTMjU2IiwiY3BoIjoiYWRtaW5fbWFzdGVyX2tleV9ibG9iIn0=",
-                "kdf_salt": "7b8e5d2c1f0a9b8e6d4c2b0a8e1f3d5e",
-                "kdf_params": {"m": 65536, "t": 3, "p": 4},
-                "public_key": "x25519_pub_admin_abcdef0123456789",
-                "wrapped_private_key": "wrapped_priv_admin_1234567890abcdef",
-                "recovery_wrapped_master_key": "recovery_blob_admin_0987654321",
-                "email_verified_at": timezone.now(),
-            },
+            defaults={"is_staff": True, "is_superuser": True, "is_active": True},
         )
         admin_user.set_password(admin_password)
         admin_user.save()

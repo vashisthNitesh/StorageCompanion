@@ -1,41 +1,65 @@
+import os
+
 from django.core.management.base import BaseCommand
 from django.utils import timezone
-from datetime import timedelta
+
 from apps.accounts.models import User
-from apps.billing.models import Plan, Subscription
+from apps.billing.models import Subscription
 from apps.storage.models import StorageQuota
 
 
+def get_master_admin_credentials(options=None):
+    """
+    Master admin credentials come from the environment (or CLI options), never from source code.
+    Returns (email, password); either may be empty when not configured.
+    """
+    options = options or {}
+    email = (options.get("email") or os.environ.get("MASTER_ADMIN_EMAIL", "")).strip().lower()
+    password = options.get("password") or os.environ.get("MASTER_ADMIN_PASSWORD", "")
+    return email, password
+
+
 class Command(BaseCommand):
-    help = "Create or update the master admin superuser (nitesh-vashisth)"
+    help = (
+        "Create or update the master admin superuser from MASTER_ADMIN_EMAIL / MASTER_ADMIN_PASSWORD "
+        "(or --email / --password). Does nothing when they are not configured."
+    )
+
+    def add_arguments(self, parser):
+        parser.add_argument("--email", default=None, help="Master admin email (overrides MASTER_ADMIN_EMAIL)")
+        parser.add_argument("--password", default=None, help="Master admin password (overrides MASTER_ADMIN_PASSWORD)")
 
     def handle(self, *args, **options):
-        email = "nitesh-vashisth@smartspacedata.com"
-        password = "vashisth@0000"
+        email, password = get_master_admin_credentials(options)
+        if not email or not password:
+            self.stdout.write(
+                self.style.WARNING(
+                    "MASTER_ADMIN_EMAIL / MASTER_ADMIN_PASSWORD not set; skipping master admin provisioning."
+                )
+            )
+            return
+        if len(password) < 12:
+            self.stderr.write(self.style.ERROR("MASTER_ADMIN_PASSWORD must be at least 12 characters; skipping."))
+            return
 
         self.stdout.write(f"Creating / updating master admin superuser: {email}...")
 
         user, created = User.objects.update_or_create(
             email=email,
             defaults={
-                "full_name": "Nitesh Vashisth (Master Admin)",
                 "is_staff": True,
                 "is_superuser": True,
                 "is_active": True,
-                "wrapped_master_key": "eyJhbGciOiJYWUVTMjU2IiwiY3BoIjoiYWRtaW5fbWFzdGVyX2tleV9ibG9iIn0=",
-                "kdf_salt": "7b8e5d2c1f0a9b8e6d4c2b0a8e1f3d5e",
-                "kdf_params": {"m": 65536, "t": 3, "p": 4},
-                "public_key": "x25519_pub_admin_abcdef0123456789",
-                "wrapped_private_key": "wrapped_priv_admin_1234567890abcdef",
-                "recovery_wrapped_master_key": "recovery_blob_admin_0987654321",
-                "email_verified_at": timezone.now(),
             },
         )
+        if created:
+            user.full_name = "Master Admin"
+            user.email_verified_at = timezone.now()
         user.set_password(password)
         user.save()
 
         # Super Admin is purely an administrator: NO user pack / subscription is assigned to him,
-        # ensuring the entire 1000 GB pool remains untouched and 100% available for users!
+        # ensuring the entire pool remains available for customers.
         Subscription.objects.filter(user=user).delete()
 
         quota, _ = StorageQuota.objects.get_or_create(user=user)
@@ -45,11 +69,5 @@ class Command(BaseCommand):
 
         action_str = "Created" if created else "Updated"
         self.stdout.write(
-            self.style.SUCCESS(
-                f"✓ {action_str} superuser successfully!\n"
-                f"  Username/Email: nitesh-vashisth ({email})\n"
-                f"  Password: {password}\n"
-                f"  Role: Superuser / Master Admin\n"
-                f"  Subscription: None (Administrator - zero user pool quota consumed)"
-            )
+            self.style.SUCCESS(f"✓ {action_str} master admin superuser {email} (password from environment).")
         )

@@ -17,6 +17,11 @@ services:
         value: ".onrender.com,localhost,127.0.0.1"
       - key: CSRF_TRUSTED_ORIGINS
         value: "https://*.onrender.com"
+      # Master admin is provisioned on boot from these (set them in the Render dashboard, never in git)
+      - key: MASTER_ADMIN_EMAIL
+        sync: false
+      - key: MASTER_ADMIN_PASSWORD
+        sync: false
       - key: PAYMENT_PROVIDER
         value: razorpay
       - key: DEFAULT_CURRENCY
