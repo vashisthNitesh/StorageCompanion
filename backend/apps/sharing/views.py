@@ -1,18 +1,34 @@
 import logging
-import urllib.request
+
 from django.conf import settings
 from django.contrib.auth.hashers import check_password
+from django.db.models import Q
 from django.http import StreamingHttpResponse
 from django.utils import timezone
-from django.db.models import Q
-from apps.common.streaming import stream_iterator
-from rest_framework import status, permissions, generics
-from rest_framework.response import Response
-from rest_framework.views import APIView
+from rest_framework import permissions, status
 from rest_framework.exceptions import NotFound, PermissionDenied
-
-from apps.sharing.models import Share
+from rest_framework.response import Response
 from rest_framework.throttling import AnonRateThrottle, ScopedRateThrottle
+from rest_framework.views import APIView
+
+from apps.audit.models import AuditLog
+from apps.common.streaming import stream_iterator
+from apps.sharing.models import Share
+from apps.sharing.serializers import (
+    CreateShareSerializer,
+    PublicShareAuthSerializer,
+    ShareSerializer,
+)
+from apps.sharing.services import (
+    create_public_link_share,
+    create_user_share,
+    get_public_download_url,
+    get_public_share_info,
+    hash_token,
+)
+from apps.storage.models import FileVersion
+from apps.storage.services import get_s3_client
+from apps.storage.spacebyte import get_spacebyte_client
 
 logger = logging.getLogger(__name__)
 
@@ -29,22 +45,6 @@ class SharePasswordThrottle(ScopedRateThrottle):
         if not has_password:
             return True
         return super().allow_request(request, view)
-from apps.storage.models import FileVersion
-from apps.storage.spacebyte import get_spacebyte_client
-from apps.storage.services import get_s3_client
-from apps.sharing.serializers import (
-    ShareSerializer,
-    CreateShareSerializer,
-    PublicShareAuthSerializer,
-)
-from apps.sharing.services import (
-    create_public_link_share,
-    create_user_share,
-    get_public_share_info,
-    get_public_download_url,
-    hash_token,
-)
-from apps.audit.models import AuditLog
 
 
 class ShareListCreateView(APIView):

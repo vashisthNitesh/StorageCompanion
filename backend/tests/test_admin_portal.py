@@ -1,6 +1,7 @@
 import pytest
-from rest_framework.test import APIClient
 from django.core.management import call_command
+from rest_framework.test import APIClient
+
 from apps.accounts.models import User
 from apps.billing.models import Plan, Subscription
 from apps.storage.models import StorageQuota
@@ -255,7 +256,6 @@ def test_admin_validity_rejects_non_numeric_days(api_client, subscribed_user):
 
 @pytest.mark.django_db
 def test_plans_are_ordered_and_health_is_open(api_client, sample_plan):
-    from apps.billing.models import Plan
 
     Plan.objects.create(code="zzz_first", name="First", storage_bytes=1, price_monthly=1, price_yearly=10,
                         max_file_size=1, sort_order=-1)

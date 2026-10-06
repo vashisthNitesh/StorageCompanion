@@ -1,5 +1,6 @@
 import pytest
-from apps.billing.models import Plan, Subscription, PaymentEvent
+
+from apps.billing.models import PaymentEvent, Plan, Subscription
 from apps.storage.models import StorageQuota
 
 
@@ -20,7 +21,9 @@ def test_webhook_idempotency(api_client, subscribed_user):
         },
     }
 
-    import hashlib, hmac, json
+    import hashlib
+    import hmac
+    import json
     body = json.dumps(payload)
     sig = hmac.new(b"sample_webhook_secret", body.encode(), hashlib.sha256).hexdigest()
 
@@ -43,7 +46,7 @@ def test_webhook_idempotency(api_client, subscribed_user):
 
 @pytest.mark.django_db
 def test_subscription_activation_syncs_quota(auth_client, subscribed_user):
-    new_plan = Plan.objects.create(
+    Plan.objects.create(
         code="test_business_plan",
         name="Business Plan Test",
         storage_bytes=500 * 1024 * 1024,  # 500 MB
@@ -81,10 +84,12 @@ def test_subscription_activation_syncs_quota(auth_client, subscribed_user):
 @pytest.mark.django_db
 def test_process_expired_subscriptions_lifecycle(subscribed_user):
     from datetime import timedelta
-    from django.utils import timezone
+
     from django.core.management import call_command
-    from apps.billing.services import process_expired_subscriptions
+    from django.utils import timezone
+
     from apps.accounts.models import User
+    from apps.billing.services import process_expired_subscriptions
 
     now = timezone.now()
 
@@ -149,6 +154,7 @@ def test_process_expired_subscriptions_lifecycle(subscribed_user):
 @pytest.mark.django_db
 def test_grace_period_blocks_upload_preserves_download(auth_client, subscribed_user):
     from datetime import timedelta
+
     from django.utils import timezone
 
     now = timezone.now()

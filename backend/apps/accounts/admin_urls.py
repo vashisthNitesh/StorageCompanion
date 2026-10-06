@@ -1,13 +1,14 @@
 from django.urls import path
+
 from apps.accounts.admin_views import (
     AdminKPIsView,
     AdminPoolStatusView,
-    AdminUsersListView,
+    AdminTriggerLifecycleProcessView,
     AdminUserPlanUpgradeView,
+    AdminUserPurgeDataView,
+    AdminUsersListView,
     AdminUserStatusToggleView,
     AdminUserSubscriptionValidityView,
-    AdminTriggerLifecycleProcessView,
-    AdminUserPurgeDataView,
 )
 
 urlpatterns = [

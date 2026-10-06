@@ -1,17 +1,18 @@
 from django.urls import path
+
 from apps.storage.views import (
-    NodeListView,
+    NodeContentView,
     NodeDetailView,
+    NodeDownloadView,
+    NodeListView,
     NodeRestoreView,
     NodeVersionsView,
-    NodeDownloadView,
-    NodeContentView,
-    UploadInitView,
-    UploadCompleteView,
-    UploadAbortView,
-    UploadPartRelayView,
     QuotaView,
     StoragePoolStatusView,
+    UploadAbortView,
+    UploadCompleteView,
+    UploadInitView,
+    UploadPartRelayView,
 )
 
 urlpatterns = [

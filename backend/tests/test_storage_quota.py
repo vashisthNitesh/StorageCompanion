@@ -1,6 +1,7 @@
 import pytest
+
 from apps.accounts.models import User
-from apps.storage.models import Node, FileVersion, StorageQuota
+from apps.storage.models import FileVersion, Node, StorageQuota
 
 
 @pytest.mark.django_db
@@ -86,7 +87,6 @@ def test_upload_part_relay(auth_client, subscribed_user):
 
 @pytest.mark.django_db
 def test_node_content_streaming_and_download_info(auth_client, subscribed_user):
-    from apps.storage.models import Node, FileVersion
 
     node = Node.objects.create(
         owner=subscribed_user,

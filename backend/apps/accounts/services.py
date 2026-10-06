@@ -1,14 +1,13 @@
-import io
 import base64
+import io
 import secrets
+
 import pyotp
 import qrcode
-from django.conf import settings
-from django.contrib.auth import authenticate
-from django.contrib.auth.hashers import make_password, check_password
-from django.utils import timezone
+from django.contrib.auth.hashers import check_password, make_password
 from rest_framework_simplejwt.tokens import RefreshToken
-from apps.accounts.models import User, MFADevice, Session
+
+from apps.accounts.models import MFADevice, Session, User
 from apps.audit.models import AuditLog
 
 

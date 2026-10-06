@@ -71,6 +71,7 @@ def test_payment_replay_is_idempotent(auth_client, subscribed_user):
 @pytest.mark.django_db
 def test_other_user_cannot_replay_payment(auth_client, subscribed_user, sample_plan):
     from rest_framework.test import APIClient
+
     from apps.accounts.models import User
 
     order_id = checkout(auth_client)

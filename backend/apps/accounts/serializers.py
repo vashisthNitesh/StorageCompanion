@@ -1,6 +1,7 @@
-from rest_framework import serializers
 from django.contrib.auth import authenticate
-from apps.accounts.models import User, Session, MFADevice
+from rest_framework import serializers
+
+from apps.accounts.models import Session, User
 
 
 class UserSerializer(serializers.ModelSerializer):

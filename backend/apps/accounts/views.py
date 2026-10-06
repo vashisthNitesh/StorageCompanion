@@ -1,24 +1,23 @@
 from django.conf import settings
 from django.utils import timezone
-from rest_framework import status, permissions, generics
+from rest_framework import generics, permissions, status
 from rest_framework.response import Response
-from rest_framework.views import APIView
 from rest_framework.throttling import ScopedRateThrottle
+from rest_framework.views import APIView
+from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
-from rest_framework_simplejwt.exceptions import TokenError, InvalidToken
 
-from apps.accounts.models import User, Session
+from apps.accounts.models import Session, User
 from apps.accounts.serializers import (
-    UserSerializer,
-    RegisterSerializer,
-    LoginSerializer,
-    SessionSerializer,
     ChangePasswordSerializer,
-    RecoverySerializer,
+    LoginSerializer,
+    RegisterSerializer,
+    SessionSerializer,
+    UserSerializer,
 )
 from apps.accounts.services import (
-    register_user,
     create_user_session,
+    register_user,
     setup_totp_mfa,
     verify_totp_code,
 )
@@ -339,7 +338,10 @@ class SessionRevokeView(APIView):
         session.save(update_fields=["revoked_at"])
         # Blacklist the session's refresh token so it can't be used to get new access tokens
         try:
-            from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, OutstandingToken
+            from rest_framework_simplejwt.token_blacklist.models import (
+                BlacklistedToken,
+                OutstandingToken,
+            )
 
             for ot in OutstandingToken.objects.filter(jti=session.token_jti):
                 BlacklistedToken.objects.get_or_create(token=ot)

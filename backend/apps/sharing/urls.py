@@ -1,11 +1,12 @@
 from django.urls import path
+
 from apps.sharing.views import (
-    ShareListCreateView,
-    ShareDetailView,
-    PublicShareInfoView,
     PublicShareAuthView,
-    PublicShareDownloadView,
     PublicShareContentView,
+    PublicShareDownloadView,
+    PublicShareInfoView,
+    ShareDetailView,
+    ShareListCreateView,
 )
 
 urlpatterns = [

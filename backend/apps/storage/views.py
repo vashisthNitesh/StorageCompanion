@@ -1,40 +1,39 @@
 import logging
 import uuid
-import urllib.error
-import urllib.request
+
 from django.conf import settings
 from django.http import StreamingHttpResponse
 from django.utils import timezone
-from apps.common.streaming import stream_iterator
-from rest_framework.throttling import ScopedRateThrottle
-from rest_framework import status, permissions, generics
+from rest_framework import generics, permissions, status
+from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.parsers import BaseParser
 from rest_framework.response import Response
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
-from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 
-from apps.storage.models import Node, FileVersion, StorageQuota, Upload
+from apps.audit.models import AuditLog
+from apps.common.streaming import stream_iterator
+from apps.storage.models import FileVersion, Node, StorageQuota, Upload
 from apps.storage.serializers import (
-    NodeSerializer,
-    FileVersionSerializer,
-    CreateFolderSerializer,
-    UpdateNodeSerializer,
-    InitUploadSerializer,
     CompleteUploadSerializer,
+    CreateFolderSerializer,
+    FileVersionSerializer,
+    InitUploadSerializer,
+    NodeSerializer,
     StorageQuotaSerializer,
+    UpdateNodeSerializer,
 )
 from apps.storage.services import (
-    create_folder,
-    init_multipart_upload,
-    complete_multipart_upload,
     abort_multipart_upload,
-    relay_upload_part,
+    complete_multipart_upload,
+    create_folder,
     get_download_info,
     get_s3_client,
+    init_multipart_upload,
     is_descendant_or_self,
+    relay_upload_part,
 )
 from apps.storage.spacebyte import get_spacebyte_client
-from apps.audit.models import AuditLog
 
 logger = logging.getLogger(__name__)
 

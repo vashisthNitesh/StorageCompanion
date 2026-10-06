@@ -1,20 +1,19 @@
-import uuid
-from decimal import Decimal
 from datetime import timedelta
-from django.utils import timezone
+from decimal import Decimal
+
 from django.db import models
-from django.db.models import Count, Sum
-from django.db.models.functions import TruncHour, TruncDay, TruncMonth
+from django.db.models import Count
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from rest_framework import permissions, status
-from rest_framework.views import APIView
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from apps.accounts.models import User
-from apps.billing.models import Plan, Subscription, Invoice
-from apps.storage.models import StorageQuota, Node, FileVersion
 from apps.audit.models import AuditLog
+from apps.billing.models import Plan, Subscription
+from apps.storage.models import Node, StorageQuota
 
 
 class AdminKPIsView(APIView):
@@ -34,19 +33,13 @@ class AdminKPIsView(APIView):
 
         if period == "daily":
             start_date = now - timedelta(days=1)
-            bucket_format = "%H:00"
-            bucket_count = 24
         elif period == "weekly":
             start_date = now - timedelta(days=7)
-            bucket_format = "%a"
-            bucket_count = 7
         elif period == "yearly":
             start_date = now - timedelta(days=365)
-            bucket_format = "%b"
         else:  # monthly default
             period = "monthly"
             start_date = now - timedelta(days=30)
-            bucket_format = "%d %b"
 
         # 1. Customer User Metrics (Exclude Master Admin & Staff)
         customer_users_qs = User.objects.filter(is_staff=False, is_superuser=False)
@@ -419,7 +412,7 @@ class AdminUserPlanUpgradeView(APIView):
             try:
                 limit_gb = int(custom_limit_gb)
             except (TypeError, ValueError):
-                raise ValidationError({"custom_limit_gb": "Must be a whole number of GB."})
+                raise ValidationError({"custom_limit_gb": "Must be a whole number of GB."}) from None
             if limit_gb <= 0 or limit_gb > 100_000:
                 raise ValidationError({"custom_limit_gb": "Must be between 1 and 100000 GB."})
             quota.bytes_limit = limit_gb * 1024 * 1024 * 1024
@@ -538,7 +531,7 @@ class AdminUserSubscriptionValidityView(APIView):
             try:
                 days = int(days)
             except (TypeError, ValueError):
-                raise ValidationError({"days": "Must be a whole number of days."})
+                raise ValidationError({"days": "Must be a whole number of days."}) from None
             if days <= 0 or days > 3650:
                 raise ValidationError({"days": "Must be between 1 and 3650."})
         original_status = sub.status

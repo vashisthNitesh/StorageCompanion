@@ -1,14 +1,15 @@
 from django.urls import path
+
 from apps.accounts.views import (
-    RegisterView,
+    ChangePasswordView,
     LoginView,
-    RefreshTokenView,
     LogoutView,
     MeView,
-    ChangePasswordView,
+    MFADisableView,
     MFAEnrollView,
     MFAVerifyView,
-    MFADisableView,
+    RefreshTokenView,
+    RegisterView,
     SessionListView,
     SessionRevokeView,
 )

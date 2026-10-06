@@ -1,10 +1,11 @@
 from django.core.management.base import BaseCommand
 from django.utils import timezone
-from apps.accounts.models import User, Session, MFADevice
-from apps.billing.models import Subscription, Invoice, PaymentEvent, Plan
-from apps.storage.models import Node, FileVersion, Upload, StorageQuota
-from apps.sharing.models import Share
+
+from apps.accounts.models import MFADevice, Session, User
 from apps.audit.models import AuditLog
+from apps.billing.models import Invoice, PaymentEvent, Subscription
+from apps.sharing.models import Share
+from apps.storage.models import FileVersion, Node, StorageQuota, Upload
 
 
 class Command(BaseCommand):
@@ -14,7 +15,9 @@ class Command(BaseCommand):
         self.stdout.write("--- Starting System Data Cleanup ---")
 
         # 1. Ensure master admin superuser is preserved (credentials from environment only)
-        from apps.accounts.management.commands.create_master_admin import get_master_admin_credentials
+        from apps.accounts.management.commands.create_master_admin import (
+            get_master_admin_credentials,
+        )
 
         admin_email, admin_password = get_master_admin_credentials()
         if not admin_email or not admin_password:

@@ -2,8 +2,8 @@ from django.urls import path
 
 from apps.billing.views import (
     CheckoutInitView,
-    InvoiceListView,
     HealthView,
+    InvoiceListView,
     PaymentVerifyView,
     PlanListView,
     RazorpayWebhookView,

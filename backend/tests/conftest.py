@@ -1,5 +1,6 @@
 import pytest
 from rest_framework.test import APIClient
+
 from apps.accounts.models import User
 from apps.billing.models import Plan, Subscription
 from apps.storage.models import StorageQuota
@@ -36,8 +37,9 @@ def subscribed_user(db, sample_plan):
         wrapped_private_key="priv_key_test",
         recovery_wrapped_master_key="recovery_test",
     )
-    from django.utils import timezone
     from datetime import timedelta
+
+    from django.utils import timezone
     Subscription.objects.create(
         user=user,
         plan=sample_plan,

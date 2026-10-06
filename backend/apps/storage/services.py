@@ -1,19 +1,24 @@
 import logging
 import math
-import urllib.request
 import uuid
 from datetime import timedelta
+
 import boto3
+import urllib3
 from botocore.config import Config
 from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
-from rest_framework.exceptions import PermissionDenied, NotFound
+from rest_framework.exceptions import NotFound, PermissionDenied
 
-from apps.common.exceptions import QuotaExceededException, SubscriptionRequiredException, UpstreamStorageError
-from apps.storage.models import Node, FileVersion, Upload, StorageQuota
-from apps.storage.spacebyte import get_spacebyte_client
 from apps.audit.models import AuditLog
+from apps.common.exceptions import (
+    QuotaExceededException,
+    SubscriptionRequiredException,
+    UpstreamStorageError,
+)
+from apps.storage.models import FileVersion, Node, StorageQuota, Upload
+from apps.storage.spacebyte import get_spacebyte_client
 
 logger = logging.getLogger(__name__)
 
@@ -454,7 +459,6 @@ def abort_multipart_upload(upload_id: str, user):
         upload.save(update_fields=["status"])
 
 
-import urllib3
 
 http_pool = urllib3.PoolManager(
     maxsize=10,

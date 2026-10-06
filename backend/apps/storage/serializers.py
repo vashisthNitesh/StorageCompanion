@@ -1,5 +1,6 @@
 from rest_framework import serializers
-from apps.storage.models import Node, FileVersion, StorageQuota
+
+from apps.storage.models import FileVersion, Node, StorageQuota
 
 
 class FileVersionSerializer(serializers.ModelSerializer):

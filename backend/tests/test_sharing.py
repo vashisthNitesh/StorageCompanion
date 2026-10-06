@@ -1,7 +1,6 @@
 import pytest
-from apps.accounts.models import User
-from apps.storage.models import Node, FileVersion
-from apps.sharing.models import Share
+
+from apps.storage.models import FileVersion, Node
 
 
 @pytest.mark.django_db

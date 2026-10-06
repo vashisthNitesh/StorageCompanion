@@ -1,11 +1,8 @@
 import pytest
-from django.conf import settings
 from rest_framework.test import APIClient
-from apps.accounts.models import User
-from apps.billing.models import Plan, Subscription
-from apps.storage.models import StorageQuota
-from apps.storage.spacebyte import SpaceByteClient, get_spacebyte_client
-from apps.storage.services import check_storage_pool_capacity, QuotaExceededException
+
+from apps.storage.services import QuotaExceededException, check_storage_pool_capacity
+from apps.storage.spacebyte import SpaceByteClient
 
 
 @pytest.mark.django_db
@@ -86,8 +83,9 @@ def test_storage_pool_status_api(subscribed_user):
 
 @pytest.mark.django_db
 def test_no_auth_redirect_handler_strips_auth():
-    from apps.storage.spacebyte import NoAuthRedirectHandler
     import urllib.request
+
+    from apps.storage.spacebyte import NoAuthRedirectHandler
 
     handler = NoAuthRedirectHandler()
     req = urllib.request.Request(
@@ -122,7 +120,8 @@ def test_download_stream_unconfigured():
 def test_node_content_view_spacebyte_streaming(subscribed_user):
     import io
     from unittest.mock import patch
-    from apps.storage.models import Node, FileVersion
+
+    from apps.storage.models import FileVersion, Node
 
     # Create node with spacebyte_hash
     node = Node.objects.create(

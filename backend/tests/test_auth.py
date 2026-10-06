@@ -1,5 +1,6 @@
 import pytest
-from apps.accounts.models import User, Session
+
+from apps.accounts.models import User
 
 
 @pytest.mark.django_db
