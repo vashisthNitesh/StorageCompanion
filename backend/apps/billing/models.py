@@ -1,7 +1,9 @@
 import uuid
+
 from django.conf import settings
 from django.db import models
 from django.utils import timezone
+
 from apps.common.models import BaseModel, TimeStampedModel
 
 
@@ -157,9 +159,49 @@ class Invoice(BaseModel):
 
     class Meta:
         ordering = ["-issued_at"]
+        constraints = [
+            # One invoice per Razorpay payment and per order: verify + webhook + retries can never
+            # record (or extend a subscription for) the same payment twice.
+            models.UniqueConstraint(
+                fields=["provider_payment_id"],
+                condition=~models.Q(provider_payment_id=""),
+                name="uniq_invoice_provider_payment_id",
+            ),
+            models.UniqueConstraint(
+                fields=["provider_invoice_id"],
+                condition=~models.Q(provider_invoice_id=""),
+                name="uniq_invoice_provider_order_id",
+            ),
+        ]
 
     def __str__(self):
         return f"Invoice {self.id} - {self.subscription.user.email} ({self.currency} {self.amount})"
+
+
+class CheckoutOrder(BaseModel):
+    """
+    A Razorpay order issued to a user for a plan. Re-used for repeated clicks/retries so a user
+    can't end up with several payable orders (Razorpay rejects a second payment on a paid order),
+    and lets the webhook activate the plan if the browser never reached /verify.
+    """
+
+    STATUS_CHOICES = [("created", "Created"), ("paid", "Paid"), ("abandoned", "Abandoned")]
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="checkout_orders")
+    plan = models.ForeignKey(Plan, on_delete=models.PROTECT, related_name="checkout_orders")
+    billing_interval = models.CharField(max_length=20, default="monthly")
+    provider_order_id = models.CharField(max_length=255, unique=True)
+    amount_paise = models.BigIntegerField()
+    currency = models.CharField(max_length=10, default="INR")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="created")
+    provider_payment_id = models.CharField(max_length=255, blank=True, default="")
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["user", "plan", "billing_interval", "status"])]
+
+    def __str__(self):
+        return f"{self.provider_order_id} ({self.user_id}, {self.plan_id}, {self.status})"
 
 
 class PaymentEvent(TimeStampedModel):

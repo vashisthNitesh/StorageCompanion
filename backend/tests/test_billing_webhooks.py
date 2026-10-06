@@ -54,10 +54,14 @@ def test_subscription_activation_syncs_quota(auth_client, subscribed_user):
         is_active=True,
     )
 
+    order = auth_client.post(
+        "/api/v1/subscription/checkout", {"plan_code": "test_business_plan", "billing_interval": "monthly"}, format="json"
+    )
+    assert order.status_code == 200, order.data
     verify_payload = {
         "plan_code": "test_business_plan",
         "razorpay_payment_id": "pay_test_abc123",
-        "razorpay_order_id": "order_mock_test_business_plan_monthly_1700000000",
+        "razorpay_order_id": order.data["order_id"],
         "razorpay_signature": "mock_signature_approved",
         "billing_interval": "monthly",
     }

@@ -103,7 +103,12 @@ export const useBillingStore = defineStore("billing", () => {
     });
   }
 
+  // In-flight lock: one checkout at a time (double clicks / parallel button presses)
+  let checkoutInFlight = false;
+
   async function checkout(planCode: string, interval: "monthly" | "yearly" = selectedInterval.value): Promise<void> {
+    if (checkoutInFlight) return;
+    checkoutInFlight = true;
     isLoading.value = true;
     try {
       const order = await apiRequest<{
@@ -141,7 +146,9 @@ export const useBillingStore = defineStore("billing", () => {
         );
       }
 
-      return new Promise((resolve, reject) => {
+      // NOTE: must be awaited. A bare `return new Promise(...)` let the finally block below run
+      // immediately, re-enabling the plan buttons while the Razorpay modal was still open.
+      return await new Promise<void>((resolve, reject) => {
         let isSettled = false;
 
         const options = {
@@ -167,8 +174,16 @@ export const useBillingStore = defineStore("billing", () => {
                 billing_interval: interval,
               });
               resolve();
-            } catch (e) {
-              reject(e);
+            } catch (e: any) {
+              // Money may already have been captured: never invite a second payment. The webhook
+              // activates the plan for this order; poll for it.
+              pollSubscriptionAfterPayment();
+              reject(
+                new Error(
+                  `Payment received, but activation is still being confirmed (${e?.message || "network error"}). ` +
+                    "Please don't pay again; your plan will appear here within a minute."
+                )
+              );
             }
           },
           modal: {
@@ -196,8 +211,19 @@ export const useBillingStore = defineStore("billing", () => {
         }
       });
     } finally {
+      checkoutInFlight = false;
       isLoading.value = false;
     }
+  }
+
+  function pollSubscriptionAfterPayment(attempts = 12, intervalMs = 5000) {
+    let n = 0;
+    const tick = async () => {
+      n++;
+      await Promise.all([authStore.fetchProfile(), fetchSubscription(), fetchInvoices()]);
+      if (n < attempts) setTimeout(tick, intervalMs);
+    };
+    setTimeout(tick, intervalMs);
   }
 
   async function verifyPayment(payload: {

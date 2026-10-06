@@ -1,12 +1,13 @@
 from django.urls import path
+
 from apps.billing.views import (
-    PlanListView,
-    SubscriptionDetailView,
     CheckoutInitView,
-    PaymentVerifyView,
-    SubscriptionCancelView,
     InvoiceListView,
+    PaymentVerifyView,
+    PlanListView,
     RazorpayWebhookView,
+    SubscriptionCancelView,
+    SubscriptionDetailView,
 )
 
 urlpatterns = [

@@ -89,8 +89,22 @@ onMounted(async () => {
   ]);
 });
 
+const currentPlanCode = computed(
+  () => authStore.user?.subscription?.plan_code || billingStore.currentSubscription?.plan_details?.code || null
+);
+
 async function handleUpgrade(planCode: string) {
   checkoutError.value = "";
+  // Switching plans starts a new billing period today (no proration yet): say so before charging
+  const sub: any = authStore.user?.subscription;
+  if (authStore.hasActiveSubscription && currentPlanCode.value && currentPlanCode.value !== planCode && !authStore.isMasterAdmin) {
+    const daysLeft = Math.max(0, Number(sub?.days_until_expiration ?? 0));
+    const ok = window.confirm(
+      `You already have ${sub?.plan_name || "an active plan"}${daysLeft ? ` with ${daysLeft} day(s) left` : ""}. ` +
+        "Switching starts the new plan today, and the remaining time isn't credited. Continue to payment?"
+    );
+    if (!ok) return;
+  }
   try {
     await billingStore.checkout(planCode, billingStore.selectedInterval);
     isGateRequired.value = false;
@@ -281,12 +295,12 @@ async function handleUpgrade(planCode: string) {
 
           <button
             @click="handleUpgrade(plan.code)"
-            :disabled="billingStore.isLoading || (billingStore.currentSubscription?.plan_details?.code === plan.code && authStore.hasActiveSubscription)"
+            :disabled="billingStore.isLoading || (currentPlanCode === plan.code && authStore.hasActiveSubscription)"
             class="w-full py-2.5 rounded-xl text-xs font-semibold transition-all disabled:opacity-50 shadow-xs"
             :class="plan.isHero ? 'btn-primary' : 'btn-secondary'"
           >
             <span>
-              {{ billingStore.currentSubscription?.plan_details?.code === plan.code && authStore.hasActiveSubscription ? 'Current Plan' : 'Select ' + plan.name }}
+              {{ currentPlanCode === plan.code && authStore.hasActiveSubscription ? 'Current Plan' : (billingStore.isLoading ? 'Processing...' : 'Select ' + plan.name) }}
             </span>
           </button>
         </div>

@@ -17,6 +17,12 @@ def big_plan(db):
     )
 
 
+def checkout(client, plan_code="test_personal", interval="monthly"):
+    res = client.post("/api/v1/subscription/checkout", {"plan_code": plan_code, "billing_interval": interval}, format="json")
+    assert res.status_code == 200, res.data
+    return res.data["order_id"]
+
+
 def verify(client, **overrides):
     payload = {
         "plan_code": "test_personal",
@@ -37,15 +43,42 @@ def test_forged_signature_with_sample_secret_rejected(auth_client, big_plan):
 
 @pytest.mark.django_db
 def test_mock_order_cannot_claim_other_plan_or_interval(auth_client, big_plan):
-    assert verify(auth_client, plan_code="big").status_code == 400
-    assert verify(auth_client, billing_interval="yearly").status_code == 400
+    order_id = checkout(auth_client)
+    assert verify(auth_client, plan_code="big", razorpay_order_id=order_id).status_code == 400
+    assert verify(auth_client, billing_interval="yearly", razorpay_order_id=order_id).status_code == 400
 
 
 @pytest.mark.django_db
-def test_payment_replay_rejected(auth_client, subscribed_user):
-    assert verify(auth_client).status_code == 200
+def test_unknown_mock_order_rejected(auth_client, subscribed_user):
+    # Mock orders must have been issued by this server to this user
     assert verify(auth_client).status_code == 400
-    assert verify(auth_client, razorpay_payment_id="pay_2").status_code == 400  # same order id
+
+
+@pytest.mark.django_db
+def test_payment_replay_is_idempotent(auth_client, subscribed_user):
+    from apps.billing.models import Invoice
+
+    order_id = checkout(auth_client)
+    assert verify(auth_client, razorpay_order_id=order_id).status_code == 200
+    end = Subscription.objects.get(user=subscribed_user).current_period_end
+    # Same payment again, or another payment id on the same order: no 2nd invoice, no extension
+    assert verify(auth_client, razorpay_order_id=order_id).status_code == 200
+    assert verify(auth_client, razorpay_order_id=order_id, razorpay_payment_id="pay_2").status_code == 200
+    assert Invoice.objects.filter(subscription__user=subscribed_user).count() == 1
+    assert Subscription.objects.get(user=subscribed_user).current_period_end == end
+
+
+@pytest.mark.django_db
+def test_other_user_cannot_replay_payment(auth_client, subscribed_user, sample_plan):
+    from rest_framework.test import APIClient
+    from apps.accounts.models import User
+
+    order_id = checkout(auth_client)
+    assert verify(auth_client, razorpay_order_id=order_id).status_code == 200
+    other = User.objects.create_user(email="replayer@test.local", password="ReplayerPass123!")
+    c = APIClient()
+    c.force_authenticate(other)
+    assert verify(c, razorpay_order_id=order_id).status_code == 400
 
 
 @pytest.mark.django_db
@@ -63,7 +96,9 @@ def test_real_signature_bound_to_order_plan(auth_client, subscribed_user, big_pl
     sig = hmac.new(b"real_secret", f"{order_id}|{pay_id}".encode(), hashlib.sha256).hexdigest()
     order = {"id": order_id, "amount": 19900, "status": "paid",
              "notes": {"user_id": str(subscribed_user.id), "plan_code": "test_personal", "billing_interval": "monthly"}}
-    with mock.patch("apps.billing.services.fetch_razorpay_order", return_value=order):
+    payment = {"id": pay_id, "order_id": order_id, "status": "captured", "amount": 19900}
+    with mock.patch("apps.billing.services.fetch_razorpay_order", return_value=order), \
+            mock.patch("apps.billing.services.fetch_razorpay_payment", return_value=payment):
         # paid for test_personal, tries to claim "big"
         assert verify(auth_client, plan_code="big", razorpay_order_id=order_id, razorpay_payment_id=pay_id,
                       razorpay_signature=sig).status_code == 400

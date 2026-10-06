@@ -1,27 +1,26 @@
-from django.utils import timezone
-from rest_framework import status, permissions, generics
+from rest_framework import generics, permissions, status
+from rest_framework.exceptions import NotFound
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework.exceptions import NotFound, ValidationError
 
-from apps.billing.models import Plan, Subscription, Invoice
+from apps.audit.models import AuditLog
+from apps.billing.models import Invoice, Subscription
 from apps.billing.serializers import (
+    CheckoutInitSerializer,
+    InvoiceSerializer,
+    PaymentVerifySerializer,
     PlanSerializer,
     SubscriptionSerializer,
-    InvoiceSerializer,
-    CheckoutInitSerializer,
-    PaymentVerifySerializer,
 )
 from apps.billing.services import (
-    get_active_plans,
-    create_razorpay_order,
-    verify_razorpay_signature,
     activate_subscription,
-    verify_webhook_signature,
+    create_razorpay_order,
+    get_active_plans,
     process_webhook_event,
     validate_order_for_activation,
+    verify_razorpay_signature,
+    verify_webhook_signature,
 )
-from apps.audit.models import AuditLog
 
 
 class PlanListView(generics.ListAPIView):
@@ -85,6 +84,7 @@ class PaymentVerifyView(APIView):
             order_id=data["razorpay_order_id"],
             plan_code=data["plan_code"],
             billing_interval=data.get("billing_interval", "monthly"),
+            payment_id=data["razorpay_payment_id"],
         )
 
         subscription = activate_subscription(
@@ -147,7 +147,9 @@ class RazorpayWebhookView(APIView):
             return Response({"error": "Invalid signature"}, status=status.HTTP_400_BAD_REQUEST)
 
         payload = request.data
-        event_id = payload.get("event_id") or payload.get("id") or request.headers.get("X-Razorpay-Event-Id", "")
+        # Razorpay sends the unique event id only in this header (the body has no id); the old code
+        # read body fields first, so every event got event_id "" and all but the first were dropped.
+        event_id = request.headers.get("X-Razorpay-Event-Id", "") or payload.get("event_id") or payload.get("id") or ""
 
         process_webhook_event(payload=payload, event_id=event_id)
         return Response({"status": "ok"}, status=status.HTTP_200_OK)
