@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from "vue";
-import { useRouter } from "vue-router";
+import { ref, computed, onMounted, onBeforeUnmount, watch } from "vue";
+import { useRouter, useRoute } from "vue-router";
 import { useAuthStore } from "../stores/auth";
 import { useFilesStore } from "../stores/files";
 import { useUploadStore } from "../stores/upload";
@@ -23,6 +23,7 @@ import {
 } from "lucide-vue-next";
 
 const router = useRouter();
+const route = useRoute();
 const authStore = useAuthStore();
 const filesStore = useFilesStore();
 const uploadStore = useUploadStore();
@@ -51,19 +52,40 @@ async function handleUnlockVault() {
   }
 }
 
-const storageUsedMB = computed(() => {
-  const bytes = authStore.user?.quota?.bytes_used || 0;
-  return (bytes / (1024 * 1024)).toFixed(1);
+function formatBytesShort(bytes: number): string {
+  if (!bytes) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const i = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
+  const v = bytes / Math.pow(1024, i);
+  return `${v >= 100 || i === 0 ? v.toFixed(0) : v.toFixed(1)} ${units[i]}`;
+}
+
+const storageUsedLabel = computed(() => formatBytesShort(authStore.user?.quota?.bytes_used || 0));
+const storageLimitLabel = computed(() => formatBytesShort(authStore.user?.quota?.bytes_limit || 0));
+
+const percentUsed = computed(() => authStore.user?.quota?.percent_used || 0);
+// Show "<0.01%" instead of a misleading 0% once anything is stored
+const percentLabel = computed(() => {
+  const used = authStore.user?.quota?.bytes_used || 0;
+  const p = percentUsed.value;
+  if (used > 0 && p < 0.01) return "<0.01%";
+  return `${p < 10 ? Number(p.toFixed(2)) : Math.round(p)}%`;
 });
 
-const storageLimitGB = computed(() => {
-  const bytes = authStore.user?.quota?.bytes_limit || 0;
-  return (bytes / (1024 * 1024 * 1024)).toFixed(0);
-});
-
-const percentUsed = computed(() => {
-  return authStore.user?.quota?.percent_used || 0;
-});
+// Keep plan/quota fresh: refresh the profile on navigation and when the tab regains focus
+// (plan changes by an admin or in another tab previously never showed up until re-login).
+let lastProfileRefresh = Date.now();
+function refreshProfileThrottled(minIntervalMs = 15_000) {
+  if (!authStore.user || Date.now() - lastProfileRefresh < minIntervalMs) return;
+  lastProfileRefresh = Date.now();
+  authStore.fetchProfile();
+}
+function onVisibility() {
+  if (document.visibilityState === "visible") refreshProfileThrottled();
+}
+watch(() => route.fullPath, () => refreshProfileThrottled());
+onMounted(() => document.addEventListener("visibilitychange", onVisibility));
+onBeforeUnmount(() => document.removeEventListener("visibilitychange", onVisibility));
 
 function handleUploadClick() {
   if (!authStore.hasActiveSubscription) {
@@ -195,19 +217,19 @@ onMounted(() => {
               <HardDrive class="w-3.5 h-3.5 text-blue-600" />
               <span>Storage Quota</span>
             </div>
-            <span class="font-mono text-slate-600 font-semibold text-[10px]">{{ percentUsed }}%</span>
+            <span class="font-mono text-slate-600 font-semibold text-[10px]">{{ percentLabel }}</span>
           </div>
 
           <div class="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
             <div
               class="h-full rounded-full transition-all duration-300"
               :class="percentUsed > 85 ? 'bg-rose-500' : 'bg-blue-600'"
-              :style="{ width: `${percentUsed}%` }"
+              :style="{ width: `${percentUsed > 0 ? Math.max(percentUsed, 1) : 0}%` }"
             ></div>
           </div>
 
           <div class="flex items-center justify-between text-[10px] text-slate-500">
-            <span>{{ storageUsedMB }} MB of {{ storageLimitGB }} GB</span>
+            <span>{{ storageUsedLabel }} of {{ storageLimitLabel }}</span>
             <router-link to="/app/billing" class="text-blue-600 font-medium hover:underline">
               Upgrade
             </router-link>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
+import { ref, onMounted, computed } from "vue";
 import { useRoute } from "vue-router";
 import { useAuthStore } from "../../stores/auth";
 import { useBillingStore } from "../../stores/billing";
@@ -23,6 +23,17 @@ const authStore = useAuthStore();
 const billingStore = useBillingStore();
 
 const isGateRequired = ref(route.query.gate === "required");
+
+// Single source of truth: the same profile subscription the header/sidebar use. The old card
+// fell back to a hardcoded "Value Pack (200 GB)" whenever /subscription wasn't loaded/valid.
+const currentPlanName = computed(() => {
+  if (!authStore.hasActiveSubscription) return "No Active Plan";
+  return (
+    authStore.user?.subscription?.plan_name ||
+    billingStore.currentSubscription?.plan_details?.name ||
+    "Active Plan"
+  );
+});
 const checkoutError = ref("");
 
 const plansList = [
@@ -147,11 +158,11 @@ async function handleUpgrade(planCode: string) {
                 class="px-2.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider"
                 :class="authStore.hasActiveSubscription ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-rose-50 text-rose-700 border border-rose-200'"
               >
-                {{ authStore.hasActiveSubscription ? (billingStore.currentSubscription?.status || 'Active') : 'Inactive / Plan Required' }}
+                {{ authStore.hasActiveSubscription ? (authStore.user?.subscription?.status || billingStore.currentSubscription?.status || 'Active') : 'Inactive / Plan Required' }}
               </span>
             </div>
             <div class="text-2xl font-extrabold text-slate-900 tracking-tight">
-              {{ billingStore.currentSubscription?.plan_details?.name || (authStore.hasActiveSubscription ? 'Value Pack (200 GB)' : 'No Active Plan') }}
+              {{ currentPlanName }}
             </div>
             <div class="text-xs text-slate-500">
               <span v-if="billingStore.currentSubscription?.current_period_end">

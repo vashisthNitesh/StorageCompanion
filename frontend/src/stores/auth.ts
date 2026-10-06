@@ -210,7 +210,10 @@ export const useAuthStore = defineStore("auth", () => {
     try {
       const profile = await apiRequest<UserProfile>("/api/v1/auth/me");
       user.value = profile;
-    } catch {
+    } catch (err: any) {
+      // Only an authentication failure ends the session; a transient network/5xx error
+      // during a background refresh must not wipe the user's vault key.
+      if (user.value && err?.status !== 401 && err?.status !== 403) return;
       user.value = null;
       masterKey.value = null;
       setAccessToken(null);

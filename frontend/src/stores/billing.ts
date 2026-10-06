@@ -215,8 +215,8 @@ export const useBillingStore = defineStore("billing", () => {
       }
     );
     currentSubscription.value = res.subscription;
-    await authStore.fetchProfile();
-    await fetchInvoices();
+    // Refresh every view of the plan together so header, sidebar and status card agree
+    await Promise.all([authStore.fetchProfile(), fetchSubscription(), fetchInvoices()]);
   }
 
   async function cancel() {
