@@ -122,22 +122,34 @@ async function fetchPoolStatus() {
 }
 
 // Fetch Users List
+// Only the latest request may update the table: on a slow server the initial unfiltered
+// response used to land after the filtered one and overwrite it ("search doesn't filter").
+let usersRequestSeq = 0;
+let usersAbort: AbortController | null = null;
 async function fetchUsers() {
+  const seq = ++usersRequestSeq;
+  usersAbort?.abort();
+  const controller = new AbortController();
+  usersAbort = controller;
   isLoadingUsers.value = true;
   try {
     const params = new URLSearchParams({
-      search: searchQuery.value,
+      search: searchQuery.value.trim(),
       plan: selectedPlanFilter.value,
       status: selectedStatusFilter.value,
       page: usersData.value.page.toString(),
       page_size: usersData.value.page_size.toString(),
     });
-    const data = await apiRequest<any>(`/api/v1/admin/users/?${params.toString()}`);
+    const data = await apiRequest<any>(`/api/v1/admin/users/?${params.toString()}`, {
+      signal: controller.signal,
+    });
+    if (seq !== usersRequestSeq) return;
     usersData.value = data;
   } catch (err: any) {
+    if (seq !== usersRequestSeq || err?.name === "AbortError") return;
     console.error("Failed to load users:", err);
   } finally {
-    isLoadingUsers.value = false;
+    if (seq === usersRequestSeq) isLoadingUsers.value = false;
   }
 }
 
@@ -348,15 +360,17 @@ watch(selectedPeriod, () => {
   fetchKPIs();
 });
 
-// Debounce search
+// Debounced search: watch the model (covers typing, paste, autofill), Enter searches immediately
 let searchTimer: any = null;
-function handleSearchInput() {
+function runSearchNow() {
   clearTimeout(searchTimer);
-  searchTimer = setTimeout(() => {
-    usersData.value.page = 1;
-    fetchUsers();
-  }, 300);
+  usersData.value.page = 1;
+  fetchUsers();
 }
+watch(searchQuery, () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(runSearchNow, 300);
+});
 
 onMounted(async () => {
   await Promise.all([fetchKPIs(), fetchPoolStatus(), fetchUsers()]);
@@ -793,7 +807,7 @@ onMounted(async () => {
             <input
               type="text"
               v-model="searchQuery"
-              @input="handleSearchInput"
+              @keydown.enter.prevent="runSearchNow"
               placeholder="Search user or email..."
               class="pl-9 pr-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-indigo-500"
             />
