@@ -95,6 +95,36 @@ const currentPlanCode = computed(
   () => authStore.user?.subscription?.plan_code || billingStore.currentSubscription?.plan_details?.code || null
 );
 
+// Printable receipt (the browser's "Save as PDF" gives a PDF); the backend had no invoice
+// documents (pdf_url is always empty).
+function escapeHtml(v: unknown): string {
+  return String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] as string));
+}
+function printReceipt(inv: any) {
+  const w = window.open("", "_blank", "noopener=no,width=720,height=900");
+  if (!w) {
+    checkoutError.value = "Allow pop-ups for this site to open the receipt.";
+    return;
+  }
+  const issued = new Date(inv.issued_at);
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Receipt ${escapeHtml(inv.provider_invoice_id || inv.id)}</title>
+<style>body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;color:#0f172a;margin:40px}h1{font-size:20px;margin:0 0 4px}
+table{width:100%;border-collapse:collapse;margin-top:24px;font-size:14px}td{padding:8px 0;border-bottom:1px solid #e2e8f0}
+td:last-child{text-align:right;font-family:ui-monospace,monospace}.muted{color:#64748b;font-size:12px}.total{font-weight:700;font-size:16px}</style></head>
+<body><h1>Payment receipt</h1><div class="muted">SmartSpace Data · smartspacedata.com</div>
+<table>
+<tr><td>Billed to</td><td>${escapeHtml(authStore.user?.email)}</td></tr>
+<tr><td>Date</td><td>${escapeHtml(issued.toLocaleString())}</td></tr>
+<tr><td>Order ID</td><td>${escapeHtml(inv.provider_invoice_id || "—")}</td></tr>
+<tr><td>Payment ID</td><td>${escapeHtml(inv.provider_payment_id || "—")}</td></tr>
+<tr><td>Description</td><td>Encrypted cloud storage subscription (SAC 998315)</td></tr>
+<tr><td>Status</td><td>${escapeHtml(inv.status)}</td></tr>
+<tr><td class="total">Amount</td><td class="total">${escapeHtml(inv.currency)} ${escapeHtml(inv.amount)}</td></tr>
+</table><p class="muted">This is a payment receipt, not a GST tax invoice.</p>
+<script>window.onload=function(){window.print()}<\/script></body></html>`);
+  w.document.close();
+}
+
 async function handleUpgrade(planCode: string) {
   checkoutError.value = "";
   // Switching plans starts a new billing period today (no proration yet): say so before charging
@@ -337,6 +367,13 @@ async function handleUpgrade(planCode: string) {
             <span class="px-2.5 py-0.5 rounded-full text-[10px] font-semibold uppercase bg-emerald-50 text-emerald-700 border border-emerald-200">
               {{ inv.status }}
             </span>
+            <button
+              type="button"
+              @click="printReceipt(inv)"
+              class="px-2.5 py-1 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-100 text-[11px] font-medium"
+            >
+              Receipt
+            </button>
           </div>
         </div>
       </div>
