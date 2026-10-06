@@ -199,6 +199,11 @@ function getFileMeta(name: string): FileMeta {
 const filteredNodes = computed(() => {
   let list = [...filesStore.nodes];
 
+  // Header "Search decrypted vault" box: it only updated filesStore.searchQuery and nothing
+  // used it, so typing didn't filter anything. Filter the current folder by name.
+  const q = filesStore.searchQuery.trim().toLowerCase();
+  if (q) list = list.filter((n) => (n.name || "").toLowerCase().includes(q));
+
   if (activeFilter.value === "folders") {
     list = list.filter((n) => n.type === "folder");
   } else if (activeFilter.value === "documents") {
