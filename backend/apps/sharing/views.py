@@ -1,3 +1,4 @@
+import logging
 import urllib.request
 from django.conf import settings
 from django.contrib.auth.hashers import check_password
@@ -11,6 +12,23 @@ from rest_framework.views import APIView
 from rest_framework.exceptions import NotFound, PermissionDenied
 
 from apps.sharing.models import Share
+from rest_framework.throttling import AnonRateThrottle, ScopedRateThrottle
+
+logger = logging.getLogger(__name__)
+
+
+class SharePasswordThrottle(ScopedRateThrottle):
+    """Limits password guesses on protected links (per IP); requests without a password are not counted."""
+
+    scope_attr = "throttle_scope"
+
+    def allow_request(self, request, view):
+        has_password = bool(request.query_params.get("password")) or (
+            isinstance(getattr(request, "data", None), dict) and bool(request.data.get("password"))
+        )
+        if not has_password:
+            return True
+        return super().allow_request(request, view)
 from apps.storage.models import FileVersion
 from apps.storage.spacebyte import get_spacebyte_client
 from apps.storage.services import get_s3_client
@@ -112,6 +130,8 @@ class ShareDetailView(APIView):
 
 class PublicShareInfoView(APIView):
     permission_classes = [permissions.AllowAny]
+    throttle_classes = [SharePasswordThrottle, AnonRateThrottle]
+    throttle_scope = "share_auth"
 
     def get(self, request, token):
         password = request.query_params.get("password")
@@ -121,6 +141,8 @@ class PublicShareInfoView(APIView):
 
 class PublicShareAuthView(APIView):
     permission_classes = [permissions.AllowAny]
+    throttle_classes = [SharePasswordThrottle, AnonRateThrottle]
+    throttle_scope = "share_auth"
 
     def post(self, request, token):
         serializer = PublicShareAuthSerializer(data=request.data)
@@ -133,6 +155,8 @@ class PublicShareAuthView(APIView):
 
 class PublicShareDownloadView(APIView):
     permission_classes = [permissions.AllowAny]
+    throttle_classes = [SharePasswordThrottle, AnonRateThrottle]
+    throttle_scope = "share_auth"
 
     def get(self, request, token):
         password = request.query_params.get("password")
@@ -146,6 +170,8 @@ class PublicShareContentView(APIView):
     Validates token & optional password, then proxies from SpaceByte / S3 upstream.
     """
     permission_classes = [permissions.AllowAny]
+    throttle_classes = [SharePasswordThrottle, AnonRateThrottle]
+    throttle_scope = "share_auth"
 
     def get(self, request, token):
         password = request.query_params.get("password")

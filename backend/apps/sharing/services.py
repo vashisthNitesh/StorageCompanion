@@ -1,5 +1,6 @@
 import hashlib
 import secrets
+import urllib.parse
 from django.conf import settings
 from django.contrib.auth.hashers import make_password, check_password
 from django.utils import timezone

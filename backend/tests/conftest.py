@@ -92,3 +92,12 @@ def fake_s3(monkeypatch):
     for target in ("apps.storage.services", "apps.storage.views", "apps.sharing.services", "apps.sharing.views"):
         monkeypatch.setattr(f"{target}.get_s3_client", lambda: fake, raising=False)
     return fake
+
+
+@pytest.fixture(autouse=True)
+def clear_throttle_cache():
+    from django.core.cache import cache
+
+    cache.clear()
+    yield
+    cache.clear()

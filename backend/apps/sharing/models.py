@@ -63,6 +63,10 @@ class Share(BaseModel):
     def is_active(self):
         if self.revoked_at is not None:
             return False
+        # A link must stop working once its file/folder is trashed or deleted
+        node = self.node
+        if node is not None and (node.trashed_at is not None or node.deleted_at is not None):
+            return False
         if self.expires_at and timezone.now() > self.expires_at:
             return False
         if self.max_downloads and self.download_count >= self.max_downloads:

@@ -176,7 +176,7 @@ REST_FRAMEWORK = {
         "user": "1000/day",
         "auth": "10/minute",
         "uploads": "600/minute",
-        "share_auth": "10/hour",
+        "share_auth": "20/hour",
     },
     "EXCEPTION_HANDLER": "apps.common.exceptions.custom_exception_handler",
 }
