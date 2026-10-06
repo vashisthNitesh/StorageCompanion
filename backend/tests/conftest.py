@@ -84,6 +84,10 @@ class FakeS3Client:
     def abort_multipart_upload(self, **kw):
         return {}
 
+    def put_bucket_cors(self, **kw):
+        self.cors = kw
+        return {}
+
     def get_object(self, **kw):
         raise ConnectionError("fake s3: no object storage in tests")
 

@@ -321,8 +321,23 @@ class NodeContentView(APIView):
                         status=status.HTTP_502_BAD_GATEWAY,
                     )
 
+                # Never echo the raw upstream body (it can be an HTML page) to the user
+                upstream_status = getattr(e, "status_code", None)
+                if upstream_status in (401, 403):
+                    message = (
+                        f"The storage provider refused access to this file (HTTP {upstream_status}). "
+                        "The server's SpaceByte access token may be expired or lack access to this file; "
+                        "please contact support."
+                    )
+                    code = "upstream_forbidden"
+                elif upstream_status == 404:
+                    message = "This file's data was not found at the storage provider."
+                    code = "upstream_not_found"
+                else:
+                    message = "The storage provider is unavailable right now. Please try again shortly."
+                    code = "upstream_unavailable"
                 return Response(
-                    {"error": f"Failed to stream file from storage upstream: {str(e)}"},
+                    {"error": message, "code": code, "upstream_status": upstream_status},
                     status=status.HTTP_502_BAD_GATEWAY,
                 )
         else:

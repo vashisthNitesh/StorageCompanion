@@ -438,7 +438,7 @@ def abort_multipart_upload(upload_id: str, user):
     if not upload:
         raise NotFound("Upload session not found.")
 
-    if upload.status == Upload.STATUS_UPLOADING:
+    if upload.status in (Upload.STATUS_UPLOADING, Upload.STATUS_INITIATED):
         if upload.spacebyte_upload_id:
             try:
                 sb_client = get_spacebyte_client()
@@ -567,9 +567,15 @@ def get_download_info(node: Node, user, version_no: int | None = None) -> dict:
     part_size = 16 * 1024 * 1024 if version.size_bytes > 5 * 1024 * 1024 * 1024 else 8 * 1024 * 1024
 
     if node.spacebyte_hash:
-        sb_client = get_spacebyte_client()
-        resolved_url = sb_client.resolve_direct_download_url(node.spacebyte_hash)
-        direct_download_url = resolved_url or sb_client.get_download_url(node.spacebyte_hash)
+        # Live QA: resolving the presigned URL made /download take ~11 s, and when resolution
+        # failed the code handed the browser the *authenticated* SpaceByte API URL
+        # (file-entries/download/<hash>), which always 401s from a browser. The SpaceByte bucket
+        # also has no CORS rule for our origin, so a direct browser GET can't work anyway.
+        # Only resolve when explicitly enabled, and never return the API URL.
+        direct_download_url = None
+        if getattr(settings, "SPACEBYTE_DIRECT_DOWNLOADS", False):
+            sb_client = get_spacebyte_client()
+            direct_download_url = sb_client.resolve_direct_download_url(node.spacebyte_hash, timeout=5)
     else:
         s3 = get_s3_client()
         try:
