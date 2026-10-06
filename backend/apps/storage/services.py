@@ -396,7 +396,7 @@ def complete_multipart_upload(
     last_version = FileVersion.objects.filter(node=node).order_by("-version_no").first()
     version_no = (last_version.version_no + 1) if last_version else 1
 
-    file_version = FileVersion.objects.create(
+    FileVersion.objects.create(
         node=node,
         version_no=version_no,
         object_key=upload.object_key,

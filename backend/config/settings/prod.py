@@ -4,7 +4,7 @@ DEBUG = env.bool("DEBUG", default=False)
 
 ALLOWED_HOSTS = env.list(
     "ALLOWED_HOSTS",
-    default=["localhost", "127.0.0.1", "web", ".onrender.com", "*"],
+    default=["localhost", "127.0.0.1", "web", ".onrender.com"],  # never "*" (Host header poisoning)
 )
 CSRF_TRUSTED_ORIGINS = env.list(
     "CSRF_TRUSTED_ORIGINS",

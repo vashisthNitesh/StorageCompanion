@@ -26,6 +26,11 @@ from apps.billing.services import (
 class PlanListView(generics.ListAPIView):
     serializer_class = PlanSerializer
     permission_classes = [permissions.AllowAny]
+    # The global cursor pagination re-ordered plans by -created_at (newest first) instead of
+    # sort_order; the list is tiny, so return it whole and in the intended order.
+    pagination_class = None
+    # Public, cacheable catalogue (was also Render's health check): don't burn the anon quota
+    throttle_classes = []
 
     def get_queryset(self):
         return get_active_plans()
@@ -155,3 +160,14 @@ class RazorpayWebhookView(APIView):
 
         process_webhook_event(payload=payload, event_id=event_id)
         return Response({"status": "ok"}, status=status.HTTP_200_OK)
+
+
+class HealthView(APIView):
+    """Liveness probe for the load balancer: cheap, unauthenticated, never throttled."""
+
+    permission_classes = [permissions.AllowAny]
+    authentication_classes = []
+    throttle_classes = []
+
+    def get(self, request):
+        return Response({"status": "ok"})

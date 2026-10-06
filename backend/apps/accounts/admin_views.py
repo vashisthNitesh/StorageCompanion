@@ -8,6 +8,7 @@ from django.db.models.functions import TruncHour, TruncDay, TruncMonth
 from django.shortcuts import get_object_or_404
 from rest_framework import permissions, status
 from rest_framework.views import APIView
+from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
 from apps.accounts.models import User
@@ -42,12 +43,10 @@ class AdminKPIsView(APIView):
         elif period == "yearly":
             start_date = now - timedelta(days=365)
             bucket_format = "%b"
-            bucket_count = 12
         else:  # monthly default
             period = "monthly"
             start_date = now - timedelta(days=30)
             bucket_format = "%d %b"
-            bucket_count = 30
 
         # 1. Customer User Metrics (Exclude Master Admin & Staff)
         customer_users_qs = User.objects.filter(is_staff=False, is_superuser=False)
@@ -90,7 +89,6 @@ class AdminKPIsView(APIView):
         # 4. Plan Distribution (Customer plans only)
         all_plans = list(Plan.objects.filter(is_active=True).order_by("sort_order"))
         plan_counts = {p.code: 0 for p in all_plans}
-        plan_names = {p.code: p.name for p in all_plans}
         
         subs_distribution = (
             Subscription.objects.filter(
@@ -418,7 +416,13 @@ class AdminUserPlanUpgradeView(APIView):
         # Update storage quota limit
         quota, _ = StorageQuota.objects.get_or_create(user=target_user)
         if custom_limit_gb:
-            quota.bytes_limit = int(custom_limit_gb) * 1024 * 1024 * 1024
+            try:
+                limit_gb = int(custom_limit_gb)
+            except (TypeError, ValueError):
+                raise ValidationError({"custom_limit_gb": "Must be a whole number of GB."})
+            if limit_gb <= 0 or limit_gb > 100_000:
+                raise ValidationError({"custom_limit_gb": "Must be between 1 and 100000 GB."})
+            quota.bytes_limit = limit_gb * 1024 * 1024 * 1024
         else:
             quota.bytes_limit = plan.storage_bytes
         quota.save(update_fields=["bytes_limit"])
@@ -529,6 +533,14 @@ class AdminUserSubscriptionValidityView(APIView):
 
         now = timezone.now()
         original_end = sub.current_period_end
+        # Validate 'days' up front (int('abc') used to raise ValueError -> HTTP 500)
+        if days is not None:
+            try:
+                days = int(days)
+            except (TypeError, ValueError):
+                raise ValidationError({"days": "Must be a whole number of days."})
+            if days <= 0 or days > 3650:
+                raise ValidationError({"days": "Must be between 1 and 3650."})
         original_status = sub.status
 
         # 1. Reduce validity

@@ -240,3 +240,26 @@ def test_create_master_admin_requires_env(monkeypatch):
     monkeypatch.delenv("MASTER_ADMIN_PASSWORD", raising=False)
     call_command("create_master_admin")
     assert not User.objects.filter(is_superuser=True).exists()
+
+
+@pytest.mark.django_db
+def test_admin_validity_rejects_non_numeric_days(api_client, subscribed_user):
+    from apps.accounts.models import User
+
+    admin = User.objects.create_superuser(email="adm-days@test.local", password="AdminDaysPass123!")
+    api_client.force_authenticate(admin)
+    url = f"/api/v1/admin/users/{subscribed_user.id}/validity/"
+    assert api_client.post(url, {"action": "extend", "days": "abc"}, format="json").status_code == 400
+    assert api_client.post(url, {"action": "extend", "days": "5"}, format="json").status_code == 200
+
+
+@pytest.mark.django_db
+def test_plans_are_ordered_and_health_is_open(api_client, sample_plan):
+    from apps.billing.models import Plan
+
+    Plan.objects.create(code="zzz_first", name="First", storage_bytes=1, price_monthly=1, price_yearly=10,
+                        max_file_size=1, sort_order=-1)
+    res = api_client.get("/api/v1/plans")
+    assert res.status_code == 200
+    assert isinstance(res.data, list) and res.data[0]["code"] == "zzz_first"
+    assert api_client.get("/api/v1/health").data == {"status": "ok"}

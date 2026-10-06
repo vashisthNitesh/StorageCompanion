@@ -3,6 +3,7 @@ from django.urls import path
 from apps.billing.views import (
     CheckoutInitView,
     InvoiceListView,
+    HealthView,
     PaymentVerifyView,
     PlanListView,
     RazorpayWebhookView,
@@ -12,6 +13,7 @@ from apps.billing.views import (
 
 urlpatterns = [
     path("plans", PlanListView.as_view(), name="plan-list"),
+    path("health", HealthView.as_view(), name="health"),
     path("subscription", SubscriptionDetailView.as_view(), name="subscription-detail"),
     path("subscription/checkout", CheckoutInitView.as_view(), name="subscription-checkout"),
     path("subscription/verify", PaymentVerifyView.as_view(), name="subscription-verify"),
