@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch, computed } from "vue";
-import { apiRequest, apiFetch } from "../../lib/api";
+import { apiRequest } from "../../lib/api";
+import { openEncryptedStream, readAllWithStallTimeout } from "../../lib/api/storageFetch";
 import { useAuthStore } from "../../stores/auth";
 import { decryptFile } from "../../lib/crypto/content";
 import { unwrapKey } from "../../lib/crypto/keys";
@@ -53,11 +54,23 @@ watch(
     if (newNode && isOpen) {
       await loadAndDecryptPreview(newNode);
     } else if (!isOpen) {
+      cancelActiveLoad();
       cleanup();
     }
   },
   { immediate: true }
 );
+
+// Guards against overlapping loads (fast node switching / reopen) leaving a stale spinner or content
+let loadSeq = 0;
+let activeLoad: AbortController | null = null;
+
+function cancelActiveLoad() {
+  loadSeq++;
+  activeLoad?.abort();
+  activeLoad = null;
+  isLoading.value = false;
+}
 
 function cleanup() {
   if (previewUrl.value) {
@@ -91,6 +104,12 @@ function formatBytes(bytes: number): string {
 }
 
 async function loadAndDecryptPreview(node: any) {
+  cancelActiveLoad();
+  const seq = loadSeq;
+  const controller = new AbortController();
+  activeLoad = controller;
+  const isCurrent = () => seq === loadSeq;
+
   isLoading.value = true;
   error.value = "";
   cleanup();
@@ -105,9 +124,9 @@ async function loadAndDecryptPreview(node: any) {
   }
 
   try {
-    if (!authStore.masterKey) throw new Error("Vault is locked");
+    if (!authStore.masterKey) throw new Error("Vault is locked. Log out and back in to unlock it.");
 
-    // 1. Get presigned GET URL & wrapped key from backend
+    // 1. Get download URLs & wrapped key from backend
     const downloadData = await apiRequest<{
       download_url: string;
       wrapped_file_key: string;
@@ -117,45 +136,30 @@ async function loadAndDecryptPreview(node: any) {
       direct_url?: string;
       upstream?: string;
     }>(`/api/v1/nodes/${node.id}/download`);
+    if (!isCurrent()) return;
 
-    // 2. Fetch encrypted bytes: try fast direct edge download first, falling back to authenticated proxy
-    let res: Response | null = null;
-    if (downloadData.direct_url) {
-      try {
-        const directRes = await fetch(downloadData.direct_url, { method: "GET" });
-        if (directRes.ok && directRes.body) {
-          res = directRes;
-        }
-      } catch {
-        // Fall back to proxy
-        res = null;
-      }
-    }
-
-    if (!res) {
-      res = await apiFetch(downloadData.download_url);
-    }
-
-    if (!res.ok) {
-      let errMessage = `Failed to fetch file from storage (${res.status})`;
-      try {
-        const errJson = await res.json();
-        if (errJson.error) {
-          errMessage = errJson.error;
-        }
-      } catch {}
-      throw new Error(errMessage);
-    }
-    const encryptedBuffer = await res.arrayBuffer();
-    const encryptedBytes = new Uint8Array(encryptedBuffer);
-
-    // 3. Unwrap File Key
     const fileKey = await unwrapKey(authStore.masterKey, downloadData.wrapped_file_key);
     const baseNonce = hexToUint8Array(downloadData.content_nonce);
-
-    // 4. Decrypt content (supports single chunk and multi-chunk files of any size)
     const partSize = downloadData.part_size || (8 * 1024 * 1024);
-    const decryptedBytes = await decryptFile(fileKey, encryptedBytes, baseNonce, partSize);
+
+    // 2. Fetch encrypted bytes (direct edge first, bounded; then authenticated proxy) and decrypt.
+    //    If bytes from the direct URL don't decrypt (e.g. an error page), retry once via the proxy.
+    const fetchAndDecrypt = async (skipDirect: boolean) => {
+      const { res, source, controller: streamCtl } = await openEncryptedStream(downloadData, {
+        signal: controller.signal,
+        skipDirect,
+      });
+      const encryptedBytes = await readAllWithStallTimeout(res, streamCtl);
+      try {
+        return await decryptFile(fileKey, encryptedBytes, baseNonce, partSize);
+      } catch (decErr) {
+        if (source === "direct") return null;
+        throw new Error("Could not decrypt this file. It may be corrupted or incompletely uploaded.");
+      }
+    };
+    let decryptedBytes = await fetchAndDecrypt(false);
+    if (!decryptedBytes && isCurrent()) decryptedBytes = await fetchAndDecrypt(true);
+    if (!isCurrent() || !decryptedBytes) return;
     decryptedData.value = decryptedBytes;
 
     const type = detectType(node.name);
@@ -198,9 +202,13 @@ async function loadAndDecryptPreview(node: any) {
       previewUrl.value = URL.createObjectURL(blob);
     }
   } catch (err: any) {
+    if (!isCurrent() || err?.name === "AbortError") return;
     error.value = err.message || "Failed to decrypt preview in browser.";
   } finally {
-    isLoading.value = false;
+    if (isCurrent()) {
+      isLoading.value = false;
+      activeLoad = null;
+    }
   }
 }
 

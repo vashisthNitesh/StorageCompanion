@@ -25,7 +25,14 @@ def get_s3_client():
         aws_access_key_id=settings.S3_ACCESS_KEY_ID,
         aws_secret_access_key=settings.S3_SECRET_ACCESS_KEY,
         region_name=settings.S3_REGION_NAME,
-        config=Config(signature_version="s3v4"),
+        # Bounded timeouts/retries: the boto defaults (60s connect x several retries) made previews
+        # and uploads hang for minutes when the endpoint is unreachable.
+        config=Config(
+            signature_version="s3v4",
+            connect_timeout=5,
+            read_timeout=60,
+            retries={"max_attempts": 2, "mode": "standard"},
+        ),
     )
 
 
@@ -568,7 +575,8 @@ def get_download_info(node: Node, user, version_no: int | None = None) -> dict:
                 ExpiresIn=settings.PRESIGNED_URL_TTL,
             )
         except Exception:
-            direct_download_url = f"{settings.S3_ENDPOINT_URL}/{settings.S3_BUCKET_NAME}/{version.object_key}"
+            # An unsigned URL to a private bucket can never work; let the client use the proxy
+            direct_download_url = None
 
     # Primary download URL routes through authenticated backend streaming proxy
     stream_url = f"/api/v1/nodes/{node.id}/content" + (f"?v={version.version_no}" if version_no else "")

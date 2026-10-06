@@ -1,6 +1,7 @@
 import { ref } from "vue";
 import { useAuthStore } from "../../stores/auth";
-import { apiRequest, apiFetch } from "../../lib/api";
+import { apiRequest } from "../../lib/api";
+import { openEncryptedStream, readChunkWithStallTimeout } from "../../lib/api/storageFetch";
 import { unwrapKey } from "../../lib/crypto/keys";
 import { decryptChunk } from "../../lib/crypto/content";
 import { hexToUint8Array } from "../../lib/crypto/kdf";
@@ -75,33 +76,8 @@ export function useFileDownload() {
       downloadStatusText.value[node.id] = "Downloading...";
 
       // 2. Fetch encrypted bytes: try direct storage edge download first, falling back to authenticated backend proxy
-      let res: Response | null = null;
-      if (downloadData.direct_url) {
-        try {
-          const directRes = await fetch(downloadData.direct_url, { method: "GET" });
-          if (directRes.ok && directRes.body) {
-            res = directRes;
-          }
-        } catch {
-          // Direct edge download failed (e.g. CORS or network), fall back to backend proxy
-          res = null;
-        }
-      }
-
-      if (!res) {
-        res = await apiFetch(downloadData.download_url);
-      }
-
-      if (!res.ok) {
-        let errMessage = `Failed to fetch file from storage (${res.status})`;
-        try {
-          const errJson = await res.json();
-          if (errJson.error) {
-            errMessage = errJson.error;
-          }
-        } catch {}
-        throw new Error(errMessage);
-      }
+      // Bounded waits: direct edge URL (10s to respond), then authenticated proxy
+      const { res, controller: streamCtl } = await openEncryptedStream(downloadData);
 
       // 3. Unwrap File Key with user's Master Key
       const fileKey = await unwrapKey(authStore.masterKey, downloadData.wrapped_file_key);
@@ -123,7 +99,7 @@ export function useFileDownload() {
       let receivedBytes = 0;
 
       while (true) {
-        const { done, value } = await reader.read();
+        const { done, value } = await readChunkWithStallTimeout(reader, streamCtl);
         if (done) break;
 
         if (value && value.length > 0) {
