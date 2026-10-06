@@ -81,6 +81,8 @@ const plansList = [
 ];
 
 onMounted(async () => {
+  // Warm up the Razorpay SDK here (it no longer loads on every page of the app)
+  billingStore.loadRazorpaySDK().catch(() => {});
   await Promise.all([
     billingStore.fetchPlans(),
     billingStore.fetchSubscription(),

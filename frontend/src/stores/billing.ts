@@ -251,6 +251,7 @@ export const useBillingStore = defineStore("billing", () => {
   }
 
   return {
+    loadRazorpaySDK,
     plans,
     currentSubscription,
     invoices,
