@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { validateItemName } from "../../lib/util/names";
 import { ref, computed, onMounted, onUnmounted } from "vue";
 import { useRouter } from "vue-router";
 import { useFilesStore, type FileNode } from "../../stores/files";
@@ -46,6 +47,9 @@ const { isDownloading, downloadFile, getProgress, getStatusText } = useFileDownl
 const isDraggingOver = ref(false);
 const showCreateFolderModal = ref(false);
 const newFolderName = ref("");
+const folderError = ref("");
+const renameError = ref("");
+const isSavingName = ref(false);
 const showRenameModal = ref(false);
 const renameTargetNode = ref<FileNode | null>(null);
 const renameInput = ref("");
@@ -251,26 +255,46 @@ function closeContextMenu() {
 
 function triggerCreateFolder() {
   newFolderName.value = "";
+  folderError.value = "";
   showCreateFolderModal.value = true;
 }
 
+// Blank names used to be ignored silently (the modal just stayed open) and API errors were
+// unhandled; duplicate names in the same folder were allowed.
 async function submitCreateFolder() {
-  if (!newFolderName.value.trim()) return;
-  await filesStore.createFolder(newFolderName.value.trim());
-  showCreateFolderModal.value = false;
+  folderError.value = validateItemName(newFolderName.value, filesStore.nodes) || "";
+  if (folderError.value || isSavingName.value) return;
+  isSavingName.value = true;
+  try {
+    await filesStore.createFolder(newFolderName.value.trim());
+    showCreateFolderModal.value = false;
+  } catch (err: any) {
+    folderError.value = err?.message || "Could not create the folder.";
+  } finally {
+    isSavingName.value = false;
+  }
 }
 
 function triggerRename(node: FileNode) {
   renameTargetNode.value = node;
   renameInput.value = node.name;
+  renameError.value = "";
   showRenameModal.value = true;
   closeContextMenu();
 }
 
 async function submitRename() {
-  if (renameTargetNode.value && renameInput.value.trim()) {
+  if (!renameTargetNode.value || isSavingName.value) return;
+  renameError.value = validateItemName(renameInput.value, filesStore.nodes, renameTargetNode.value.id) || "";
+  if (renameError.value) return;
+  isSavingName.value = true;
+  try {
     await filesStore.renameNode(renameTargetNode.value.id, renameInput.value.trim());
     showRenameModal.value = false;
+  } catch (err: any) {
+    renameError.value = err?.message || "Could not rename this item.";
+  } finally {
+    isSavingName.value = false;
   }
 }
 
@@ -871,14 +895,17 @@ onUnmounted(() => {
           placeholder="Folder name..."
           class="w-full px-3.5 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all"
           autofocus
+          maxlength="255"
+          @input="folderError = ''"
           @keyup.enter="submitCreateFolder"
         />
+        <p v-if="folderError" class="text-xs text-rose-700" role="alert">{{ folderError }}</p>
         <div class="flex justify-end space-x-2 pt-1">
           <button @click="showCreateFolderModal = false" class="btn-secondary px-3.5 py-1.5 rounded-xl text-xs font-medium">
             Cancel
           </button>
-          <button @click="submitCreateFolder" class="btn-primary px-4 py-1.5 rounded-xl text-xs font-semibold">
-            Create Folder
+          <button @click="submitCreateFolder" :disabled="isSavingName" class="btn-primary px-4 py-1.5 rounded-xl text-xs font-semibold disabled:opacity-60">
+            {{ isSavingName ? 'Creating...' : 'Create Folder' }}
           </button>
         </div>
       </div>
@@ -896,14 +923,17 @@ onUnmounted(() => {
           v-model="renameInput"
           class="w-full px-3.5 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all"
           autofocus
+          maxlength="255"
+          @input="renameError = ''"
           @keyup.enter="submitRename"
         />
+        <p v-if="renameError" class="text-xs text-rose-700" role="alert">{{ renameError }}</p>
         <div class="flex justify-end space-x-2 pt-1">
           <button @click="showRenameModal = false" class="btn-secondary px-3.5 py-1.5 rounded-xl text-xs font-medium">
             Cancel
           </button>
-          <button @click="submitRename" class="btn-primary px-4 py-1.5 rounded-xl text-xs font-semibold">
-            Save Changes
+          <button @click="submitRename" :disabled="isSavingName" class="btn-primary px-4 py-1.5 rounded-xl text-xs font-semibold disabled:opacity-60">
+            {{ isSavingName ? 'Saving...' : 'Save Changes' }}
           </button>
         </div>
       </div>
