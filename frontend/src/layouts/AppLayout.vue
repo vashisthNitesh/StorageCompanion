@@ -13,6 +13,8 @@ import {
   LogOut,
   UploadCloud,
   Search,
+  Menu,
+  Trash2,
   ChevronRight,
   Shield,
   ShieldAlert,
@@ -83,7 +85,11 @@ function refreshProfileThrottled(minIntervalMs = 15_000) {
 function onVisibility() {
   if (document.visibilityState === "visible") refreshProfileThrottled();
 }
-watch(() => route.fullPath, () => refreshProfileThrottled());
+watch(() => route.fullPath, () => {
+  sidebarOpen.value = false; // close the mobile drawer after navigating
+  refreshProfileThrottled();
+});
+const sidebarOpen = ref(false);
 onMounted(() => document.addEventListener("visibilitychange", onVisibility));
 onBeforeUnmount(() => document.removeEventListener("visibilitychange", onVisibility));
 
@@ -124,7 +130,20 @@ onMounted(() => {
 <template>
   <div class="flex h-screen bg-slate-50 text-slate-900 overflow-hidden selection:bg-brand-600 selection:text-white">
     <!-- Left Sidebar -->
-    <aside class="w-64 border-r border-slate-200 bg-white flex flex-col justify-between shrink-0 shadow-[1px_0_3px_0_rgba(0,0,0,0.02)]">
+    <!-- Mobile drawer backdrop -->
+    <div
+      v-if="sidebarOpen"
+      class="fixed inset-0 z-30 bg-slate-900/40 md:hidden"
+      aria-hidden="true"
+      @click="sidebarOpen = false"
+    ></div>
+    <!-- Below md the sidebar is an off-canvas drawer; it used to be a fixed 256px column that
+         left ~134px for content on a 390px phone and clipped the Upload button. -->
+    <aside
+      id="app-sidebar"
+      class="fixed inset-y-0 left-0 z-40 w-64 border-r border-slate-200 bg-white flex flex-col justify-between shrink-0 shadow-[1px_0_3px_0_rgba(0,0,0,0.02)] overflow-y-auto transform transition-transform duration-200 md:static md:translate-x-0 md:z-auto"
+      :class="sidebarOpen ? 'translate-x-0 shadow-xl' : '-translate-x-full'"
+    >
       <div class="p-4 space-y-5">
         <!-- Logo -->
         <router-link to="/" class="flex items-center space-x-2.5 group">
@@ -169,6 +188,15 @@ onMounted(() => {
             >
               <Share2 class="w-4 h-4" :class="$route.path === '/app/shared' ? 'text-blue-600' : 'text-slate-400'" />
               <span>Shared Links</span>
+            </router-link>
+
+            <router-link
+              to="/app/trash"
+              class="flex items-center space-x-3 px-3 py-2 rounded-xl transition-all"
+              :class="$route.path === '/app/trash' ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/70'"
+            >
+              <Trash2 class="w-4 h-4" :class="$route.path === '/app/trash' ? 'text-blue-600' : 'text-slate-400'" />
+              <span>Trash</span>
             </router-link>
 
             <router-link
@@ -320,9 +348,19 @@ onMounted(() => {
       </div>
 
       <!-- Top Header -->
-      <header class="h-14 border-b border-slate-200 bg-white/80 backdrop-blur-md flex items-center justify-between px-6 shrink-0 shadow-2xs">
+      <header class="h-14 border-b border-slate-200 bg-white/80 backdrop-blur-md flex items-center justify-between gap-2 px-3 md:px-6 shrink-0 shadow-2xs">
+        <button
+          type="button"
+          class="md:hidden p-2 -ml-1 rounded-lg text-slate-600 hover:bg-slate-100 shrink-0"
+          aria-controls="app-sidebar"
+          :aria-expanded="sidebarOpen"
+          aria-label="Open navigation"
+          @click="sidebarOpen = !sidebarOpen"
+        >
+          <Menu class="w-5 h-5" />
+        </button>
         <!-- Breadcrumbs or Admin Title -->
-        <div class="flex items-center space-x-2 text-xs font-medium text-slate-500">
+        <div class="flex items-center space-x-2 text-xs font-medium text-slate-500 min-w-0 overflow-x-auto whitespace-nowrap flex-1">
           <template v-if="!authStore.isMasterAdmin">
             <template v-for="(crumb, idx) in filesStore.breadcrumbs" :key="crumb.id || idx">
               <button
@@ -344,9 +382,9 @@ onMounted(() => {
         </div>
 
         <!-- Search, Status & Prominent Top Sign Out -->
-        <div class="flex items-center space-x-3">
+        <div class="flex items-center space-x-2 md:space-x-3 shrink-0">
           <!-- Client-side decrypted search input (Customers Only) -->
-          <div v-if="!authStore.isMasterAdmin" class="relative w-64">
+          <div v-if="!authStore.isMasterAdmin" class="relative hidden sm:block w-40 lg:w-64">
             <Search class="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               type="text"
@@ -359,7 +397,7 @@ onMounted(() => {
 
           <!-- Subscription Badge -->
           <div
-            class="px-2.5 py-1 rounded-lg text-[10px] font-medium tracking-wide flex items-center space-x-1"
+            class="hidden sm:flex px-2.5 py-1 rounded-lg text-[10px] font-medium tracking-wide items-center space-x-1"
             :class="authStore.hasActiveSubscription ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-amber-50 text-amber-700 border border-amber-200'"
           >
             <span class="w-1.5 h-1.5 rounded-full" :class="authStore.hasActiveSubscription ? 'bg-emerald-500' : 'bg-amber-500'"></span>
@@ -373,20 +411,20 @@ onMounted(() => {
             title="Sign Out"
           >
             <LogOut class="w-3.5 h-3.5 text-rose-600" />
-            <span>Sign Out</span>
+            <span class="hidden sm:inline">Sign Out</span>
           </button>
         </div>
       </header>
 
       <!-- Routed Page Container -->
-      <main class="flex-1 overflow-y-auto p-6 bg-slate-50">
+      <main class="flex-1 overflow-y-auto p-3 sm:p-6 bg-slate-50">
         <router-view />
       </main>
     </div>
 
     <!-- Unlock Vault Modal (when user session is valid but client-side masterKey is locked) -->
     <div
-      v-if="!authStore.isVaultUnlocked && !authStore.isMasterAdmin && ($route.path.startsWith('/app/files') || $route.path.startsWith('/app/shared'))"
+      v-if="!authStore.isVaultUnlocked && !authStore.isMasterAdmin && ($route.path.startsWith('/app/files') || $route.path.startsWith('/app/shared') || $route.path.startsWith('/app/trash'))"
       class="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4"
     >
       <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-5">

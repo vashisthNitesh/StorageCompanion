@@ -148,3 +148,27 @@ export async function apiRequest<T = any>(
 
   return await response.json();
 }
+
+/**
+ * Fetches every page of a cursor-paginated DRF list (PAGE_SIZE is 50). Callers previously read
+ * only `results` of the first page, so folders with more than 50 items silently lost the rest.
+ * `next` links are absolute and may carry the wrong scheme/host behind the proxy, so they are
+ * converted back to same-origin relative URLs.
+ */
+export async function apiRequestAllPages<T = any>(endpoint: string, maxPages = 200): Promise<T[]> {
+  const all: T[] = [];
+  let url: string | null = endpoint;
+  for (let page = 0; url && page < maxPages; page++) {
+    const res: any = await apiRequest<any>(url);
+    if (Array.isArray(res)) return res as T[];
+    all.push(...((res?.results as T[]) || []));
+    if (!res?.next) break;
+    try {
+      const u = new URL(res.next, typeof window !== "undefined" ? window.location.origin : "http://localhost");
+      url = u.pathname + u.search;
+    } catch {
+      url = null;
+    }
+  }
+  return all;
+}

@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { ref, computed } from "vue";
-import { apiRequest } from "../lib/api";
+import { apiRequest, apiRequestAllPages } from "../lib/api";
 import { useAuthStore } from "./auth";
 import { encryptName, decryptName } from "../lib/crypto/names";
 import { cacheNodes, searchLocalNodes, type CachedMetadataNode } from "../lib/db";
@@ -51,19 +51,23 @@ export const useFilesStore = defineStore("files", () => {
         endpoint += `?parent=${parentId}`;
       }
 
-      const res = await apiRequest<{ results: any[] } | any[]>(endpoint);
-      const items = Array.isArray(res) ? res : res.results || [];
+      const items = await apiRequestAllPages<any>(endpoint);
 
       // Decrypt all file and folder names in parallel using the user's Master Key
       const decryptedNodes: FileNode[] = await Promise.all(
         items.map(async (item: any) => {
           let decrypted = "[Encrypted]";
           if (authStore.masterKey) {
-            decrypted = await decryptName(
-              authStore.masterKey,
-              item.encrypted_name,
-              item.name_nonce
-            );
+            try {
+              decrypted = await decryptName(
+                authStore.masterKey,
+                item.encrypted_name,
+                item.name_nonce
+              );
+            } catch {
+              // One corrupt name must not make the whole folder fail to load
+              decrypted = "[Unreadable name]";
+            }
           }
           return {
             ...item,

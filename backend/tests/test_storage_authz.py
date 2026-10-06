@@ -125,3 +125,25 @@ def test_complete_uses_server_side_etags(auth_client, monkeypatch, fake_s3):
     )
     assert res.status_code == 200, res.data
     assert seen["MultipartUpload"]["Parts"] == [{"PartNumber": 1, "ETag": '"abc123"'}]
+
+
+@pytest.mark.django_db
+def test_trash_list_and_restore_out_of_trashed_folder(auth_client, subscribed_user):
+    folder = Node.objects.create(owner=subscribed_user, type=Node.TYPE_FOLDER, encrypted_name="Zg==", name_nonce="n")
+    child = make_file(subscribed_user)
+    child.parent = folder
+    child.save()
+    assert auth_client.delete(f"/api/v1/nodes/{child.id}").status_code == 200
+    assert auth_client.delete(f"/api/v1/nodes/{folder.id}").status_code == 200
+    listed = auth_client.get("/api/v1/nodes?trashed=true").data
+    ids = {n["id"] for n in (listed["results"] if isinstance(listed, dict) else listed)}
+    assert {str(folder.id), str(child.id)} <= ids
+    assert auth_client.post(f"/api/v1/nodes/{child.id}/restore").status_code == 200
+    child.refresh_from_db()
+    assert child.trashed_at is None and child.parent_id is None  # moved to root, visible again
+
+
+@pytest.mark.django_db
+def test_cannot_restore_other_users_node(other_client, subscribed_user):
+    node = make_file(subscribed_user)
+    assert other_client.post(f"/api/v1/nodes/{node.id}/restore").status_code == 404

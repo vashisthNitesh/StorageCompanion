@@ -173,7 +173,12 @@ class NodeRestoreView(APIView):
             raise NotFound("Node not found.")
 
         node.trashed_at = None
-        node.save(update_fields=["trashed_at"])
+        update_fields = ["trashed_at"]
+        # Restoring into a folder that is itself trashed/deleted would leave the item invisible
+        if node.parent_id and (node.parent.trashed_at is not None or node.parent.deleted_at is not None):
+            node.parent = None
+            update_fields.append("parent")
+        node.save(update_fields=update_fields)
 
         AuditLog.objects.create(
             user=request.user,

@@ -61,6 +61,11 @@ const routes: RouteRecordRaw[] = [
         component: () => import("../features/sharing/SharedFilesView.vue"),
       },
       {
+        path: "trash",
+        name: "trash",
+        component: () => import("../features/files/TrashView.vue"),
+      },
+      {
         path: "billing",
         name: "billing",
         component: () => import("../features/billing/BillingView.vue"),
@@ -113,7 +118,7 @@ router.beforeEach(async (to, _from, next) => {
     }
 
     // Superadmin restriction: redirect away from customer vault/billing pages to admin dashboard
-    if (authStore.isMasterAdmin && (to.path === "/app" || to.path === "/app/files" || to.path === "/app/shared" || to.path === "/app/billing")) {
+    if (authStore.isMasterAdmin && (to.path === "/app" || to.path === "/app/files" || to.path === "/app/shared" || to.path === "/app/trash" || to.path === "/app/billing")) {
       next({ path: "/app/admin" });
       return;
     }
