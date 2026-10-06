@@ -4,6 +4,7 @@ from django.contrib.auth.hashers import check_password
 from django.http import StreamingHttpResponse
 from django.utils import timezone
 from django.db.models import Q
+from apps.common.streaming import stream_iterator
 from rest_framework import status, permissions, generics
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -170,7 +171,7 @@ class PublicShareContentView(APIView):
             s3_obj = s3.get_object(**params)
             status_code = 206 if "Range" in params else 200
             streaming_resp = StreamingHttpResponse(
-                s3_obj["Body"].iter_chunks(chunk_size=256 * 1024),
+                stream_iterator(request, s3_obj["Body"].iter_chunks(chunk_size=256 * 1024)),
                 status=status_code,
                 content_type="application/octet-stream",
             )
@@ -192,7 +193,7 @@ class PublicShareContentView(APIView):
                     range_header=range_header,
                 )
                 streaming_resp = StreamingHttpResponse(
-                    iter(lambda: upstream_resp.read(256 * 1024), b""),
+                    stream_iterator(request, iter(lambda: upstream_resp.read(256 * 1024), b"")),
                     status=resp_status,
                     content_type=resp_headers.get("Content-Type", "application/octet-stream"),
                 )

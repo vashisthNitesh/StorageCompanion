@@ -175,7 +175,7 @@ REST_FRAMEWORK = {
         "anon": "100/day",
         "user": "1000/day",
         "auth": "10/minute",
-        "uploads": "100/minute",
+        "uploads": "600/minute",
         "share_auth": "10/hour",
     },
     "EXCEPTION_HANDLER": "apps.common.exceptions.custom_exception_handler",

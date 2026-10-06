@@ -25,7 +25,7 @@ function uploadPartWithProgress(
   headers: Record<string, string>,
   onProgress: (loaded: number, total: number) => void,
   timeoutMs: number = 90000
-): Promise<{ ok: boolean; status: number; etag: string; responseJson?: any }> {
+): Promise<{ ok: boolean; status: number; etag: string; responseJson?: any; retryAfter?: number }> {
   return new Promise((resolve) => {
     const xhr = new XMLHttpRequest();
     xhr.open(method, url, true);
@@ -78,7 +78,14 @@ function uploadPartWithProgress(
         const etag = xhr.getResponseHeader("ETag") || responseJson?.etag || "";
         resolve({ ok: true, status: xhr.status, etag, responseJson });
       } else {
-        resolve({ ok: false, status: xhr.status, etag: "" });
+        let responseJson: any = null;
+        try {
+          responseJson = JSON.parse(xhr.responseText);
+        } catch {
+          // not json
+        }
+        const retryAfter = Number(xhr.getResponseHeader("Retry-After")) || undefined;
+        resolve({ ok: false, status: xhr.status, etag: "", responseJson, retryAfter });
       }
     };
 
@@ -217,6 +224,12 @@ export const useUploadStore = defineStore("upload", () => {
         totalCommittedBytes += thisPartSize;
       }
 
+      // Direct-to-storage uploads are disabled for the rest of this file after a CORS/network
+      // failure or an unreadable ETag (storage CORS must expose ETag), instead of re-trying the
+      // direct URL first for every part (live QA: net::ERR_FAILED on storage.spacebyte.cloud).
+      let directDisabled = false;
+      let directFailures = 0;
+
       // Concurrency: 2 for large files (> 500MB) to prevent uplink queue buildup; 3 for > 100MB; 4 for smaller files
       const concurrency = file.size > 500 * 1024 * 1024 ? 2 : (file.size > 100 * 1024 * 1024 ? 3 : 4);
       let nextPartIndex = 0;
@@ -291,6 +304,7 @@ export const useUploadStore = defineStore("upload", () => {
             ? initData.presigned_urls.find((p: { part_number: number; url: string }) => p.part_number === partNumber)?.url
             : null;
 
+          if (presignedUrl && directDisabled) presignedUrl = null;
           if (presignedUrl && (presignedUrl.includes("localhost") || presignedUrl.includes("127.0.0.1"))) {
             const isLocalClient = typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
             if (!isLocalClient) {
@@ -338,12 +352,21 @@ export const useUploadStore = defineStore("upload", () => {
                 120000 // 120s timeout with stall detector
               );
 
-              if (directRes.ok) {
-                etag = directRes.etag || `"${partNumber}"`;
+              if (directRes.ok && directRes.etag) {
+                etag = directRes.etag;
                 uploaded = true;
                 uploadItem.errorMessage = undefined;
                 break;
               }
+              if (directRes.ok && !directRes.etag) {
+                // Stored, but the browser can't read the ETag (CORS doesn't expose it), so the
+                // upload could never be completed. Re-send via the relay, which returns it.
+                directDisabled = true;
+              } else if (directRes.status === 0 || directRes.status === 403) {
+                // CORS/network block or expired URL: stop trying direct after 2 failures
+                if (++directFailures >= 2) directDisabled = true;
+              }
+              presignedUrl = directDisabled ? null : presignedUrl;
             }
 
             // 2. Fallback: relay through backend API endpoint
@@ -368,12 +391,20 @@ export const useUploadStore = defineStore("upload", () => {
             );
 
             if (relayRes.ok) {
-              etag = relayRes.etag || relayRes.responseJson?.etag || `"${partNumber}"`;
+              etag = relayRes.responseJson?.etag || relayRes.etag || "";
               uploaded = true;
               uploadItem.errorMessage = undefined;
               break;
             } else {
               retries--;
+              const serverMsg = relayRes.responseJson?.error?.message || relayRes.responseJson?.error || relayRes.responseJson?.detail;
+              // Permanent errors: retrying 50 times (minutes of backoff) can't help
+              if ([400, 402, 403, 404, 409, 413].includes(relayRes.status)) {
+                throw new Error(
+                  (typeof serverMsg === "string" && serverMsg) ||
+                    (relayRes.status === 413 ? "Upload part rejected as too large by the server." : `Upload rejected (HTTP ${relayRes.status}).`)
+                );
+              }
               if (relayRes.status === 401) {
                 // Access token expired mid-upload: automatically refresh it!
                 await refreshAccessToken().catch(() => {});
@@ -381,8 +412,10 @@ export const useUploadStore = defineStore("upload", () => {
               if (retries === 0) {
                 throw new Error(`Failed to upload part ${partNumber}. Check network and click Retry.`);
               }
-              // Exponential backoff capped at 10s
-              const backoff = Math.min(10000, 1000 * Math.pow(1.5, Math.min(attempt - 1, 8)));
+              // Exponential backoff capped at 10s (or the server's Retry-After when throttled)
+              const backoff = relayRes.status === 429 && relayRes.retryAfter
+                ? Math.min(60000, relayRes.retryAfter * 1000)
+                : Math.min(10000, 1000 * Math.pow(1.5, Math.min(attempt - 1, 8)));
               await new Promise((r) => setTimeout(r, backoff));
             }
           }

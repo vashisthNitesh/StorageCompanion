@@ -34,11 +34,37 @@ export function useFileDownload() {
       return;
     }
 
+    let writableStream: any = null;
+    const knownSize = node.size_bytes || 0;
+    const hasFsAccess = typeof window !== "undefined" && "showSaveFilePicker" in window;
+
+    // In-memory assembly needs ~2x the file size in RAM; past this the tab would crash instead
+    // of downloading. Say so up front.
+    const MEMORY_LIMIT = 2 * 1024 * 1024 * 1024;
+    if (!hasFsAccess && knownSize > MEMORY_LIMIT) {
+      alert(
+        "This file is too large to decrypt in this browser's memory. Please download it with Chrome or Edge on a desktop, which can stream it straight to disk."
+      );
+      return;
+    }
+
+    // The save picker must be opened while the click's user activation is still valid, i.e.
+    // BEFORE any network await. Previously it ran after /download (which can take several
+    // seconds), so Chrome rejected it, the code silently fell back to buffering the whole file
+    // in memory, and nothing visible happened until the entire file was downloaded.
+    if (hasFsAccess && knownSize >= 100 * 1024 * 1024) {
+      try {
+        const fileHandle = await (window as any).showSaveFilePicker({ suggestedName: node.name });
+        writableStream = await fileHandle.createWritable();
+      } catch (pickerErr: any) {
+        if (pickerErr?.name === "AbortError") return; // user cancelled
+        writableStream = null; // fall back to in-memory assembly
+      }
+    }
+
     downloadingIds.value.add(node.id);
     downloadProgress.value[node.id] = 0;
     downloadStatusText.value[node.id] = "Connecting...";
-
-    let writableStream: any = null;
 
     try {
       // 1. Fetch download metadata (presigned/proxy URL & wrapped key)
@@ -52,26 +78,7 @@ export function useFileDownload() {
         upstream?: string;
       }>(`/api/v1/nodes/${node.id}/download`);
 
-      const totalSize = downloadData.size_bytes || node.size_bytes || 0;
-      const isLargeFile = totalSize >= 400 * 1024 * 1024; // >= 400 MB
-
-      // For large files (> 400 MB), try File System Access API for zero-RAM direct-to-disk streaming
-      if (isLargeFile && typeof window !== "undefined" && "showSaveFilePicker" in window) {
-        try {
-          downloadStatusText.value[node.id] = "Choose save location...";
-          const fileHandle = await (window as any).showSaveFilePicker({
-            suggestedName: node.name,
-          });
-          writableStream = await fileHandle.createWritable();
-        } catch (pickerErr: any) {
-          if (pickerErr.name === "AbortError") {
-            // User cancelled the file picker dialog
-            return;
-          }
-          // Fall back to in-memory chunked blob assembly
-          writableStream = null;
-        }
-      }
+      const totalSize = downloadData.size_bytes || knownSize;
 
       downloadStatusText.value[node.id] = "Downloading...";
 

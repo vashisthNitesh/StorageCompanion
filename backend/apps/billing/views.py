@@ -138,6 +138,8 @@ class InvoiceListView(generics.ListAPIView):
 
 class RazorpayWebhookView(APIView):
     permission_classes = [permissions.AllowAny]
+    # Signature-verified; must never be throttled (anon 100/day would drop Razorpay deliveries)
+    throttle_classes = []
 
     def post(self, request):
         signature = request.headers.get("X-Razorpay-Signature", "")

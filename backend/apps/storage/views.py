@@ -5,6 +5,8 @@ import urllib.request
 from django.conf import settings
 from django.http import StreamingHttpResponse
 from django.utils import timezone
+from apps.common.streaming import stream_iterator
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework import status, permissions, generics
 from rest_framework.parsers import BaseParser
 from rest_framework.response import Response
@@ -251,7 +253,7 @@ class NodeContentView(APIView):
             s3_obj = s3.get_object(**params)
             status_code = 206 if "Range" in params else 200
             streaming_resp = StreamingHttpResponse(
-                s3_obj["Body"].iter_chunks(chunk_size=256 * 1024),
+                stream_iterator(request, s3_obj["Body"].iter_chunks(chunk_size=256 * 1024)),
                 status=status_code,
                 content_type="application/octet-stream",
             )
@@ -287,7 +289,7 @@ class NodeContentView(APIView):
                                 pass
 
                 streaming_resp = StreamingHttpResponse(
-                    _stream_generator(upstream_resp),
+                    stream_iterator(request, _stream_generator(upstream_resp)),
                     status=resp_status,
                     content_type=resp_headers.get("Content-Type", "application/octet-stream"),
                 )
@@ -329,6 +331,10 @@ class NodeContentView(APIView):
 
 class UploadInitView(APIView):
     permission_classes = [permissions.IsAuthenticated]
+    # Large files are many requests (75 parts for 600 MB); the global 1000/day user throttle
+    # made big or repeated uploads fail with 429 part-way through.
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "uploads"
 
     def post(self, request):
         serializer = InitUploadSerializer(data=request.data)
@@ -348,6 +354,10 @@ class UploadInitView(APIView):
 
 class UploadCompleteView(APIView):
     permission_classes = [permissions.IsAuthenticated]
+    # Large files are many requests (75 parts for 600 MB); the global 1000/day user throttle
+    # made big or repeated uploads fail with 429 part-way through.
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "uploads"
 
     def post(self, request, upload_id):
         serializer = CompleteUploadSerializer(data=request.data)
@@ -369,6 +379,10 @@ class UploadCompleteView(APIView):
 
 class UploadAbortView(APIView):
     permission_classes = [permissions.IsAuthenticated]
+    # Large files are many requests (75 parts for 600 MB); the global 1000/day user throttle
+    # made big or repeated uploads fail with 429 part-way through.
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "uploads"
 
     def delete(self, request, upload_id):
         abort_multipart_upload(upload_id=upload_id, user=request.user)
@@ -377,6 +391,10 @@ class UploadAbortView(APIView):
 
 class UploadPartRelayView(APIView):
     permission_classes = [permissions.IsAuthenticated]
+    # Large files are many requests (75 parts for 600 MB); the global 1000/day user throttle
+    # made big or repeated uploads fail with 429 part-way through.
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "uploads"
     parser_classes = [BinaryParser]
 
     def post(self, request, upload_id, part_number):
