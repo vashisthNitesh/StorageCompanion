@@ -61,3 +61,34 @@ def auth_client(api_client, subscribed_user):
     refresh = RefreshToken.for_user(subscribed_user)
     api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
     return api_client
+
+
+class FakeS3Client:
+    """Offline stand-in for boto3's S3 client so tests never touch a real/local object store."""
+
+    def create_multipart_upload(self, Bucket, Key, **kw):
+        return {"UploadId": "mock-upload-test"}
+
+    def generate_presigned_url(self, ClientMethod, Params, ExpiresIn=900):
+        q = "&".join(f"{k}={v}" for k, v in Params.items())
+        return f"https://mock-s3.local/{ClientMethod}?{q}"
+
+    def list_parts(self, **kw):
+        return {"Parts": []}
+
+    def complete_multipart_upload(self, **kw):
+        return {}
+
+    def abort_multipart_upload(self, **kw):
+        return {}
+
+    def get_object(self, **kw):
+        raise ConnectionError("fake s3: no object storage in tests")
+
+
+@pytest.fixture(autouse=True)
+def fake_s3(monkeypatch):
+    fake = FakeS3Client()
+    for target in ("apps.storage.services", "apps.storage.views", "apps.sharing.services", "apps.sharing.views"):
+        monkeypatch.setattr(f"{target}.get_s3_client", lambda: fake, raising=False)
+    return fake

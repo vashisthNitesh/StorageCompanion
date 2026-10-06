@@ -10,7 +10,7 @@ from django.db import transaction
 from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied, NotFound
 
-from apps.common.exceptions import QuotaExceededException, SubscriptionRequiredException
+from apps.common.exceptions import QuotaExceededException, SubscriptionRequiredException, UpstreamStorageError
 from apps.storage.models import Node, FileVersion, Upload, StorageQuota
 from apps.storage.spacebyte import get_spacebyte_client
 from apps.audit.models import AuditLog
@@ -222,7 +222,11 @@ def init_multipart_upload(
                 ContentType="application/octet-stream",
             )
             s3_upload_id = response["UploadId"]
-        except Exception:
+        except Exception as e:
+            if not settings.DEBUG:
+                logger.error("S3 create_multipart_upload failed: %s", e)
+                raise UpstreamStorageError("Storage provider is unavailable. Please try again later.") from e
+            # Local development without object storage: simulate the upload
             s3_upload_id = f"mock-upload-{uuid.uuid4()}"
 
         presigned_urls = []
@@ -315,10 +319,26 @@ def complete_multipart_upload(
             )
             spacebyte_entry = entry_res.get("fileEntry", {})
         except Exception as e:
-            logger.warning("SpaceByte complete multipart/entry warning: %s", e)
+            # Do NOT create a file record pointing at data that was never assembled upstream:
+            # that produced files which could never be previewed or downloaded.
+            logger.error("SpaceByte complete multipart/entry failed for upload %s: %s", upload.id, e)
+            raise UpstreamStorageError("Storage provider could not finalize the upload. Please retry.") from e
+        if not spacebyte_entry or not spacebyte_entry.get("hash"):
+            raise UpstreamStorageError("Storage provider did not register the uploaded file. Please retry.")
     else:
         s3 = get_s3_client()
+        is_mock_upload = str(upload.upload_id).startswith("mock-upload-")
         s3_parts = [{"PartNumber": p["part_number"], "ETag": (p.get("etag") or f'"{p["part_number"]}"')} for p in sorted(parts, key=lambda x: x["part_number"])]
+        if not is_mock_upload:
+            # Browsers often cannot read the ETag of a cross-origin PUT (CORS doesn't expose it), so the
+            # client-sent ETags may be placeholders. Ask S3 for the authoritative part list instead.
+            try:
+                listed = s3.list_parts(Bucket=settings.S3_BUCKET_NAME, Key=upload.object_key, UploadId=upload.upload_id)
+                server_parts = [{"PartNumber": p["PartNumber"], "ETag": p["ETag"]} for p in listed.get("Parts", [])]
+                if server_parts:
+                    s3_parts = server_parts
+            except Exception as e:
+                logger.warning("list_parts failed for upload %s, using client ETags: %s", upload.id, e)
         try:
             s3.complete_multipart_upload(
                 Bucket=settings.S3_BUCKET_NAME,
@@ -326,8 +346,10 @@ def complete_multipart_upload(
                 UploadId=upload.upload_id,
                 MultipartUpload={"Parts": s3_parts},
             )
-        except Exception:
-            pass  # In local test/mock environments, allow completion
+        except Exception as e:
+            if not (settings.DEBUG and is_mock_upload):
+                logger.error("S3 complete_multipart_upload failed for upload %s: %s", upload.id, e)
+                raise UpstreamStorageError("Storage provider could not finalize the upload. Please retry.") from e
 
     parent = None
     if upload.parent_id:
@@ -480,13 +502,15 @@ def relay_upload_part(upload: Upload, part_number: int, chunk_bytes: bytes) -> s
             except Exception:
                 presigned_url = f"{settings.S3_ENDPOINT_URL}/{settings.S3_BUCKET_NAME}/{upload.object_key}?uploadId={upload.upload_id}&partNumber={part_number}"
 
+    if not presigned_url:
+        raise UpstreamStorageError(f"Could not obtain an upload URL for part {part_number}.")
+    # Mock URLs only exist when no real storage is configured (DEBUG-only mock uploads / unconfigured SpaceByte client)
     if (
-        not presigned_url
-        or presigned_url.startswith("https://mock-s3.local")
-        or ("mock" in presigned_url and "spacebyte" not in presigned_url)
-        or ("localhost" in presigned_url and not settings.DEBUG)
-        or ("127.0.0.1" in presigned_url and not settings.DEBUG)
+        presigned_url.startswith("https://mock-s3.local")
+        or "mock-upload-" in presigned_url
+        or "mockSign=valid" in presigned_url
     ):
+        # Local development without object storage: simulate success
         return f'"{part_number}"'
 
     try:
@@ -496,27 +520,18 @@ def relay_upload_part(upload: Upload, part_number: int, chunk_bytes: bytes) -> s
             body=chunk_bytes,
             headers={"Content-Type": "application/octet-stream"},
         )
-        if resp.status in (200, 201, 204):
-            etag = resp.headers.get("ETag") or f'"{part_number}"'
-            return etag.strip()
-        logger.error("Upstream returned HTTP %s for part %s", resp.status, part_number)
-        return f'"{part_number}"'
     except Exception as e:
-        logger.error("Failed to relay upload part %s to upstream via pool: %s", part_number, e)
-        # Fallback to standard urllib
-        try:
-            req = urllib.request.Request(
-                presigned_url,
-                data=chunk_bytes,
-                headers={"Content-Type": "application/octet-stream"},
-                method="PUT",
-            )
-            with urllib.request.urlopen(req, timeout=60) as fallback_resp:
-                etag = fallback_resp.headers.get("ETag") or f'"{part_number}"'
-                return etag.strip()
-        except Exception as fallback_e:
-            logger.error("Fallback relay also failed for part %s: %s", part_number, fallback_e)
-            return f'"{part_number}"'
+        logger.error("Failed to relay upload part %s to upstream: %s", part_number, e)
+        raise UpstreamStorageError(f"Storage provider unreachable while uploading part {part_number}.") from e
+
+    if resp.status in (200, 201, 204):
+        etag = resp.headers.get("ETag")
+        if not etag:
+            raise UpstreamStorageError(f"Storage provider returned no ETag for part {part_number}.")
+        return etag.strip()
+    logger.error("Upstream returned HTTP %s for part %s", resp.status, part_number)
+    # Never report success with a fabricated ETag: that silently produced corrupt/missing files.
+    raise UpstreamStorageError(f"Storage provider rejected part {part_number} (HTTP {resp.status}).")
 
 
 def get_download_info(node: Node, user, version_no: int | None = None) -> dict:

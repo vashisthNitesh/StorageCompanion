@@ -34,6 +34,12 @@ class SubscriptionRequiredException(APIException):
     default_code = "subscription_required"
 
 
+class UpstreamStorageError(APIException):
+    status_code = status.HTTP_502_BAD_GATEWAY
+    default_detail = "Storage provider error. Please retry."
+    default_code = "upstream_storage_error"
+
+
 def custom_exception_handler(exc, context):
     response = exception_handler(exc, context)
     if response is not None:

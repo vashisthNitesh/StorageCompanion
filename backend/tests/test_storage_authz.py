@@ -88,3 +88,40 @@ def test_complete_requires_part_numbers(auth_client):
     res = auth_client.post(f"/api/v1/uploads/{res.data['upload_session_id']}/complete",
                            {"parts": [{"etag": "x"}], "wrapped_file_key": "k", "content_nonce": "00"}, format="json")
     assert res.status_code == 400
+
+
+@pytest.mark.django_db
+def test_complete_does_not_create_file_when_storage_finalize_fails(auth_client, subscribed_user, monkeypatch, fake_s3):
+    api_client, user = auth_client, subscribed_user
+    monkeypatch.setattr(fake_s3, "create_multipart_upload", lambda **kw: {"UploadId": "real-upload-1"})
+
+    def boom(**kw):
+        raise RuntimeError("InvalidPart")
+
+    monkeypatch.setattr(fake_s3, "complete_multipart_upload", boom)
+    init = api_client.post("/api/v1/uploads", {"encrypted_name": "bmFtZQ==", "name_nonce": "abc", "size_bytes": 10}, format="json")
+    assert init.status_code == 201
+    res = api_client.post(
+        f"/api/v1/uploads/{init.data['upload_session_id']}/complete",
+        {"parts": [{"part_number": 1, "etag": '"1"'}], "wrapped_file_key": "k", "content_nonce": "n"},
+        format="json",
+    )
+    assert res.status_code == 502
+    assert not Node.objects.filter(owner=user, type=Node.TYPE_FILE).exists()
+
+
+@pytest.mark.django_db
+def test_complete_uses_server_side_etags(auth_client, monkeypatch, fake_s3):
+    api_client = auth_client
+    monkeypatch.setattr(fake_s3, "create_multipart_upload", lambda **kw: {"UploadId": "real-upload-2"})
+    monkeypatch.setattr(fake_s3, "list_parts", lambda **kw: {"Parts": [{"PartNumber": 1, "ETag": '"abc123"'}]})
+    seen = {}
+    monkeypatch.setattr(fake_s3, "complete_multipart_upload", lambda **kw: seen.update(kw) or {})
+    init = api_client.post("/api/v1/uploads", {"encrypted_name": "bmFtZQ==", "name_nonce": "abc", "size_bytes": 10}, format="json")
+    res = api_client.post(
+        f"/api/v1/uploads/{init.data['upload_session_id']}/complete",
+        {"parts": [{"part_number": 1}], "wrapped_file_key": "k", "content_nonce": "n"},
+        format="json",
+    )
+    assert res.status_code == 200, res.data
+    assert seen["MultipartUpload"]["Parts"] == [{"PartNumber": 1, "ETag": '"abc123"'}]
