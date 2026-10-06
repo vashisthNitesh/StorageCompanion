@@ -26,6 +26,7 @@ env = environ.Env(
     SPACEBYTE_STORAGE_POOL_LIMIT_BYTES=(int, 1000 * 1024 * 1024 * 1024),  # 1 TB testing allocation
     SPACEBYTE_PARENT_FOLDER_ID=(str, ""),
     PAYMENT_PROVIDER=(str, "razorpay"),
+    PAYMENTS_MOCK_MODE=(bool, False),
     DEFAULT_CURRENCY=(str, "INR"),
     RAZORPAY_KEY_ID=(str, "rzp_test_sample"),
     RAZORPAY_KEY_SECRET=(str, "sample_secret_key"),
@@ -220,6 +221,8 @@ PRESIGNED_URL_TTL = env("PRESIGNED_URL_TTL")
 
 # Payments (Razorpay)
 PAYMENT_PROVIDER = env("PAYMENT_PROVIDER")
+# Accept fake "order_mock_*" payments (local dev / tests only). Never enable on a public deployment.
+PAYMENTS_MOCK_MODE = env("PAYMENTS_MOCK_MODE")
 DEFAULT_CURRENCY = env("DEFAULT_CURRENCY")
 RAZORPAY_KEY_ID = env("RAZORPAY_KEY_ID")
 RAZORPAY_KEY_SECRET = env("RAZORPAY_KEY_SECRET")

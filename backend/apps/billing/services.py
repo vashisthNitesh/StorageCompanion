@@ -4,6 +4,7 @@ import hmac
 import json
 import logging
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import timedelta
 from django.conf import settings
@@ -19,8 +20,81 @@ from apps.audit.models import AuditLog
 logger = logging.getLogger(__name__)
 
 
+SAMPLE_KEY_SECRET = "sample_secret_key"
+SAMPLE_KEY_ID = "rzp_test_sample"
+SAMPLE_WEBHOOK_SECRET = "sample_webhook_secret"
+MOCK_SIGNATURE = "mock_signature_approved"
+
+
 def get_active_plans():
     return Plan.objects.filter(is_active=True).order_by("sort_order")
+
+
+def payments_mock_mode() -> bool:
+    """Mock (fake) payments are only honoured when explicitly enabled (local dev / tests)."""
+    return bool(getattr(settings, "PAYMENTS_MOCK_MODE", False))
+
+
+def has_real_razorpay_credentials() -> bool:
+    key_id = getattr(settings, "RAZORPAY_KEY_ID", "")
+    key_secret = getattr(settings, "RAZORPAY_KEY_SECRET", "")
+    return bool(key_id and key_secret and key_id != SAMPLE_KEY_ID and key_secret != SAMPLE_KEY_SECRET)
+
+
+def build_mock_order_id(plan_code: str, billing_interval: str) -> str:
+    return f"order_mock_{plan_code}_{billing_interval}_{int(timezone.now().timestamp())}"
+
+
+def mock_order_matches(order_id: str, plan_code: str, billing_interval: str) -> bool:
+    return order_id.startswith(f"order_mock_{plan_code}_{billing_interval}_")
+
+
+def fetch_razorpay_order(order_id: str) -> dict:
+    """Fetches an order from the Razorpay Orders API (used to bind plan/amount/user to a payment)."""
+    key_id = settings.RAZORPAY_KEY_ID
+    key_secret = settings.RAZORPAY_KEY_SECRET
+    b64_auth = base64.b64encode(f"{key_id}:{key_secret}".encode()).decode("ascii")
+    req = urllib.request.Request(
+        f"https://api.razorpay.com/v1/orders/{urllib.parse.quote(order_id, safe='')}",
+        headers={"Authorization": f"Basic {b64_auth}", "User-Agent": "SmartSpaceData-Subscription/1.0"},
+        method="GET",
+    )
+    with urllib.request.urlopen(req, timeout=12) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def validate_order_for_activation(user: User, order_id: str, plan_code: str, billing_interval: str) -> None:
+    """
+    Ensures the plan/interval being activated is the one the order was created (and paid) for,
+    and that the order belongs to this user. Raises ValidationError otherwise.
+    """
+    if order_id.startswith("order_mock_"):
+        if not payments_mock_mode():
+            raise ValidationError("Mock payments are disabled.")
+        if not mock_order_matches(order_id, plan_code, billing_interval):
+            raise ValidationError("Order does not match the requested plan.")
+        return
+
+    plan = Plan.objects.filter(code=plan_code, is_active=True).first()
+    if not plan:
+        raise NotFound("Plan not found.")
+    try:
+        order = fetch_razorpay_order(order_id)
+    except Exception as e:
+        logger.error("Could not fetch Razorpay order %s: %s", order_id, e)
+        raise ValidationError("Could not verify the payment order with Razorpay.") from e
+
+    notes = order.get("notes") or {}
+    expected_amount = int((plan.price_yearly if billing_interval == "yearly" else plan.price_monthly) * 100)
+    if (
+        notes.get("user_id") != str(user.id)
+        or notes.get("plan_code") != plan.code
+        or notes.get("billing_interval", "monthly") != billing_interval
+        or int(order.get("amount", -1)) != expected_amount
+    ):
+        raise ValidationError("Order does not match the requested plan.")
+    if order.get("status") not in (None, "paid", "attempted"):
+        raise ValidationError("Order has not been paid.")
 
 
 def create_razorpay_order(user: User, plan_code: str, billing_interval: str = "monthly") -> dict:
@@ -37,15 +111,7 @@ def create_razorpay_order(user: User, plan_code: str, billing_interval: str = "m
     key_id = getattr(settings, "RAZORPAY_KEY_ID", "")
     key_secret = getattr(settings, "RAZORPAY_KEY_SECRET", "")
 
-    # Check if real Razorpay credentials are provided (live or valid rzp_test keys)
-    is_real_credentials = (
-        key_id
-        and key_secret
-        and key_id != "rzp_test_sample"
-        and key_secret != "sample_secret_key"
-    )
-
-    if is_real_credentials:
+    if has_real_razorpay_credentials():
         # Call Razorpay Orders API: https://api.razorpay.com/v1/orders
         auth_str = f"{key_id}:{key_secret}"
         b64_auth = base64.b64encode(auth_str.encode("utf-8")).decode("ascii")
@@ -88,13 +154,17 @@ def create_razorpay_order(user: User, plan_code: str, billing_interval: str = "m
                 desc = err_json.get("error", {}).get("description") or err_content
             except Exception:
                 desc = err_content
-            raise ValidationError(f"Razorpay Order Error ({e.code}): {desc}")
+            raise ValidationError(f"Razorpay Order Error ({e.code}): {desc}") from e
+        except ValidationError:
+            raise
         except Exception as e:
             logger.error("Razorpay connection error: %s", str(e))
-            raise ValidationError(f"Razorpay connectivity failure: {str(e)}")
-    else:
+            raise ValidationError(f"Razorpay connectivity failure: {str(e)}") from e
+    elif payments_mock_mode():
         # Structured demo order when running in local development mode without keys
-        order_id = f"order_mock_{plan.code}_{int(timezone.now().timestamp())}"
+        order_id = build_mock_order_id(plan.code, billing_interval)
+    else:
+        raise ValidationError("Online payments are not configured yet. Please contact support.")
 
     return {
         "provider": "razorpay",
@@ -119,12 +189,13 @@ def verify_razorpay_signature(payment_id: str, order_id: str, signature: str) ->
     """
     key_secret = getattr(settings, "RAZORPAY_KEY_SECRET", "")
 
-    # In local testing or mock order mode:
-    if order_id.startswith("order_mock_") and signature == "mock_signature_approved":
-        return True
+    # Mock orders are only accepted when mock payments are explicitly enabled (local dev / tests)
+    if order_id.startswith("order_mock_"):
+        return payments_mock_mode() and hmac.compare_digest(signature, MOCK_SIGNATURE)
 
-    if not key_secret or key_secret == "sample_secret_key":
-        return True
+    # Never treat a missing / sample secret as "valid": the sample value is public.
+    if not key_secret or key_secret == SAMPLE_KEY_SECRET:
+        return False
 
     generated_signature = hmac.new(
         key_secret.encode("utf-8"),
@@ -137,8 +208,11 @@ def verify_razorpay_signature(payment_id: str, order_id: str, signature: str) ->
 
 def verify_webhook_signature(body_bytes: bytes, signature: str) -> bool:
     secret = settings.RAZORPAY_WEBHOOK_SECRET
-    if not secret or secret == "sample_webhook_secret":
-        return True
+    if not secret or not signature:
+        return False
+    # The sample secret is public; only allow it for local mock-mode testing.
+    if secret == SAMPLE_WEBHOOK_SECRET and not payments_mock_mode():
+        return False
 
     expected = hmac.new(
         secret.encode("utf-8"),
@@ -163,6 +237,12 @@ def activate_subscription(
     plan = Plan.objects.filter(code=plan_code, is_active=True).first()
     if not plan:
         raise NotFound("Plan not found.")
+
+    # Replay protection: a payment / order can only activate a subscription once
+    if Invoice.objects.filter(provider_payment_id=provider_payment_id).exists() or Invoice.objects.filter(
+        provider_invoice_id=provider_order_id
+    ).exists():
+        raise ValidationError("This payment has already been used.")
 
     duration_days = 365 if billing_interval == "yearly" else 30
     period_start = timezone.now()

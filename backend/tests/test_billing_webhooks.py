@@ -20,13 +20,22 @@ def test_webhook_idempotency(api_client, subscribed_user):
         },
     }
 
+    import hashlib, hmac, json
+    body = json.dumps(payload)
+    sig = hmac.new(b"sample_webhook_secret", body.encode(), hashlib.sha256).hexdigest()
+
+    def post():
+        return api_client.post(
+            "/api/v1/webhooks/razorpay", body, content_type="application/json", HTTP_X_RAZORPAY_SIGNATURE=sig
+        )
+
     # First call
-    res1 = api_client.post("/api/v1/webhooks/razorpay", payload, format="json")
+    res1 = post()
     assert res1.status_code == 200
     assert PaymentEvent.objects.filter(provider_event_id=event_id).count() == 1
 
     # Second duplicate call
-    res2 = api_client.post("/api/v1/webhooks/razorpay", payload, format="json")
+    res2 = post()
     assert res2.status_code == 200
     # Still only 1 record created due to idempotency
     assert PaymentEvent.objects.filter(provider_event_id=event_id).count() == 1
@@ -48,8 +57,8 @@ def test_subscription_activation_syncs_quota(auth_client, subscribed_user):
     verify_payload = {
         "plan_code": "test_business_plan",
         "razorpay_payment_id": "pay_test_abc123",
-        "razorpay_order_id": "order_test_xyz789",
-        "razorpay_signature": "mock_valid_signature",
+        "razorpay_order_id": "order_mock_test_business_plan_monthly_1700000000",
+        "razorpay_signature": "mock_signature_approved",
         "billing_interval": "monthly",
     }
 

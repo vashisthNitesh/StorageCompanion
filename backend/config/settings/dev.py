@@ -8,3 +8,6 @@ SIMPLE_JWT["AUTH_COOKIE_SECURE"] = False
 
 # Console email backend for testing
 EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+
+# Local development: allow the mock Razorpay checkout flow unless explicitly disabled
+PAYMENTS_MOCK_MODE = env.bool("PAYMENTS_MOCK_MODE", default=True)

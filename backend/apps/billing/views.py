@@ -19,6 +19,7 @@ from apps.billing.services import (
     activate_subscription,
     verify_webhook_signature,
     process_webhook_event,
+    validate_order_for_activation,
 )
 from apps.audit.models import AuditLog
 
@@ -78,6 +79,13 @@ class PaymentVerifyView(APIView):
                 {"error": "Invalid payment signature. Verification failed."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+        validate_order_for_activation(
+            user=request.user,
+            order_id=data["razorpay_order_id"],
+            plan_code=data["plan_code"],
+            billing_interval=data.get("billing_interval", "monthly"),
+        )
 
         subscription = activate_subscription(
             user=request.user,
