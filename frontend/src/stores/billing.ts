@@ -113,27 +113,29 @@ export const useBillingStore = defineStore("billing", () => {
         amount: number;
         currency: string;
         plan_name: string;
+        mock?: boolean;
         prefill: { name: string; email: string };
       }>("/api/v1/subscription/checkout", {
         method: "POST",
         body: JSON.stringify({ plan_code: planCode, billing_interval: interval }),
       });
 
-      // Ensure Razorpay SDK script is loaded
+      // Local development only: the backend issues mock orders solely when PAYMENTS_MOCK_MODE is on.
+      // Mock orders are not valid at Razorpay, so simulate the checkout (the server still verifies).
+      if (order.mock === true) {
+        await verifyPayment({
+          plan_code: planCode,
+          razorpay_payment_id: `pay_sim_${Date.now()}`,
+          razorpay_order_id: order.order_id,
+          razorpay_signature: "mock_signature_approved",
+          billing_interval: interval,
+        });
+        return;
+      }
+
+      // Real payment: the plan only changes after Razorpay's handler returns a signed payment
       const isLoaded = await loadRazorpaySDK();
       if (!isLoaded || typeof (window as any).Razorpay !== "function") {
-        // Only if offline with mock order and placeholder keys allow mock demo simulation
-        if (order.order_id.startsWith("order_mock_") && (!order.key_id || order.key_id === "rzp_test_sample")) {
-          await verifyPayment({
-            plan_code: planCode,
-            razorpay_payment_id: `pay_sim_${Date.now()}`,
-            razorpay_order_id: order.order_id,
-            razorpay_signature: "mock_signature_approved",
-            billing_interval: interval,
-          });
-          return;
-        }
-
         throw new Error(
           "Razorpay checkout failed to load. Please disable any ad-blockers or shields for this page and try again."
         );

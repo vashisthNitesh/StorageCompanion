@@ -175,6 +175,9 @@ def create_razorpay_order(user: User, plan_code: str, billing_interval: str = "m
         "plan_code": plan.code,
         "plan_name": plan.name,
         "billing_interval": billing_interval,
+        # True only when the server runs with PAYMENTS_MOCK_MODE (local dev); the client may then
+        # simulate checkout. In every other case a real Razorpay payment + signature is required.
+        "mock": order_id.startswith("order_mock_"),
         "prefill": {
             "name": user.full_name or user.email.split("@")[0],
             "email": user.email,

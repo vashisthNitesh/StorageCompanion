@@ -90,3 +90,23 @@ def test_sample_webhook_secret_rejected_outside_mock_mode(api_client, subscribed
     res = api_client.post("/api/v1/webhooks/razorpay", body, content_type="application/json",
                           HTTP_X_RAZORPAY_SIGNATURE=sig)
     assert res.status_code == 400
+
+
+@pytest.mark.django_db
+def test_checkout_refuses_without_real_keys_when_mock_disabled(auth_client, sample_plan, settings):
+    settings.PAYMENTS_MOCK_MODE = False
+    settings.RAZORPAY_KEY_ID = "rzp_test_sample"
+    settings.RAZORPAY_KEY_SECRET = "sample_secret_key"
+    res = auth_client.post("/api/v1/subscription/checkout", {"plan_code": sample_plan.code, "billing_interval": "monthly"}, format="json")
+    assert res.status_code == 400
+
+
+@pytest.mark.django_db
+def test_checkout_flags_mock_orders_only_in_mock_mode(auth_client, sample_plan, settings):
+    settings.PAYMENTS_MOCK_MODE = True
+    settings.RAZORPAY_KEY_ID = "rzp_test_sample"
+    settings.RAZORPAY_KEY_SECRET = "sample_secret_key"
+    res = auth_client.post("/api/v1/subscription/checkout", {"plan_code": sample_plan.code, "billing_interval": "monthly"}, format="json")
+    assert res.status_code in (200, 201), res.data
+    assert res.data["mock"] is True
+    assert res.data["order_id"].startswith("order_mock_")
