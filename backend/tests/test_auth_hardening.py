@@ -23,7 +23,7 @@ def test_query_string_token_is_not_accepted(user):
 
 
 @pytest.mark.django_db
-def _pending_test_login_is_rate_limited(user):
+def test_login_is_rate_limited(user):
     c = APIClient()
     codes = [login(c, password=f"wrong{i}").status_code for i in range(12)]
     assert codes[0] == 400
