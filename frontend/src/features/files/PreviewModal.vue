@@ -48,6 +48,11 @@ const isLargeMedia = computed(() => {
   return size > 100 * 1024 * 1024 || ext === "mkv" || ext === "iso";
 });
 
+// Guards against overlapping loads (fast node switching / reopen) leaving a stale spinner or content.
+// Declared before the immediate watcher below, which can call cancelActiveLoad() during setup.
+let loadSeq = 0;
+let activeLoad: AbortController | null = null;
+
 watch(
   [() => props.node, () => props.isOpen],
   async ([newNode, isOpen]) => {
@@ -60,10 +65,6 @@ watch(
   },
   { immediate: true }
 );
-
-// Guards against overlapping loads (fast node switching / reopen) leaving a stale spinner or content
-let loadSeq = 0;
-let activeLoad: AbortController | null = null;
 
 function cancelActiveLoad() {
   loadSeq++;
