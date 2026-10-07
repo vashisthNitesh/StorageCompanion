@@ -16,11 +16,12 @@ const requiresPassword = ref(false);
 const error = ref("");
 const isDownloading = ref(false);
 const downloadSuccess = ref(false);
+const fileName = ref("");
 
 let linkKeyBytes: Uint8Array | null = null;
 
 onMounted(async () => {
-  // Extract key from fragment: #key=...
+  // Extract key and filename from fragment: #key=...&name=...
   const hash = window.location.hash;
   const match = hash.match(/key=([^&]+)/);
   if (match) {
@@ -30,6 +31,13 @@ onMounted(async () => {
     } catch {
       error.value = "Invalid or corrupted decryption key in link fragment.";
     }
+  }
+
+  const nameMatch = hash.match(/name=([^&]+)/);
+  if (nameMatch) {
+    try {
+      fileName.value = decodeURIComponent(nameMatch[1]);
+    } catch {}
   }
 
   await loadShareInfo();
@@ -92,7 +100,7 @@ async function downloadAndDecrypt() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `Decrypted-File-${token.slice(0, 8)}`;
+    a.download = fileName.value || `Decrypted-File-${token.slice(0, 8)}`;
     a.click();
     URL.revokeObjectURL(url);
     downloadSuccess.value = true;
@@ -163,7 +171,7 @@ async function downloadAndDecrypt() {
               <FileText class="w-6 h-6" />
             </div>
             <div>
-              <div class="text-sm font-bold text-slate-900">Encrypted File Ready</div>
+              <div class="text-sm font-bold text-slate-900 break-words">{{ fileName || 'Encrypted File Ready' }}</div>
               <div class="text-xs text-slate-500 font-mono mt-1">
                 {{ (shareInfo.size_bytes / (1024 * 1024)).toFixed(1) }} MB • AES-256-GCM
               </div>

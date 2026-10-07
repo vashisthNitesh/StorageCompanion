@@ -118,22 +118,20 @@ async function loadAndDecryptPreview(node: any) {
       upstream?: string;
     }>(`/api/v1/nodes/${node.id}/download`);
 
-    // 2. Fetch encrypted bytes: try fast direct edge download first, falling back to authenticated proxy
-    let res: Response | null = null;
-    if (downloadData.direct_url) {
-      try {
-        const directRes = await fetch(downloadData.direct_url, { method: "GET" });
-        if (directRes.ok && directRes.body) {
-          res = directRes;
-        }
-      } catch {
-        // Fall back to proxy
-        res = null;
+    // 2. Fetch encrypted bytes directly via authenticated backend streaming proxy
+    // This bypasses browser CORS limitations and ensures valid Bearer auth for SpaceByte & S3
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 25000);
+    let res: Response;
+    try {
+      res = await apiFetch(downloadData.download_url, { signal: controller.signal });
+    } catch (fetchErr: any) {
+      if (fetchErr.name === "AbortError") {
+        throw new Error("File streaming timed out after 25s. Upstream storage may be busy, please retry.");
       }
-    }
-
-    if (!res) {
-      res = await apiFetch(downloadData.download_url);
+      throw fetchErr;
+    } finally {
+      clearTimeout(timeoutId);
     }
 
     if (!res.ok) {

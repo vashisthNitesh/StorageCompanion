@@ -6,6 +6,7 @@ from apps.billing.views import (
     PaymentVerifyView,
     SubscriptionCancelView,
     InvoiceListView,
+    InvoiceDownloadView,
     RazorpayWebhookView,
 )
 
@@ -16,5 +17,6 @@ urlpatterns = [
     path("subscription/verify", PaymentVerifyView.as_view(), name="subscription-verify"),
     path("subscription/cancel", SubscriptionCancelView.as_view(), name="subscription-cancel"),
     path("invoices", InvoiceListView.as_view(), name="invoice-list"),
+    path("invoices/<uuid:pk>/download", InvoiceDownloadView.as_view(), name="invoice-download"),
     path("webhooks/razorpay", RazorpayWebhookView.as_view(), name="webhook-razorpay"),
 ]

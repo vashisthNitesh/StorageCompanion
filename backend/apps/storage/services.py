@@ -159,6 +159,8 @@ def init_multipart_upload(
             sb_init = sb_client.init_multipart_upload(
                 filename=f"vault_{user.id}_{uuid.uuid4().hex[:8]}.bin",
                 mime="application/octet-stream",
+                size=size_bytes,
+                extension="bin",
                 part_count=num_parts,
             )
             s3_upload_id = sb_init["upload_id"]
@@ -461,11 +463,11 @@ def relay_upload_part(upload: Upload, part_number: int, chunk_bytes: bytes) -> s
         if resp.status in (200, 201, 204):
             etag = resp.headers.get("ETag") or f'"{part_number}"'
             return etag.strip()
-        logger.error("Upstream returned HTTP %s for part %s", resp.status, part_number)
-        return f'"{part_number}"'
+        logger.error("Upstream returned HTTP %s for part %s: %s", resp.status, part_number, resp.data[:200] if hasattr(resp, 'data') else '')
+        raise RuntimeError(f"Upstream returned HTTP {resp.status} for part {part_number}")
     except Exception as e:
-        logger.error("Failed to relay upload part %s to upstream via pool: %s", part_number, e)
-        # Fallback to standard urllib
+        logger.warning("Failed to relay upload part %s via pool: %s; trying urllib fallback...", part_number, e)
+        # Fallback to standard urllib with 120s timeout
         try:
             req = urllib.request.Request(
                 presigned_url,
@@ -473,12 +475,14 @@ def relay_upload_part(upload: Upload, part_number: int, chunk_bytes: bytes) -> s
                 headers={"Content-Type": "application/octet-stream"},
                 method="PUT",
             )
-            with urllib.request.urlopen(req, timeout=60) as fallback_resp:
-                etag = fallback_resp.headers.get("ETag") or f'"{part_number}"'
-                return etag.strip()
+            with urllib.request.urlopen(req, timeout=120) as fallback_resp:
+                if fallback_resp.status in (200, 201, 204):
+                    etag = fallback_resp.headers.get("ETag") or f'"{part_number}"'
+                    return etag.strip()
+                raise RuntimeError(f"Fallback upstream returned HTTP {fallback_resp.status}")
         except Exception as fallback_e:
-            logger.error("Fallback relay also failed for part %s: %s", part_number, fallback_e)
-            return f'"{part_number}"'
+            logger.error("Relay upload failed for part %s: %s", part_number, fallback_e)
+            raise RuntimeError(f"Relay upload failed for part {part_number}: {fallback_e}")
 
 
 def get_download_info(node: Node, user, version_no: int | None = None) -> dict:
@@ -502,10 +506,10 @@ def get_download_info(node: Node, user, version_no: int | None = None) -> dict:
 
     part_size = 16 * 1024 * 1024 if version.size_bytes > 5 * 1024 * 1024 * 1024 else 8 * 1024 * 1024
 
+    # For SpaceByte upstream files, direct browser download requires secret Bearer token and is blocked by CORS.
+    # Therefore direct_url is None for SpaceByte, ensuring clean streaming via authenticated backend proxy.
     if node.spacebyte_hash:
-        sb_client = get_spacebyte_client()
-        resolved_url = sb_client.resolve_direct_download_url(node.spacebyte_hash)
-        direct_download_url = resolved_url or sb_client.get_download_url(node.spacebyte_hash)
+        direct_download_url = None
     else:
         s3 = get_s3_client()
         try:

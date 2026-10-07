@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
+import { ref, computed, onMounted } from "vue";
 import { useRoute } from "vue-router";
 import { useAuthStore } from "../../stores/auth";
 import { useBillingStore } from "../../stores/billing";
@@ -16,6 +16,7 @@ import {
   Zap,
   ShieldCheck,
   Server,
+  Download,
 } from "lucide-vue-next";
 
 const route = useRoute();
@@ -24,6 +25,19 @@ const billingStore = useBillingStore();
 
 const isGateRequired = ref(route.query.gate === "required");
 const checkoutError = ref("");
+
+const currentPlanName = computed(() => {
+  return (
+    billingStore.currentSubscription?.plan_details?.name ||
+    authStore.user?.subscription?.plan_name ||
+    (authStore.hasActiveSubscription ? 'Active Storage Plan' : 'No Active Plan')
+  );
+});
+
+const allocatedQuotaGB = computed(() => {
+  const bytes = authStore.user?.quota?.bytes_limit || billingStore.currentSubscription?.plan_details?.storage_bytes || 0;
+  return (bytes / (1024 * 1024 * 1024)).toFixed(0);
+});
 
 const plansList = [
   {
@@ -151,7 +165,7 @@ async function handleUpgrade(planCode: string) {
               </span>
             </div>
             <div class="text-2xl font-extrabold text-slate-900 tracking-tight">
-              {{ billingStore.currentSubscription?.plan_details?.name || (authStore.hasActiveSubscription ? 'Value Pack (200 GB)' : 'No Active Plan') }}
+              {{ currentPlanName }}
             </div>
             <div class="text-xs text-slate-500">
               <span v-if="billingStore.currentSubscription?.current_period_end">
@@ -166,7 +180,7 @@ async function handleUpgrade(planCode: string) {
           <div class="p-4 rounded-xl bg-slate-50 border border-slate-200 text-right min-w-[140px]">
             <div class="text-[11px] text-slate-500 font-medium">Allocated Quota</div>
             <div class="text-2xl font-bold text-slate-900 font-mono">
-              {{ ((authStore.user?.quota?.bytes_limit || 0) / (1024 * 1024 * 1024)).toFixed(0) }} GB
+              {{ allocatedQuotaGB }} GB
             </div>
           </div>
         </div>

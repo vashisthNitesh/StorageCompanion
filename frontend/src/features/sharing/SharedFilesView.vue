@@ -3,6 +3,10 @@ import { ref, onMounted } from "vue";
 import { apiRequest } from "../../lib/api";
 import { Share2, Link, Trash2, ExternalLink, ShieldCheck } from "lucide-vue-next";
 
+import { useAuthStore } from "../../stores/auth";
+import { decryptName } from "../../lib/crypto/names";
+
+const authStore = useAuthStore();
 const shares = ref<any[]>([]);
 const isLoading = ref(true);
 
@@ -14,7 +18,27 @@ async function fetchShares() {
   isLoading.value = true;
   try {
     const data = await apiRequest("/api/v1/shares");
-    shares.value = Array.isArray(data) ? data : data.results || [];
+    const list = Array.isArray(data) ? data : data.results || [];
+    shares.value = await Promise.all(
+      list.map(async (s: any) => {
+        let name = s.node_details?.name || s.node;
+        if (s.node_details?.encrypted_name && s.node_details?.name_nonce && authStore.masterKey) {
+          try {
+            name = await decryptName(
+              authStore.masterKey,
+              s.node_details.encrypted_name,
+              s.node_details.name_nonce
+            );
+          } catch {
+            name = s.node_details?.name || s.node;
+          }
+        }
+        return {
+          ...s,
+          displayName: name,
+        };
+      })
+    );
   } finally {
     isLoading.value = false;
   }
@@ -56,7 +80,7 @@ async function revokeShare(id: string) {
             <Link class="w-4 h-4" />
           </div>
           <div>
-            <div class="font-bold text-slate-900">Node: {{ share.node_details?.name || share.node }}</div>
+            <div class="font-bold text-slate-900">{{ share.displayName || share.node_details?.name || share.node }}</div>
             <div class="text-[11px] text-slate-500 flex items-center space-x-2 mt-0.5 font-mono">
               <span>Downloads: {{ share.download_count }} / {{ share.max_downloads || '∞' }}</span>
               <span v-if="share.has_password" class="text-amber-700 font-bold">• Password Protected</span>

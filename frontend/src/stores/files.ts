@@ -153,6 +153,33 @@ export const useFilesStore = defineStore("files", () => {
     rawNodes.value = rawNodes.value.filter((n) => n.id !== nodeId);
   }
 
+  async function permanentDeleteNode(nodeId: string) {
+    await apiRequest(`/api/v1/nodes/${nodeId}?permanent=true`, { method: "DELETE" });
+    rawNodes.value = rawNodes.value.filter((n) => n.id !== nodeId);
+    selectedNodeIds.value.delete(nodeId);
+  }
+
+  async function fetchAllFolders(excludeId?: string): Promise<{ id: string | null; name: string }[]> {
+    if (!authStore.masterKey) return [{ id: null, name: "Root (/)" }];
+    try {
+      const res = await apiRequest<{ results: any[] } | any[]>("/api/v1/nodes");
+      const items = Array.isArray(res) ? res : res.results || [];
+      const folders = items.filter((n: any) => n.type === "folder" && !n.trashed_at && n.id !== excludeId);
+      const decrypted = await Promise.all(
+        folders.map(async (f: any) => {
+          let name = "Folder";
+          try {
+            name = await decryptName(authStore.masterKey!, f.encrypted_name, f.name_nonce);
+          } catch {}
+          return { id: f.id as string, name };
+        })
+      );
+      return [{ id: null, name: "Root (/)" }, ...decrypted];
+    } catch {
+      return [{ id: null, name: "Root (/)" }];
+    }
+  }
+
   function navigateToFolder(folderId: string | null, folderName: string) {
     if (folderId === null) {
       breadcrumbs.value = [{ id: null, name: "My Files" }];
@@ -214,6 +241,8 @@ export const useFilesStore = defineStore("files", () => {
     moveNode,
     trashNode,
     restoreNode,
+    permanentDeleteNode,
+    fetchAllFolders,
     navigateToFolder,
     navigateUp,
     performSearch,

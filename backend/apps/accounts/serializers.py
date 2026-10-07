@@ -46,10 +46,8 @@ class UserSerializer(serializers.ModelSerializer):
                 "plan_name": "Master Administrator (No Pack)",
                 "plan_code": "admin",
             }
-        try:
-            subscription = getattr(obj, "subscription", None)
-        except Exception:
-            subscription = None
+        from apps.billing.models import Subscription
+        subscription = Subscription.objects.filter(user=obj).select_related("plan").first()
 
         if not subscription:
             return {
@@ -80,7 +78,7 @@ class UserSerializer(serializers.ModelSerializer):
                 "percent_used": 0,
             }
         try:
-            quota = getattr(obj, "storage_quota", None)
+            quota = StorageQuota.objects.filter(user=obj).first()
         except Exception:
             quota = None
 
@@ -165,9 +163,9 @@ class SessionSerializer(serializers.ModelSerializer):
 class ChangePasswordSerializer(serializers.Serializer):
     current_password = serializers.CharField(write_only=True)
     new_password = serializers.CharField(write_only=True, min_length=10)
-    new_wrapped_master_key = serializers.CharField()
-    new_kdf_salt = serializers.CharField()
-    new_kdf_params = serializers.JSONField()
+    new_wrapped_master_key = serializers.CharField(required=False, allow_blank=True, default="")
+    new_kdf_salt = serializers.CharField(required=False, allow_blank=True, default="")
+    new_kdf_params = serializers.JSONField(required=False, default=dict)
 
 
 class RecoverySerializer(serializers.Serializer):

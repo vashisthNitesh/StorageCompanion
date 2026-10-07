@@ -187,12 +187,22 @@ class SpaceByteClient:
         self,
         filename: str,
         mime: str = "application/octet-stream",
+        size: int = 0,
+        extension: str = "bin",
         part_count: int = 1,
     ) -> dict[str, Any]:
         """
         Creates an S3 multipart upload session and batches presigned URLs for all parts.
+        Conforms strictly to SpaceByte OpenAPI 3.0 specification:
+        requires filename, mime, size, and extension.
         """
-        create_res = self._request("POST", "s3/multipart/create", {"filename": filename, "mime": mime})
+        payload = {
+            "filename": filename,
+            "mime": mime,
+            "size": max(1, size),
+            "extension": extension or "bin",
+        }
+        create_res = self._request("POST", "s3/multipart/create", payload)
         upload_id = create_res.get("uploadId")
         key = create_res.get("key")
         if not upload_id or not key:
@@ -217,10 +227,19 @@ class SpaceByteClient:
         Finalizes an S3 multipart upload on SpaceByte.
         Parts must be a list of {'PartNumber': int, 'ETag': str}.
         """
+        formatted_parts = []
+        for p in parts:
+            part_num = p.get("PartNumber") or p.get("part_number") or p.get("partNumber")
+            etag = p.get("ETag") or p.get("etag") or ""
+            formatted_parts.append({
+                "PartNumber": int(part_num),
+                "ETag": str(etag).strip('"'),
+            })
+
         payload = {
             "uploadId": upload_id,
             "key": key,
-            "parts": parts,
+            "parts": formatted_parts,
         }
         return self._request("POST", "s3/multipart/complete", payload)
 

@@ -34,6 +34,9 @@ import {
   ShieldCheck,
   MinusCircle,
   PlusCircle,
+  UserPlus,
+  FileText,
+  Folder,
 } from "lucide-vue-next";
 
 const authStore = useAuthStore();
@@ -356,6 +359,147 @@ function handleSearchInput() {
     usersData.value.page = 1;
     fetchUsers();
   }, 300);
+}
+
+// Filtered users computed helper for instant reactive client search fallback
+const filteredUsers = computed(() => {
+  let list = usersData.value?.results || [];
+  const q = searchQuery.value.trim().toLowerCase();
+  if (q) {
+    list = list.filter((u: any) =>
+      (u.email && u.email.toLowerCase().includes(q)) ||
+      (u.full_name && u.full_name.toLowerCase().includes(q)) ||
+      (u.id && u.id.toLowerCase().includes(q))
+    );
+  }
+  return list;
+});
+
+// Watch search query and filters
+watch([searchQuery, selectedPlanFilter, selectedStatusFilter], () => {
+  handleSearchInput();
+});
+
+// Active dashboard view tab
+const activeAdminTab = ref<"overview" | "users" | "files" | "pool">("overview");
+
+// Create User & Assign Role State
+const showCreateUserModal = ref(false);
+const newEmail = ref("");
+const newPassword = ref("");
+const newFullName = ref("");
+const newRole = ref<"customer" | "admin">("customer");
+const newPlanCode = ref("entry");
+const isCreatingUser = ref(false);
+const createUserError = ref("");
+const createUserSuccess = ref("");
+
+function openCreateUserModal() {
+  newEmail.value = "";
+  newPassword.value = "";
+  newFullName.value = "";
+  newRole.value = "customer";
+  newPlanCode.value = "entry";
+  createUserError.value = "";
+  createUserSuccess.value = "";
+  showCreateUserModal.value = true;
+}
+
+async function submitCreateUser() {
+  if (!newEmail.value.trim() || !newPassword.value) {
+    createUserError.value = "Email and password are required.";
+    return;
+  }
+  isCreatingUser.value = true;
+  createUserError.value = "";
+  createUserSuccess.value = "";
+  try {
+    const res = await apiRequest<{ success: boolean; message: string }>("/api/v1/admin/users/create/", {
+      method: "POST",
+      body: JSON.stringify({
+        email: newEmail.value.trim(),
+        password: newPassword.value,
+        full_name: newFullName.value.trim(),
+        role: newRole.value,
+        plan_code: newPlanCode.value,
+      }),
+    });
+    createUserSuccess.value = res.message || "User created successfully!";
+    await fetchUsers();
+    await fetchKPIs();
+    setTimeout(() => {
+      showCreateUserModal.value = false;
+    }, 1200);
+  } catch (err: any) {
+    createUserError.value = err.message || "Failed to create user.";
+  } finally {
+    isCreatingUser.value = false;
+  }
+}
+
+// Global File Explorer State
+const filesData = ref<{
+  total_count: number;
+  total_size_bytes: number;
+  page: number;
+  page_size: number;
+  results: any[];
+}>({
+  total_count: 0,
+  total_size_bytes: 0,
+  page: 1,
+  page_size: 25,
+  results: [],
+});
+const filesSearchQuery = ref("");
+const filesTypeFilter = ref("");
+const filesStatusFilter = ref("");
+const isLoadingFiles = ref(false);
+
+async function fetchAdminFiles() {
+  isLoadingFiles.value = true;
+  try {
+    const params = new URLSearchParams({
+      search: filesSearchQuery.value,
+      type: filesTypeFilter.value,
+      status: filesStatusFilter.value,
+      page: filesData.value.page.toString(),
+      page_size: filesData.value.page_size.toString(),
+    });
+    const res = await apiRequest<any>(`/api/v1/admin/files/?${params.toString()}`);
+    filesData.value = res;
+  } catch (err) {
+    console.error("Failed to load admin files:", err);
+  } finally {
+    isLoadingFiles.value = false;
+  }
+}
+
+let filesSearchTimer: any = null;
+function handleFilesSearchInput() {
+  clearTimeout(filesSearchTimer);
+  filesSearchTimer = setTimeout(() => {
+    filesData.value.page = 1;
+    fetchAdminFiles();
+  }, 300);
+}
+
+watch(filesSearchQuery, () => {
+  handleFilesSearchInput();
+});
+
+watch(activeAdminTab, (tab) => {
+  if (tab === "files") {
+    fetchAdminFiles();
+  }
+});
+
+function formatBytes(bytes: number): string {
+  if (!bytes || bytes === 0) return "0 B";
+  const k = 1024;
+  const sizes = ["B", "KB", "MB", "GB", "TB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
 }
 
 onMounted(async () => {
@@ -826,6 +970,15 @@ onMounted(async () => {
             <option value="suspended">Suspended Only</option>
             <option value="purged">Purged (Wiped)</option>
           </select>
+
+          <!-- Create User & Role Button -->
+          <button
+            @click="openCreateUserModal"
+            class="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs flex items-center space-x-1.5 shadow-xs transition-colors cursor-pointer"
+          >
+            <UserPlus class="w-3.5 h-3.5" />
+            <span>Create User</span>
+          </button>
         </div>
       </div>
 
@@ -896,7 +1049,7 @@ onMounted(async () => {
           </thead>
           <tbody class="divide-y divide-slate-100">
             <tr
-              v-for="user in usersData.results"
+              v-for="user in filteredUsers"
               :key="user.id"
               class="hover:bg-slate-50/70 transition-colors"
             >
@@ -1066,9 +1219,146 @@ onMounted(async () => {
               </td>
             </tr>
 
-            <tr v-if="usersData.results.length === 0">
+            <tr v-if="filteredUsers.length === 0">
               <td colspan="6" class="py-8 text-center text-slate-500 text-xs">
                 No users matched the search query or filters.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Global File View for Master Admin -->
+    <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-5">
+      <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        <div>
+          <h3 class="text-base font-bold text-slate-900 tracking-tight flex items-center space-x-2">
+            <Folder class="w-4 h-4 text-indigo-600" />
+            <span>Global File Explorer (All Accounts)</span>
+          </h3>
+          <p class="text-xs text-slate-500">
+            System-wide view of all customer vaults, storage consumption, file versions, and upstream SpaceByte/S3 persistence.
+          </p>
+        </div>
+
+        <!-- File Filters -->
+        <div class="flex flex-wrap items-center gap-2.5">
+          <div class="relative">
+            <Search class="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              v-model="filesSearchQuery"
+              @input="handleFilesSearchInput"
+              placeholder="Search file ID or owner..."
+              class="pl-9 pr-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-indigo-500"
+            />
+          </div>
+
+          <select
+            v-model="filesTypeFilter"
+            @change="fetchAdminFiles"
+            class="px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-700 focus:outline-none focus:border-indigo-500"
+          >
+            <option value="">All Types</option>
+            <option value="file">Files Only</option>
+            <option value="folder">Folders Only</option>
+          </select>
+
+          <select
+            v-model="filesStatusFilter"
+            @change="fetchAdminFiles"
+            class="px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-700 focus:outline-none focus:border-indigo-500"
+          >
+            <option value="">All Statuses</option>
+            <option value="active">Active Vault Files</option>
+            <option value="trashed">In Trash</option>
+          </select>
+
+          <button
+            @click="fetchAdminFiles"
+            class="p-2 rounded-xl border border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-50 cursor-pointer"
+            title="Refresh files"
+          >
+            <RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin': isLoadingFiles }" />
+          </button>
+        </div>
+      </div>
+
+      <!-- Quick Metrics -->
+      <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
+        <div class="p-3 rounded-xl bg-slate-50 border border-slate-200/80">
+          <div class="text-[10px] text-slate-500 uppercase font-semibold">Total Vault Nodes</div>
+          <div class="text-lg font-bold font-mono text-slate-900">{{ filesData.total_count }}</div>
+        </div>
+        <div class="p-3 rounded-xl bg-slate-50 border border-slate-200/80">
+          <div class="text-[10px] text-slate-500 uppercase font-semibold">Total Encrypted Storage</div>
+          <div class="text-lg font-bold font-mono text-indigo-700">{{ formatBytes(filesData.total_size_bytes) }}</div>
+        </div>
+        <div class="p-3 rounded-xl bg-slate-50 border border-slate-200/80 col-span-2 sm:col-span-1">
+          <div class="text-[10px] text-slate-500 uppercase font-semibold">Upstream Storage</div>
+          <div class="text-xs font-bold text-slate-900 mt-1 flex items-center space-x-1.5">
+            <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+            <span>SpaceByte & S3 Edge</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Files Table -->
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-xs border-collapse">
+          <thead>
+            <tr class="border-b border-slate-200 text-slate-500 font-semibold uppercase text-[10px] tracking-wider bg-slate-50/70">
+              <th class="py-3 px-4 rounded-l-xl">File / Node ID</th>
+              <th class="py-3 px-4">Owner Account</th>
+              <th class="py-3 px-4">Type</th>
+              <th class="py-3 px-4">Size</th>
+              <th class="py-3 px-4">Upstream Storage</th>
+              <th class="py-3 px-4">Vault Status</th>
+              <th class="py-3 px-4 text-right rounded-r-xl">Created At</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100">
+            <tr v-for="file in filesData.results" :key="file.id" class="hover:bg-slate-50/70 transition-colors">
+              <td class="py-3 px-4 font-mono text-[11px] text-slate-700 flex items-center space-x-2">
+                <Folder v-if="file.type === 'folder'" class="w-4 h-4 text-amber-500 shrink-0" />
+                <FileText v-else class="w-4 h-4 text-blue-600 shrink-0" />
+                <span class="truncate max-w-[140px]" :title="file.id">{{ file.id.slice(0, 13) }}...</span>
+              </td>
+              <td class="py-3 px-4">
+                <div class="font-semibold text-slate-900">{{ file.owner_email }}</div>
+                <div class="text-[10px] text-slate-400">{{ file.owner_name || 'Customer' }}</div>
+              </td>
+              <td class="py-3 px-4 capitalize font-medium">
+                {{ file.type }}
+              </td>
+              <td class="py-3 px-4 font-mono text-slate-900 font-medium">
+                {{ file.type === 'folder' ? '-' : formatBytes(file.size_bytes) }}
+              </td>
+              <td class="py-3 px-4">
+                <span
+                  class="px-2 py-0.5 rounded-full text-[10px] font-semibold font-mono"
+                  :class="file.upstream === 'SpaceByte' ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'bg-slate-100 text-slate-700'"
+                >
+                  {{ file.upstream }}
+                </span>
+              </td>
+              <td class="py-3 px-4">
+                <span
+                  class="px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider"
+                  :class="file.is_trashed ? 'bg-rose-50 text-rose-700 border border-rose-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'"
+                >
+                  {{ file.is_trashed ? 'In Trash' : 'Active' }}
+                </span>
+              </td>
+              <td class="py-3 px-4 text-right text-slate-500 text-[11px]">
+                {{ file.created_at ? new Date(file.created_at).toLocaleDateString() : '-' }}
+              </td>
+            </tr>
+
+            <tr v-if="filesData.results.length === 0">
+              <td colspan="7" class="py-8 text-center text-slate-500 text-xs">
+                No files found matching the search criteria.
               </td>
             </tr>
           </tbody>
@@ -1547,6 +1837,115 @@ onMounted(async () => {
             <span>{{ isUpgrading ? 'Applying...' : 'Apply Plan Upgrade' }}</span>
           </button>
         </div>
+      </div>
+    </div>
+
+    <!-- Create User & Assign Role Modal -->
+    <div
+      v-if="showCreateUserModal"
+      class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs"
+    >
+      <div class="bg-white w-full max-w-md rounded-2xl p-6 border border-slate-200 shadow-2xl space-y-4">
+        <div class="flex items-center justify-between pb-2 border-b border-slate-100">
+          <div class="flex items-center space-x-2 text-slate-900">
+            <UserPlus class="w-5 h-5 text-indigo-600" />
+            <h3 class="text-base font-bold">Create User & Assign Role</h3>
+          </div>
+          <button @click="showCreateUserModal = false" class="p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer">
+            <X class="w-5 h-5" />
+          </button>
+        </div>
+
+        <form @submit.prevent="submitCreateUser" class="space-y-3.5">
+          <div>
+            <label class="block text-xs font-semibold text-slate-700 mb-1">Email Address *</label>
+            <input
+              type="email"
+              v-model="newEmail"
+              required
+              placeholder="user@example.com"
+              class="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-900 focus:outline-none focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+            />
+          </div>
+
+          <div>
+            <label class="block text-xs font-semibold text-slate-700 mb-1">Full Name</label>
+            <input
+              type="text"
+              v-model="newFullName"
+              placeholder="e.g. John Doe"
+              class="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-900 focus:outline-none focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+            />
+          </div>
+
+          <div>
+            <label class="block text-xs font-semibold text-slate-700 mb-1">Password * (min 8 chars)</label>
+            <input
+              type="password"
+              v-model="newPassword"
+              required
+              minlength="8"
+              placeholder="Temporary password"
+              class="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-900 focus:outline-none focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+            />
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-semibold text-slate-700 mb-1">Account Role *</label>
+              <select
+                v-model="newRole"
+                class="w-full px-3 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-900 focus:outline-none focus:bg-white focus:border-indigo-500"
+              >
+                <option value="customer">Customer</option>
+                <option value="admin">Master Admin</option>
+              </select>
+            </div>
+
+            <div v-if="newRole === 'customer'">
+              <label class="block text-xs font-semibold text-slate-700 mb-1">Starting Storage Plan</label>
+              <select
+                v-model="newPlanCode"
+                class="w-full px-3 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-900 focus:outline-none focus:bg-white focus:border-indigo-500"
+              >
+                <option value="entry">Entry Pack (25 GB)</option>
+                <option value="smart">Smart Pack (100 GB)</option>
+                <option value="value">Value Pack (200 GB)</option>
+                <option value="super">Super Pack (400 GB)</option>
+                <option value="mega">Mega Pack (1 TB)</option>
+                <option value="none">No Plan</option>
+              </select>
+            </div>
+          </div>
+
+          <div v-if="createUserError" class="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center space-x-2">
+            <AlertTriangle class="w-4 h-4 text-rose-600 shrink-0" />
+            <span>{{ createUserError }}</span>
+          </div>
+
+          <div v-if="createUserSuccess" class="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center space-x-2">
+            <CheckCircle2 class="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>{{ createUserSuccess }}</span>
+          </div>
+
+          <div class="pt-2 flex items-center justify-end space-x-2.5">
+            <button
+              type="button"
+              @click="showCreateUserModal = false"
+              class="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              :disabled="isCreatingUser"
+              class="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-all shadow-sm flex items-center space-x-1.5 cursor-pointer disabled:opacity-50"
+            >
+              <RefreshCw v-if="isCreatingUser" class="w-3.5 h-3.5 animate-spin" />
+              <span>{{ isCreatingUser ? 'Creating...' : 'Create Account' }}</span>
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   </div>

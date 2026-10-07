@@ -683,3 +683,164 @@ class AdminUserPurgeDataView(APIView):
             "message": f"Purged {deleted_count} vault nodes and reclaimed storage for {target_user.email}.",
             "nodes_deleted": deleted_count,
         })
+
+
+class AdminFilesListView(APIView):
+    """
+    Global searchable, paginated file view for the Master Admin across all users.
+    Displays file IDs, owner emails, types, sizes, upload dates, upstream storage, and trash status.
+    """
+    permission_classes = [permissions.IsAuthenticated, permissions.IsAdminUser]
+
+    def get(self, request):
+        search = request.query_params.get("search", "").strip().lower()
+        node_type = request.query_params.get("type", "").strip().lower()
+        status_filter = request.query_params.get("status", "").strip().lower()
+        owner_id = request.query_params.get("owner_id", "").strip()
+
+        queryset = Node.objects.select_related("owner").order_by("-created_at")
+
+        if search:
+            queryset = queryset.filter(
+                models.Q(owner__email__icontains=search)
+                | models.Q(id__icontains=search)
+                | models.Q(owner__full_name__icontains=search)
+            )
+
+        if owner_id:
+            queryset = queryset.filter(owner_id=owner_id)
+
+        if node_type in ["file", "folder"]:
+            queryset = queryset.filter(type=node_type)
+
+        if status_filter == "trashed":
+            queryset = queryset.filter(trashed_at__isnull=False)
+        elif status_filter == "active":
+            queryset = queryset.filter(trashed_at__isnull=True)
+
+        total_count = queryset.count()
+        total_size = queryset.filter(type=Node.TYPE_FILE).aggregate(s=models.Sum("size_bytes"))["s"] or 0
+
+        # Pagination
+        try:
+            page = max(1, int(request.query_params.get("page", 1)))
+            page_size = min(100, max(1, int(request.query_params.get("page_size", 25))))
+        except ValueError:
+            page = 1
+            page_size = 25
+
+        start_idx = (page - 1) * page_size
+        end_idx = start_idx + page_size
+        paged_nodes = queryset[start_idx:end_idx]
+
+        results = []
+        for n in paged_nodes:
+            versions_count = n.versions.count() if hasattr(n, "versions") else 1
+            results.append({
+                "id": str(n.id),
+                "type": n.type,
+                "size_bytes": n.size_bytes,
+                "owner_id": str(n.owner.id) if n.owner else None,
+                "owner_email": n.owner.email if n.owner else "Unknown",
+                "owner_name": n.owner.full_name if n.owner else "",
+                "created_at": n.created_at.isoformat() if n.created_at else None,
+                "updated_at": n.updated_at.isoformat() if n.updated_at else None,
+                "trashed_at": n.trashed_at.isoformat() if n.trashed_at else None,
+                "is_trashed": bool(n.trashed_at),
+                "upstream": "SpaceByte" if n.spacebyte_hash else "S3 Storage",
+                "spacebyte_hash": n.spacebyte_hash or None,
+                "versions_count": versions_count,
+            })
+
+        return Response({
+            "total_count": total_count,
+            "total_size_bytes": total_size,
+            "page": page,
+            "page_size": page_size,
+            "results": results,
+        })
+
+
+class AdminCreateUserView(APIView):
+    """
+    Enables Master Admin to provision new user accounts directly from the admin dashboard,
+    assign user roles (Customer or Admin/Staff), and configure starting storage plan allocations.
+    """
+    permission_classes = [permissions.IsAuthenticated, permissions.IsAdminUser]
+
+    def post(self, request):
+        email = request.data.get("email", "").strip().lower()
+        password = request.data.get("password", "")
+        full_name = request.data.get("full_name", "").strip()
+        role = request.data.get("role", "customer").strip().lower()
+        plan_code = request.data.get("plan_code", "entry").strip().lower()
+
+        if not email or "@" not in email:
+            return Response({"error": "A valid email address is required."}, status=status.HTTP_400_BAD_REQUEST)
+        if not password or len(password) < 8:
+            return Response({"error": "Password must be at least 8 characters."}, status=status.HTTP_400_BAD_REQUEST)
+        if User.objects.filter(email=email).exists():
+            return Response({"error": f"An account with email '{email}' already exists."}, status=status.HTTP_400_BAD_REQUEST)
+
+        is_admin = role in ["admin", "staff", "superuser"]
+
+        user = User(
+            email=email,
+            full_name=full_name,
+            is_staff=is_admin,
+            is_superuser=is_admin,
+            is_active=True,
+            email_verified_at=timezone.now(),
+        )
+        user.set_password(password)
+        user.save()
+
+        # If customer account, create initial StorageQuota and Subscription
+        plan = None
+        if not is_admin and plan_code != "none":
+            plan = Plan.objects.filter(code=plan_code).first()
+
+        quota_limit = plan.storage_bytes if plan else (25 * 1024 * 1024 * 1024 if not is_admin else 0)
+        StorageQuota.objects.create(
+            user=user,
+            bytes_used=0,
+            bytes_limit=quota_limit,
+        )
+
+        if not is_admin and plan:
+            now = timezone.now()
+            Subscription.objects.create(
+                user=user,
+                plan=plan,
+                status="active",
+                billing_interval="monthly",
+                current_period_start=now,
+                current_period_end=now + timedelta(days=365),
+                can_upload=True,
+            )
+
+        AuditLog.objects.create(
+            user=request.user,
+            action="admin.user_created",
+            target_type="user",
+            target_id=str(user.id),
+            metadata={
+                "created_email": email,
+                "role": "Admin" if is_admin else "Customer",
+                "plan_code": plan_code,
+            },
+        )
+
+        return Response({
+            "success": True,
+            "message": f"Successfully created user {email} ({'Admin' if is_admin else 'Customer'}).",
+            "user": {
+                "id": str(user.id),
+                "email": user.email,
+                "full_name": user.full_name,
+                "is_staff": user.is_staff,
+                "is_superuser": user.is_superuser,
+                "role": "Admin" if is_admin else "Customer",
+            },
+        }, status=status.HTTP_201_CREATED)
+

@@ -213,11 +213,14 @@ class ChangePasswordView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Update password & re-wrapped master key
+        # Update password & re-wrapped master key if provided
         user.set_password(data["new_password"])
-        user.wrapped_master_key = data["new_wrapped_master_key"]
-        user.kdf_salt = data["new_kdf_salt"]
-        user.kdf_params = data["new_kdf_params"]
+        if data.get("new_wrapped_master_key"):
+            user.wrapped_master_key = data["new_wrapped_master_key"]
+        if data.get("new_kdf_salt"):
+            user.kdf_salt = data["new_kdf_salt"]
+        if data.get("new_kdf_params"):
+            user.kdf_params = data["new_kdf_params"]
         user.save()
 
         AuditLog.objects.create(

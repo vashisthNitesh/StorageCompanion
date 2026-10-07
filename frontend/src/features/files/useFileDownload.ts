@@ -25,7 +25,7 @@ export function useFileDownload() {
     return downloadStatusText.value[nodeId] || "";
   }
 
-  async function downloadFile(node: FileNode): Promise<void> {
+  async function downloadFile(node: FileNode, versionNo?: number): Promise<void> {
     if (node.type === "folder") return;
 
     if (!authStore.masterKey) {
@@ -33,14 +33,16 @@ export function useFileDownload() {
       return;
     }
 
-    downloadingIds.value.add(node.id);
-    downloadProgress.value[node.id] = 0;
-    downloadStatusText.value[node.id] = "Connecting...";
+    const downloadKey = versionNo ? `${node.id}-v${versionNo}` : node.id;
+    downloadingIds.value.add(downloadKey);
+    downloadProgress.value[downloadKey] = 0;
+    downloadStatusText.value[downloadKey] = "Connecting...";
 
     let writableStream: any = null;
 
     try {
       // 1. Fetch download metadata (presigned/proxy URL & wrapped key)
+      const vQuery = versionNo ? `?v=${versionNo}` : "";
       const downloadData = await apiRequest<{
         download_url: string;
         wrapped_file_key: string;
@@ -49,7 +51,7 @@ export function useFileDownload() {
         part_size?: number;
         direct_url?: string;
         upstream?: string;
-      }>(`/api/v1/nodes/${node.id}/download`);
+      }>(`/api/v1/nodes/${node.id}/download${vQuery}`);
 
       const totalSize = downloadData.size_bytes || node.size_bytes || 0;
       const isLargeFile = totalSize >= 400 * 1024 * 1024; // >= 400 MB
@@ -57,9 +59,9 @@ export function useFileDownload() {
       // For large files (> 400 MB), try File System Access API for zero-RAM direct-to-disk streaming
       if (isLargeFile && typeof window !== "undefined" && "showSaveFilePicker" in window) {
         try {
-          downloadStatusText.value[node.id] = "Choose save location...";
+          downloadStatusText.value[downloadKey] = "Choose save location...";
           const fileHandle = await (window as any).showSaveFilePicker({
-            suggestedName: node.name,
+            suggestedName: versionNo ? `v${versionNo}_${node.name}` : node.name,
           });
           writableStream = await fileHandle.createWritable();
         } catch (pickerErr: any) {
@@ -72,18 +74,21 @@ export function useFileDownload() {
         }
       }
 
-      downloadStatusText.value[node.id] = "Downloading...";
+      downloadStatusText.value[downloadKey] = "Downloading...";
 
       // 2. Fetch encrypted bytes: try direct storage edge download first, falling back to authenticated backend proxy
+      // 2. Fetch encrypted bytes: stream through authenticated backend proxy for SpaceByte, or try fast direct edge for S3
       let res: Response | null = null;
-      if (downloadData.direct_url) {
+      if (downloadData.direct_url && downloadData.upstream !== "spacebyte") {
         try {
-          const directRes = await fetch(downloadData.direct_url, { method: "GET" });
+          const directController = new AbortController();
+          const directTimeout = setTimeout(() => directController.abort(), 5000);
+          const directRes = await fetch(downloadData.direct_url, { method: "GET", signal: directController.signal });
+          clearTimeout(directTimeout);
           if (directRes.ok && directRes.body) {
             res = directRes;
           }
         } catch {
-          // Direct edge download failed (e.g. CORS or network), fall back to backend proxy
           res = null;
         }
       }
@@ -177,8 +182,8 @@ export function useFileDownload() {
         }
       }
 
-      downloadProgress.value[node.id] = 100;
-      downloadStatusText.value[node.id] = "Finishing...";
+      downloadProgress.value[downloadKey] = 100;
+      downloadStatusText.value[downloadKey] = "Finishing...";
 
       // 5. Finalize file write or trigger standard browser download
       if (writableStream) {
@@ -190,7 +195,7 @@ export function useFileDownload() {
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = node.name;
+        a.download = versionNo ? `v${versionNo}_${node.name}` : node.name;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -205,9 +210,9 @@ export function useFileDownload() {
       console.error("Download failed:", err);
       alert(err.message || "Failed to download and decrypt file.");
     } finally {
-      downloadingIds.value.delete(node.id);
-      delete downloadProgress.value[node.id];
-      delete downloadStatusText.value[node.id];
+      downloadingIds.value.delete(downloadKey);
+      delete downloadProgress.value[downloadKey];
+      delete downloadStatusText.value[downloadKey];
     }
   }
 

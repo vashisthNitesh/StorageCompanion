@@ -53,10 +53,11 @@ async function generatePublicLink() {
       }),
     });
 
-    // 4. Construct URL with key in fragment (#)
+    // 4. Construct URL with key and filename in fragment (#)
     const linkKeyBase64 = uint8ArrayToBase64(linkKey);
     const origin = window.location.origin;
-    shareUrl.value = `${origin}/s/${res.raw_token}#key=${encodeURIComponent(linkKeyBase64)}`;
+    const nameParam = props.node?.name ? `&name=${encodeURIComponent(props.node.name)}` : "";
+    shareUrl.value = `${origin}/s/${res.raw_token}#key=${encodeURIComponent(linkKeyBase64)}${nameParam}`;
   } catch (err: any) {
     errorMessage.value = err.message || "Failed to create share link.";
   } finally {

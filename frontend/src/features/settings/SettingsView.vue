@@ -14,6 +14,7 @@ import {
   AlertCircle,
   QrCode,
   Trash2,
+  Loader2,
 } from "lucide-vue-next";
 
 const authStore = useAuthStore();
@@ -56,6 +57,8 @@ async function fetchAuditLogs() {
   } catch {}
 }
 
+const isEnrollingMfa = ref(false);
+
 async function handleChangePassword() {
   passwordMessage.value = "";
   passwordError.value = "";
@@ -64,30 +67,35 @@ async function handleChangePassword() {
     passwordError.value = "New passwords do not match.";
     return;
   }
-  if (!authStore.masterKey) {
+
+  // If vault user with wrapped key, check if unlocked; for Master Admin allow direct password change
+  if (!authStore.masterKey && !authStore.isMasterAdmin && authStore.user?.wrapped_master_key) {
     passwordError.value = "Vault must be unlocked to change password.";
     return;
   }
 
   isChangingPassword.value = true;
   try {
-    // 1. Derive new KEK with new password
-    const newKek = await deriveKEK(newPassword.value, authStore.user!.kdf_salt, DEFAULT_KDF_PARAMS);
-    // 2. Re-wrap Master Key with new KEK (does NOT re-encrypt files!)
-    const newWrappedMasterKey = await wrapKey(newKek, authStore.masterKey);
+    let payload: any = {
+      current_password: currentPassword.value,
+      new_password: newPassword.value,
+    };
+
+    // If vault is unlocked and user has KDF salt, re-wrap the master key
+    if (authStore.masterKey && authStore.user?.kdf_salt) {
+      const newKek = await deriveKEK(newPassword.value, authStore.user.kdf_salt, DEFAULT_KDF_PARAMS);
+      const newWrappedMasterKey = await wrapKey(newKek, authStore.masterKey);
+      payload.new_wrapped_master_key = newWrappedMasterKey;
+      payload.new_kdf_salt = authStore.user.kdf_salt;
+      payload.new_kdf_params = DEFAULT_KDF_PARAMS;
+    }
 
     await apiRequest("/api/v1/auth/password", {
       method: "POST",
-      body: JSON.stringify({
-        current_password: currentPassword.value,
-        new_password: newPassword.value,
-        new_wrapped_master_key: newWrappedMasterKey,
-        new_kdf_salt: authStore.user!.kdf_salt,
-        new_kdf_params: DEFAULT_KDF_PARAMS,
-      }),
+      body: JSON.stringify(payload),
     });
 
-    passwordMessage.value = "Password changed and Master Key re-wrapped successfully!";
+    passwordMessage.value = "Password updated successfully!";
     currentPassword.value = "";
     newPassword.value = "";
     confirmNewPassword.value = "";
@@ -100,15 +108,19 @@ async function handleChangePassword() {
 
 async function startMfaEnroll() {
   mfaError.value = "";
+  isEnrollingMfa.value = true;
   try {
     const data = await apiRequest<{ qr_code: string; secret: string }>("/api/v1/auth/mfa/enroll", {
       method: "POST",
+      body: JSON.stringify({}),
     });
     mfaQrCode.value = data.qr_code;
     mfaSecret.value = data.secret;
     mfaStep.value = "enrolling";
   } catch (err: any) {
     mfaError.value = err.message || "Failed to start MFA setup.";
+  } finally {
+    isEnrollingMfa.value = false;
   }
 }
 
@@ -217,9 +229,11 @@ async function revokeSession(sessionId: string) {
       <div v-else-if="mfaStep === 'initial'">
         <button
           @click="startMfaEnroll"
-          class="px-5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold text-xs border border-slate-200 transition-colors"
+          :disabled="isEnrollingMfa"
+          class="px-5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold text-xs border border-slate-200 transition-colors flex items-center space-x-2 disabled:opacity-50"
         >
-          Enable Authenticator App
+          <Loader2 v-if="isEnrollingMfa" class="w-4 h-4 animate-spin text-slate-600" />
+          <span>{{ isEnrollingMfa ? 'Starting setup...' : 'Enable Authenticator App' }}</span>
         </button>
       </div>
 
@@ -243,6 +257,14 @@ async function revokeSession(sessionId: string) {
             class="btn-primary px-4 py-2 rounded-xl text-white font-semibold text-xs shadow-xs"
           >
             Verify & Enable
+          </button>
+        </div>
+        <div>
+          <button
+            @click="mfaStep = 'initial'; mfaError = '';"
+            class="text-xs text-slate-500 hover:text-slate-800 underline transition-colors"
+          >
+            Cancel setup
           </button>
         </div>
       </div>

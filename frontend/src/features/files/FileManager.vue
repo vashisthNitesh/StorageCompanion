@@ -35,7 +35,10 @@ import {
   ArrowUpDown,
   Search,
   Plus,
+  FolderInput,
+  History,
 } from "lucide-vue-next";
+import { apiRequest } from "../../lib/api";
 
 const router = useRouter();
 const filesStore = useFilesStore();
@@ -46,9 +49,25 @@ const { isDownloading, downloadFile, getProgress, getStatusText } = useFileDownl
 const isDraggingOver = ref(false);
 const showCreateFolderModal = ref(false);
 const newFolderName = ref("");
+const folderError = ref("");
 const showRenameModal = ref(false);
 const renameTargetNode = ref<FileNode | null>(null);
 const renameInput = ref("");
+
+// Move Modal
+const showMoveModal = ref(false);
+const moveTargetNode = ref<FileNode | null>(null);
+const availableFolders = ref<{ id: string | null; name: string }[]>([]);
+const selectedDestinationId = ref<string | null>(null);
+const isMoving = ref(false);
+const moveError = ref("");
+
+// Version History Modal
+const showVersionsModal = ref(false);
+const versionsTargetNode = ref<FileNode | null>(null);
+const fileVersions = ref<any[]>([]);
+const isLoadingVersions = ref(false);
+const versionsError = ref("");
 
 // In-vault file input refs
 const vaultFileInputRef = ref<HTMLInputElement | null>(null);
@@ -251,13 +270,62 @@ function closeContextMenu() {
 
 function triggerCreateFolder() {
   newFolderName.value = "";
+  folderError.value = "";
   showCreateFolderModal.value = true;
 }
 
 async function submitCreateFolder() {
-  if (!newFolderName.value.trim()) return;
-  await filesStore.createFolder(newFolderName.value.trim());
-  showCreateFolderModal.value = false;
+  const name = newFolderName.value.trim();
+  if (!name) {
+    folderError.value = "Folder name cannot be blank.";
+    return;
+  }
+  try {
+    await filesStore.createFolder(name);
+    showCreateFolderModal.value = false;
+  } catch (err: any) {
+    folderError.value = err.message || "Failed to create folder.";
+  }
+}
+
+async function triggerMove(node: FileNode) {
+  moveTargetNode.value = node;
+  moveError.value = "";
+  selectedDestinationId.value = null;
+  showMoveModal.value = true;
+  closeContextMenu();
+  availableFolders.value = await filesStore.fetchAllFolders(node.id);
+}
+
+async function submitMove() {
+  if (!moveTargetNode.value) return;
+  isMoving.value = true;
+  moveError.value = "";
+  try {
+    await filesStore.moveNode(moveTargetNode.value.id, selectedDestinationId.value);
+    showMoveModal.value = false;
+  } catch (err: any) {
+    moveError.value = err.message || "Failed to move item.";
+  } finally {
+    isMoving.value = false;
+  }
+}
+
+async function triggerVersions(node: FileNode) {
+  versionsTargetNode.value = node;
+  versionsError.value = "";
+  fileVersions.value = [];
+  isLoadingVersions.value = true;
+  showVersionsModal.value = true;
+  closeContextMenu();
+  try {
+    const res = await apiRequest(`/api/v1/nodes/${node.id}/versions`);
+    fileVersions.value = Array.isArray(res) ? res : (res as any).results || [];
+  } catch (err: any) {
+    versionsError.value = err.message || "Failed to load version history.";
+  } finally {
+    isLoadingVersions.value = false;
+  }
 }
 
 function triggerRename(node: FileNode) {
@@ -340,6 +408,8 @@ function handleKeydown(e: KeyboardEvent) {
     isShareOpen.value = false;
     showCreateFolderModal.value = false;
     showRenameModal.value = false;
+    showMoveModal.value = false;
+    showVersionsModal.value = false;
   }
 }
 
@@ -831,12 +901,31 @@ onUnmounted(() => {
         <span>Preview & Decrypt</span>
       </button>
 
+      <!-- Versions Option for Files -->
+      <button
+        v-if="contextMenu.node.type === 'file'"
+        @click="triggerVersions(contextMenu.node)"
+        class="w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl hover:bg-slate-100 text-slate-700 hover:text-slate-900 transition-colors"
+      >
+        <History class="w-3.5 h-3.5 text-slate-500" />
+        <span>Version History</span>
+      </button>
+
       <button
         @click="triggerShare(contextMenu.node)"
         class="w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl hover:bg-slate-100 text-slate-700 hover:text-slate-900 transition-colors"
       >
         <Share2 class="w-3.5 h-3.5 text-slate-500" />
         <span>Share Link (#key)</span>
+      </button>
+
+      <!-- Move Option -->
+      <button
+        @click="triggerMove(contextMenu.node)"
+        class="w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl hover:bg-slate-100 text-slate-700 hover:text-slate-900 transition-colors"
+      >
+        <FolderInput class="w-3.5 h-3.5 text-slate-500" />
+        <span>Move to...</span>
       </button>
 
       <button
@@ -865,20 +954,113 @@ onUnmounted(() => {
           <FolderPlus class="w-5 h-5 text-blue-600" />
           <h3 class="text-sm font-bold">Create New Folder</h3>
         </div>
-        <input
-          type="text"
-          v-model="newFolderName"
-          placeholder="Folder name..."
-          class="w-full px-3.5 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all"
-          autofocus
-          @keyup.enter="submitCreateFolder"
-        />
+        <div class="space-y-1.5">
+          <input
+            type="text"
+            v-model="newFolderName"
+            @input="folderError = ''"
+            placeholder="Folder name..."
+            class="w-full px-3.5 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all"
+            autofocus
+            @keyup.enter="submitCreateFolder"
+          />
+          <p v-if="folderError" class="text-xs text-rose-600 font-medium">{{ folderError }}</p>
+        </div>
         <div class="flex justify-end space-x-2 pt-1">
           <button @click="showCreateFolderModal = false" class="btn-secondary px-3.5 py-1.5 rounded-xl text-xs font-medium">
             Cancel
           </button>
           <button @click="submitCreateFolder" class="btn-primary px-4 py-1.5 rounded-xl text-xs font-semibold">
             Create Folder
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Move Modal -->
+    <div v-if="showMoveModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs">
+      <div class="bg-white w-full max-w-sm rounded-2xl p-6 border border-slate-200 space-y-4 shadow-xl">
+        <div class="flex items-center space-x-2.5 text-slate-900">
+          <FolderInput class="w-5 h-5 text-blue-600" />
+          <h3 class="text-sm font-bold">Move "{{ moveTargetNode?.name }}"</h3>
+        </div>
+        <p class="text-xs text-slate-500">Choose destination folder to place this item:</p>
+        <div v-if="moveError" class="text-xs text-rose-600 font-medium">{{ moveError }}</div>
+        <div class="max-h-48 overflow-y-auto space-y-1 rounded-xl border border-slate-200 p-2 bg-slate-50">
+          <label
+            v-for="folder in availableFolders"
+            :key="folder.id || 'root'"
+            class="flex items-center space-x-2.5 p-2 rounded-lg cursor-pointer hover:bg-white text-xs text-slate-800 transition-colors"
+          >
+            <input
+              type="radio"
+              :value="folder.id"
+              v-model="selectedDestinationId"
+              class="text-blue-600 focus:ring-blue-500 border-slate-300"
+            />
+            <Folder class="w-4 h-4 text-amber-500 shrink-0" />
+            <span class="truncate font-medium">{{ folder.name }}</span>
+          </label>
+        </div>
+        <div class="flex justify-end space-x-2 pt-1">
+          <button @click="showMoveModal = false" class="btn-secondary px-3.5 py-1.5 rounded-xl text-xs font-medium">
+            Cancel
+          </button>
+          <button @click="submitMove" :disabled="isMoving" class="btn-primary px-4 py-1.5 rounded-xl text-xs font-semibold flex items-center space-x-1.5">
+            <Loader2 v-if="isMoving" class="w-3.5 h-3.5 animate-spin" />
+            <span>Move Here</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Version History Modal -->
+    <div v-if="showVersionsModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs">
+      <div class="bg-white w-full max-w-md rounded-2xl p-6 border border-slate-200 space-y-4 shadow-xl">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center space-x-2.5 text-slate-900">
+            <History class="w-5 h-5 text-blue-600" />
+            <h3 class="text-sm font-bold">Version History</h3>
+          </div>
+          <button @click="showVersionsModal = false" class="text-slate-400 hover:text-slate-600 font-bold p-1">✕</button>
+        </div>
+        <p class="text-xs text-slate-600 truncate font-semibold">
+          {{ versionsTargetNode?.name }}
+        </p>
+        <div v-if="isLoadingVersions" class="text-center py-6 text-xs text-slate-500 flex items-center justify-center space-x-2">
+          <Loader2 class="w-4 h-4 animate-spin text-blue-600" />
+          <span>Loading versions...</span>
+        </div>
+        <div v-else-if="versionsError" class="text-xs text-rose-600 font-medium">
+          {{ versionsError }}
+        </div>
+        <div v-else-if="fileVersions.length === 0" class="text-xs text-slate-500 text-center py-4">
+          No previous versions recorded.
+        </div>
+        <div v-else class="max-h-60 overflow-y-auto divide-y divide-slate-100 rounded-xl border border-slate-200">
+          <div
+            v-for="ver in fileVersions"
+            :key="ver.id"
+            class="p-3 flex items-center justify-between hover:bg-slate-50 transition-colors text-xs"
+          >
+            <div>
+              <div class="font-bold text-slate-900">Version {{ ver.version_no }}</div>
+              <div class="text-[11px] text-slate-500">
+                {{ formatBytes(ver.size_bytes) }} • {{ new Date(ver.created_at).toLocaleDateString() }} {{ new Date(ver.created_at).toLocaleTimeString() }}
+              </div>
+            </div>
+            <button
+              @click="downloadFile(versionsTargetNode!, ver.version_no)"
+              class="px-2.5 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold text-xs flex items-center space-x-1 transition-colors"
+            >
+              <Download class="w-3.5 h-3.5" />
+              <span>Download</span>
+            </button>
+          </div>
+        </div>
+        <div class="flex justify-end pt-1">
+          <button @click="showVersionsModal = false" class="btn-secondary px-4 py-1.5 rounded-xl text-xs font-medium">
+            Close
           </button>
         </div>
       </div>

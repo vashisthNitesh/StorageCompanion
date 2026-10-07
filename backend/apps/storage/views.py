@@ -119,6 +119,35 @@ class NodeDetailView(APIView):
 
     def delete(self, request, pk):
         node = self.get_node(pk, request.user)
+        is_permanent = request.query_params.get("permanent") == "true" or node.trashed_at is not None
+
+        if is_permanent:
+            # Reclaim quota for deleted file
+            if node.type == Node.TYPE_FILE and node.size_bytes:
+                quota = StorageQuota.objects.filter(user=request.user).first()
+                if quota:
+                    quota.bytes_used = max(0, quota.bytes_used - node.size_bytes)
+                    quota.save(update_fields=["bytes_used"])
+
+            # Clean up SpaceByte upstream entry if present
+            if node.spacebyte_entry_id:
+                try:
+                    sb_client = get_spacebyte_client()
+                    sb_client.delete_entries([node.spacebyte_entry_id], delete_forever=True)
+                except Exception:
+                    pass
+
+            node_id_str = str(node.id)
+            node.delete()
+
+            AuditLog.objects.create(
+                user=request.user,
+                action="node.deleted_permanently",
+                target_type="node",
+                target_id=node_id_str,
+            )
+            return Response({"success": True, "message": "Permanently deleted."})
+
         # Soft delete: move to trash
         node.trashed_at = timezone.now()
         node.save(update_fields=["trashed_at"])
@@ -360,12 +389,19 @@ class UploadPartRelayView(APIView):
         if not chunk_bytes:
             return Response({"error": "No chunk data received."}, status=status.HTTP_400_BAD_REQUEST)
 
-        etag = relay_upload_part(upload, int(part_number), chunk_bytes)
-        return Response({
-            "status": "success",
-            "part_number": int(part_number),
-            "etag": etag,
-        })
+        try:
+            etag = relay_upload_part(upload, int(part_number), chunk_bytes)
+            return Response({
+                "status": "success",
+                "part_number": int(part_number),
+                "etag": etag,
+            })
+        except Exception as e:
+            logger.error("Relay upload part %s failed: %s", part_number, e)
+            return Response(
+                {"error": f"Failed to relay chunk {part_number} to upstream storage: {str(e)}"},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
 
 
 class QuotaView(APIView):

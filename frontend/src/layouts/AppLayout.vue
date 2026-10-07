@@ -20,6 +20,9 @@ import {
   AlertTriangle,
   ArrowRight,
   Loader2,
+  Menu,
+  X,
+  Trash2,
 } from "lucide-vue-next";
 
 const router = useRouter();
@@ -27,6 +30,7 @@ const authStore = useAuthStore();
 const filesStore = useFilesStore();
 const uploadStore = useUploadStore();
 
+const isMobileSidebarOpen = ref(false);
 const searchInput = ref("");
 const fileInputRef = ref<HTMLInputElement | null>(null);
 
@@ -101,8 +105,8 @@ onMounted(() => {
 
 <template>
   <div class="flex h-screen bg-slate-50 text-slate-900 overflow-hidden selection:bg-brand-600 selection:text-white">
-    <!-- Left Sidebar -->
-    <aside class="w-64 border-r border-slate-200 bg-white flex flex-col justify-between shrink-0 shadow-[1px_0_3px_0_rgba(0,0,0,0.02)]">
+    <!-- Left Sidebar (Desktop) -->
+    <aside class="hidden md:flex w-64 border-r border-slate-200 bg-white flex-col justify-between shrink-0 shadow-[1px_0_3px_0_rgba(0,0,0,0.02)]">
       <div class="p-4 space-y-5">
         <!-- Logo -->
         <router-link to="/" class="flex items-center space-x-2.5 group">
@@ -129,7 +133,7 @@ onMounted(() => {
 
         <!-- Navigation Links -->
         <nav class="space-y-1 text-xs font-medium">
-          <!-- Customer Navigation: Encrypted Vault, Shared Links, Billing -->
+          <!-- Customer Navigation: Encrypted Vault, Shared Links, Trash, Billing -->
           <template v-if="!authStore.isMasterAdmin">
             <router-link
               to="/app/files"
@@ -147,6 +151,15 @@ onMounted(() => {
             >
               <Share2 class="w-4 h-4" :class="$route.path === '/app/shared' ? 'text-blue-600' : 'text-slate-400'" />
               <span>Shared Links</span>
+            </router-link>
+
+            <router-link
+              to="/app/trash"
+              class="flex items-center space-x-3 px-3 py-2 rounded-xl transition-all"
+              :class="$route.path === '/app/trash' ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/70'"
+            >
+              <Trash2 class="w-4 h-4" :class="$route.path === '/app/trash' ? 'text-blue-600' : 'text-slate-400'" />
+              <span>Trash</span>
             </router-link>
 
             <router-link
@@ -257,12 +270,146 @@ onMounted(() => {
       </div>
     </aside>
 
+    <!-- Mobile Sidebar Backdrop & Drawer -->
+    <div v-if="isMobileSidebarOpen" class="fixed inset-0 z-50 md:hidden flex">
+      <!-- Backdrop -->
+      <div class="fixed inset-0 bg-slate-900/40 backdrop-blur-xs transition-opacity" @click="isMobileSidebarOpen = false"></div>
+
+      <!-- Drawer Panel -->
+      <aside class="relative w-64 max-w-[85vw] bg-white h-full flex flex-col justify-between z-10 shadow-2xl">
+        <div class="p-4 space-y-5 overflow-y-auto">
+          <!-- Logo & Close -->
+          <div class="flex items-center justify-between">
+            <router-link to="/" @click="isMobileSidebarOpen = false" class="flex items-center space-x-2.5 group">
+              <div class="w-8 h-8 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center shadow-sm shadow-blue-500/20">
+                <Lock class="w-4 h-4 text-white" />
+              </div>
+              <div>
+                <div class="font-bold text-slate-900 text-sm tracking-tight leading-none">SmartSpace</div>
+                <div class="text-[10px] text-slate-500 font-medium mt-0.5">smartspacedata.com</div>
+              </div>
+            </router-link>
+            <button @click="isMobileSidebarOpen = false" class="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors">
+              <X class="w-5 h-5" />
+            </button>
+          </div>
+
+          <!-- Quick Upload Action (Customer Accounts Only) -->
+          <div v-if="!authStore.isMasterAdmin">
+            <button
+              @click="handleUploadClick(); isMobileSidebarOpen = false"
+              class="w-full btn-primary py-2.5 px-3 rounded-xl text-xs font-semibold flex items-center justify-center space-x-2"
+            >
+              <UploadCloud class="w-4 h-4" />
+              <span>Upload Encrypted Files</span>
+            </button>
+          </div>
+
+          <!-- Navigation Links -->
+          <nav class="space-y-1 text-xs font-medium">
+            <template v-if="!authStore.isMasterAdmin">
+              <router-link
+                to="/app/files"
+                @click="isMobileSidebarOpen = false"
+                class="flex items-center space-x-3 px-3 py-2 rounded-xl transition-all"
+                :class="$route.path === '/app/files' ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/70'"
+              >
+                <Folder class="w-4 h-4" :class="$route.path === '/app/files' ? 'text-blue-600' : 'text-slate-400'" />
+                <span>Encrypted Vault</span>
+              </router-link>
+
+              <router-link
+                to="/app/shared"
+                @click="isMobileSidebarOpen = false"
+                class="flex items-center space-x-3 px-3 py-2 rounded-xl transition-all"
+                :class="$route.path === '/app/shared' ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/70'"
+              >
+                <Share2 class="w-4 h-4" :class="$route.path === '/app/shared' ? 'text-blue-600' : 'text-slate-400'" />
+                <span>Shared Links</span>
+              </router-link>
+
+              <router-link
+                to="/app/trash"
+                @click="isMobileSidebarOpen = false"
+                class="flex items-center space-x-3 px-3 py-2 rounded-xl transition-all"
+                :class="$route.path === '/app/trash' ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/70'"
+              >
+                <Trash2 class="w-4 h-4" :class="$route.path === '/app/trash' ? 'text-blue-600' : 'text-slate-400'" />
+                <span>Trash</span>
+              </router-link>
+
+              <router-link
+                to="/app/billing"
+                @click="isMobileSidebarOpen = false"
+                class="flex items-center space-x-3 px-3 py-2 rounded-xl transition-all"
+                :class="$route.path === '/app/billing' ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/70'"
+              >
+                <CreditCard class="w-4 h-4" :class="$route.path === '/app/billing' ? 'text-blue-600' : 'text-slate-400'" />
+                <span>Subscription & Billing</span>
+              </router-link>
+            </template>
+
+            <template v-else>
+              <router-link
+                to="/app/admin"
+                @click="isMobileSidebarOpen = false"
+                class="flex items-center space-x-3 px-3 py-2 rounded-xl transition-all border border-indigo-200/70"
+                :class="$route.path.startsWith('/app/admin') ? 'bg-indigo-50 text-indigo-800 font-bold shadow-xs' : 'bg-indigo-50/40 text-indigo-700 hover:bg-indigo-100/60'"
+              >
+                <ShieldAlert class="w-4 h-4 text-indigo-600 shrink-0" />
+                <div class="flex items-center justify-between w-full min-w-0">
+                  <span class="truncate">Admin Dashboard</span>
+                  <span class="text-[9px] bg-indigo-600 text-white px-1.5 py-0.5 rounded font-mono font-bold uppercase tracking-wider">Master</span>
+                </div>
+              </router-link>
+            </template>
+
+            <router-link
+              to="/app/settings"
+              @click="isMobileSidebarOpen = false"
+              class="flex items-center space-x-3 px-3 py-2 rounded-xl transition-all"
+              :class="$route.path === '/app/settings' ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/70'"
+            >
+              <Settings class="w-4 h-4" :class="$route.path === '/app/settings' ? 'text-blue-600' : 'text-slate-400'" />
+              <span>Security & Sessions</span>
+            </router-link>
+          </nav>
+        </div>
+
+        <!-- Mobile Drawer Profile Footer -->
+        <div class="p-4 border-t border-slate-200 space-y-3 bg-slate-50/50">
+          <div class="pt-1 space-y-2">
+            <div class="flex items-center space-x-2.5 min-w-0">
+              <div class="w-7 h-7 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-bold text-xs shrink-0 border border-blue-200">
+                {{ (authStore.user?.full_name || authStore.user?.email || 'U')[0].toUpperCase() }}
+              </div>
+              <div class="min-w-0 flex-1">
+                <div class="text-xs font-semibold text-slate-900 truncate">
+                  {{ authStore.user?.full_name || (authStore.isMasterAdmin ? 'Master Administrator' : 'My Vault') }}
+                </div>
+                <div class="text-[10px] text-slate-500 truncate">
+                  {{ authStore.user?.email }}
+                </div>
+              </div>
+            </div>
+            <button
+              @click="handleLogout(); isMobileSidebarOpen = false"
+              class="w-full flex items-center justify-center space-x-2 py-2 px-3 rounded-xl text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 hover:text-rose-800 border border-rose-200 transition-all shadow-xs cursor-pointer"
+            >
+              <LogOut class="w-4 h-4 text-rose-600" />
+              <span>Sign Out</span>
+            </button>
+          </div>
+        </div>
+      </aside>
+    </div>
+
     <!-- Main Content Area -->
     <div class="flex-1 flex flex-col min-w-0 overflow-hidden bg-slate-50">
       <!-- 90-Day Retention Grace Period Warning Banner -->
       <div
         v-if="!authStore.isMasterAdmin && authStore.user?.subscription && (authStore.user?.subscription?.is_in_grace_period || authStore.user?.subscription?.status === 'expired')"
-        class="px-6 py-2.5 bg-amber-50 border-b border-amber-200 flex items-center justify-between text-xs text-amber-900"
+        class="px-4 sm:px-6 py-2.5 bg-amber-50 border-b border-amber-200 flex items-center justify-between text-xs text-amber-900"
       >
         <div class="flex items-center space-x-2.5">
           <AlertTriangle class="w-4 h-4 text-amber-600 shrink-0" />
@@ -283,7 +430,7 @@ onMounted(() => {
       <!-- General Unpaid Warning Banner (For newly registered users with no active plan) -->
       <div
         v-else-if="!authStore.hasActiveSubscription && !authStore.isMasterAdmin"
-        class="px-6 py-2.5 bg-amber-50 border-b border-amber-200 flex items-center justify-between text-xs text-amber-900"
+        class="px-4 sm:px-6 py-2.5 bg-amber-50 border-b border-amber-200 flex items-center justify-between text-xs text-amber-900"
       >
         <div class="flex items-center space-x-2">
           <AlertTriangle class="w-4 h-4 text-amber-600 shrink-0" />
@@ -298,33 +445,40 @@ onMounted(() => {
       </div>
 
       <!-- Top Header -->
-      <header class="h-14 border-b border-slate-200 bg-white/80 backdrop-blur-md flex items-center justify-between px-6 shrink-0 shadow-2xs">
+      <header class="h-14 border-b border-slate-200 bg-white/80 backdrop-blur-md flex items-center justify-between px-3 sm:px-6 shrink-0 shadow-2xs">
         <!-- Breadcrumbs or Admin Title -->
-        <div class="flex items-center space-x-2 text-xs font-medium text-slate-500">
+        <div class="flex items-center space-x-2 sm:space-x-3 text-xs font-medium text-slate-500 min-w-0">
+          <button
+            @click="isMobileSidebarOpen = true"
+            class="md:hidden p-1.5 -ml-1 rounded-xl text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors shrink-0"
+            title="Open navigation menu"
+          >
+            <Menu class="w-5 h-5" />
+          </button>
           <template v-if="!authStore.isMasterAdmin">
             <template v-for="(crumb, idx) in filesStore.breadcrumbs" :key="crumb.id || idx">
               <button
                 @click="filesStore.navigateUp(idx)"
-                class="hover:text-slate-900 transition-colors"
+                class="hover:text-slate-900 transition-colors truncate max-w-[100px] sm:max-w-none"
                 :class="{ 'text-slate-900 font-semibold': idx === filesStore.breadcrumbs.length - 1 }"
               >
                 {{ crumb.name }}
               </button>
-              <ChevronRight v-if="idx < filesStore.breadcrumbs.length - 1" class="w-3.5 h-3.5 text-slate-400" />
+              <ChevronRight v-if="idx < filesStore.breadcrumbs.length - 1" class="w-3.5 h-3.5 text-slate-400 shrink-0" />
             </template>
           </template>
           <template v-else>
             <div class="flex items-center space-x-2 text-slate-800 font-bold">
-              <ShieldAlert class="w-4 h-4 text-indigo-600" />
-              <span>Platform Management Console</span>
+              <ShieldAlert class="w-4 h-4 text-indigo-600 shrink-0" />
+              <span class="truncate">Platform Console</span>
             </div>
           </template>
         </div>
 
         <!-- Search, Status & Prominent Top Sign Out -->
-        <div class="flex items-center space-x-3">
+        <div class="flex items-center space-x-2 sm:space-x-3">
           <!-- Client-side decrypted search input (Customers Only) -->
-          <div v-if="!authStore.isMasterAdmin" class="relative w-64">
+          <div v-if="!authStore.isMasterAdmin" class="hidden sm:block relative w-44 lg:w-64">
             <Search class="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               type="text"
