@@ -44,16 +44,29 @@ export async function refreshAccessToken(): Promise<{ access_token: string; user
         credentials: "include",
       });
 
-      if (refreshRes.ok) {
-        const refreshData = await refreshRes.json();
+      let res = refreshRes;
+      if (res.status === 401) {
+        // Another tab may have just rotated the refresh cookie (rotation blacklists the old one);
+        // retry once with whatever cookie the browser now holds.
+        await new Promise((r) => setTimeout(r, 400));
+        res = await fetch("/api/v1/auth/refresh", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+        });
+      }
+      if (res.ok) {
+        const refreshData = await res.json();
         setAccessToken(refreshData.access_token);
         return refreshData;
-      } else {
-        setAccessToken(null);
-        return null;
       }
+      if (res.status === 401 || res.status === 403) {
+        setAccessToken(null);
+      }
+      return null;
     } catch {
-      setAccessToken(null);
+      // Network blip: keep the current access token (it may still be valid) instead of
+      // wiping it, which made every following upload part fail with 401.
       return null;
     } finally {
       refreshPromise = null;
@@ -61,6 +74,26 @@ export async function refreshAccessToken(): Promise<{ access_token: string; user
   })();
 
   return refreshPromise;
+}
+
+/** Seconds until the current access token expires (null if unknown). */
+export function accessTokenSecondsLeft(): number | null {
+  const token = getAccessToken();
+  if (!token) return null;
+  try {
+    const payload = JSON.parse(atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
+    return typeof payload.exp === "number" ? payload.exp - Date.now() / 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Proactively refresh the access token when it expires within `marginSeconds`. */
+export async function ensureFreshAccessToken(marginSeconds = 120): Promise<void> {
+  const left = accessTokenSecondsLeft();
+  if (left === null || left < marginSeconds) {
+    await refreshAccessToken();
+  }
 }
 
 export async function apiFetch(

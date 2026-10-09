@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { ref, computed, reactive } from "vue";
-import { apiRequest, getAccessToken, refreshAccessToken } from "../lib/api";
+import { apiRequest, getAccessToken, refreshAccessToken, ensureFreshAccessToken } from "../lib/api";
 import { useAuthStore } from "./auth";
 import { useFilesStore } from "./files";
 import { uniqueName } from "../lib/util/names";
@@ -30,7 +30,11 @@ function uploadPartWithProgress(
   return new Promise((resolve) => {
     const xhr = new XMLHttpRequest();
     xhr.open(method, url, true);
-    xhr.timeout = timeoutMs;
+    // No total timeout: the old fixed 120 s limit aborted every 8 MB part on slow uplinks
+    // (~0.1 MB/s with 2 parts in parallel needs ~160 s), so large uploads retried forever at 0-1%
+    // (live QA). Stalls are detected by the inactivity timer below instead.
+    xhr.timeout = 0;
+    void timeoutMs;
     for (const [k, v] of Object.entries(headers)) {
       xhr.setRequestHeader(k, v);
     }
@@ -363,14 +367,20 @@ export const useUploadStore = defineStore("upload", () => {
                 // Stored, but the browser can't read the ETag (CORS doesn't expose it), so the
                 // upload could never be completed. Re-send via the relay, which returns it.
                 directDisabled = true;
-              } else if (directRes.status === 0 || directRes.status === 403) {
-                // CORS/network block or expired URL: stop trying direct after 2 failures
+              } else if (directRes.status === 0) {
+                // CORS preflight rejected / network error (live QA: storage.spacebyte.cloud has no
+                // CORS rule for our origin): relay ALL remaining parts instead of retrying direct.
+                directDisabled = true;
+              } else if (directRes.status === 403) {
+                // Expired presigned URL etc.: stop trying direct after 2 failures
                 if (++directFailures >= 2) directDisabled = true;
               }
               presignedUrl = directDisabled ? null : presignedUrl;
             }
 
-            // 2. Fallback: relay through backend API endpoint
+            // 2. Fallback: relay through backend API endpoint. Refresh the JWT first if it is
+            //    about to expire, since a long upload can outlive the access token.
+            await ensureFreshAccessToken();
             const token = getAccessToken();
             const relayHeaders: Record<string, string> = {
               "Content-Type": "application/octet-stream",
@@ -532,6 +542,9 @@ export const useUploadStore = defineStore("upload", () => {
     const itemIdx = uploads.value.findIndex((u) => u.id === id);
     if (itemIdx !== -1) {
       const item = uploads.value[itemIdx];
+      // Stop the part workers first (they exit on "paused"); previously they kept uploading
+      // parts after the multipart upload had been aborted.
+      item.status = "paused";
       if (item.uploadSessionId) {
         apiRequest(`/api/v1/uploads/${item.uploadSessionId}`, { method: "DELETE" }).catch(() => {});
         removeUploadState(item.uploadSessionId).catch(() => {});
