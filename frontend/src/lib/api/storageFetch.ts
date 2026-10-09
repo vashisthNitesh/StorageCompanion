@@ -1,4 +1,5 @@
 import { apiFetch } from "./index";
+import { decryptChunk } from "../crypto/content";
 
 /**
  * Helpers for fetching encrypted file bytes with bounded waits.
@@ -65,15 +66,26 @@ async function errorMessageFrom(res: Response): Promise<string> {
  */
 export async function openEncryptedStream(
   src: EncryptedSource,
-  opts: { signal?: AbortSignal; directTimeoutMs?: number; proxyTimeoutMs?: number; skipDirect?: boolean } = {}
+  opts: {
+    signal?: AbortSignal;
+    directTimeoutMs?: number;
+    proxyTimeoutMs?: number;
+    skipDirect?: boolean;
+    range?: string;
+  } = {}
 ): Promise<OpenedStream> {
-  const { signal, directTimeoutMs = 10_000, proxyTimeoutMs = 45_000, skipDirect = false } = opts;
+  const { signal, directTimeoutMs = 10_000, proxyTimeoutMs = 45_000, skipDirect = false, range } = opts;
+  const rangeHeaders: Record<string, string> = range ? { Range: range } : {};
 
   if (!skipDirect && isUsableDirectUrl(src.direct_url)) {
     const controller = linkedController(signal);
     const timer = setTimeout(() => controller.abort(), directTimeoutMs);
     try {
-      const res = await fetch(src.direct_url as string, { method: "GET", signal: controller.signal });
+      const res = await fetch(src.direct_url as string, {
+        method: "GET",
+        headers: rangeHeaders,
+        signal: controller.signal,
+      });
       clearTimeout(timer);
       const ct = (res.headers.get("content-type") || "").toLowerCase();
       // An HTML/JSON body here is a login page or error document, not ciphertext
@@ -92,7 +104,7 @@ export async function openEncryptedStream(
   const timer = setTimeout(() => controller.abort(), proxyTimeoutMs);
   let res: Response;
   try {
-    res = await apiFetch(src.download_url, { signal: controller.signal });
+    res = await apiFetch(src.download_url, { headers: rangeHeaders, signal: controller.signal });
   } catch (err) {
     if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
     if (controller.signal.aborted) throw new Error("Storage took too long to respond. Please try again.");
@@ -149,4 +161,112 @@ export async function readAllWithStallTimeout(
     offset += c.length;
   }
   return out;
+}
+
+class FatalDownloadError extends Error {}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+export interface RangedDecryptOptions {
+  fileKey: Uint8Array;
+  baseNonce: Uint8Array;
+  partSize: number;
+  /** Plaintext size from metadata; used until the server reports the real encrypted size. */
+  plainSize: number;
+  /** Receives decrypted parts in order. */
+  onPart: (plain: Uint8Array) => Promise<void> | void;
+  onProgress?: (encryptedBytesDone: number, encryptedTotal: number) => void;
+  signal?: AbortSignal;
+  /** Encrypted parts per HTTP request (default 8, i.e. ~64 MB). */
+  partsPerRequest?: number;
+  maxRetries?: number;
+}
+
+/**
+ * Downloads and decrypts a chunked AES-GCM file using HTTP Range requests.
+ *
+ * Each request covers a bounded window of encrypted parts and decrypted parts are handed to
+ * onPart as soon as they're complete, so memory stays bounded. A dropped connection (common on
+ * multi-GB transfers through a proxy) resumes from the first part not yet decrypted instead of
+ * failing the whole download. If the server ignores Range (200), the single stream is consumed.
+ */
+export async function downloadDecryptRanged(src: EncryptedSource, opts: RangedDecryptOptions): Promise<void> {
+  const { fileKey, baseNonce, partSize, onPart, onProgress, signal } = opts;
+  const partsPerRequest = opts.partsPerRequest ?? 8;
+  const maxRetries = opts.maxRetries ?? 5;
+  const encPartSize = partSize + 16;
+  const plainParts = Math.max(1, Math.ceil(opts.plainSize / partSize));
+  let encTotal = opts.plainSize + 16 * plainParts;
+  let skipDirect = false;
+  let nextPart = 1;
+  let attempt = 0;
+
+  const totalParts = () => Math.max(1, Math.ceil(encTotal / encPartSize));
+  const partLen = (n: number) => (n < totalParts() ? encPartSize : encTotal - (totalParts() - 1) * encPartSize);
+
+  while (true) {
+    const start = (nextPart - 1) * encPartSize;
+    if (start >= encTotal) return;
+    const end = Math.min(start + partsPerRequest * encPartSize, encTotal) - 1;
+    try {
+      const opened = await openEncryptedStream(src, { signal, skipDirect, range: `bytes=${start}-${end}` });
+      if (opened.source === "proxy") skipDirect = true;
+      const { res, controller } = opened;
+      if (res.status === 416) return; // nothing left
+      const rangeless = res.status === 200;
+      if (rangeless && start > 0) {
+        throw new FatalDownloadError("Storage doesn't support resuming this download. Please try again.");
+      }
+      const cr = res.headers.get("content-range");
+      const m = cr && /\/(\d+)\s*$/.exec(cr);
+      if (m) encTotal = Number(m[1]);
+      else if (rangeless) {
+        const len = Number(res.headers.get("content-length"));
+        if (len > 0) encTotal = len;
+      }
+      if (!res.body) throw new Error("Download stream response body is unavailable.");
+
+      const reader = res.body.getReader();
+      let buf = new Uint8Array(encPartSize * 2);
+      let bufLen = 0;
+      while (true) {
+        const { done, value } = await readChunkWithStallTimeout(reader, controller);
+        if (done) break;
+        if (!value?.length) continue;
+        if (bufLen + value.length > buf.length) {
+          const grown = new Uint8Array(Math.max(buf.length * 2, bufLen + value.length));
+          grown.set(buf.subarray(0, bufLen));
+          buf = grown;
+        }
+        buf.set(value, bufLen);
+        bufLen += value.length;
+        while (nextPart <= totalParts() && bufLen >= partLen(nextPart)) {
+          const len = partLen(nextPart);
+          const plain = await decryptChunk(fileKey, buf.slice(0, len), baseNonce, nextPart);
+          await onPart(plain);
+          buf.copyWithin(0, len, bufLen);
+          bufLen -= len;
+          nextPart++;
+          attempt = 0;
+          onProgress?.(Math.min(encTotal, (nextPart - 1) * encPartSize), encTotal);
+        }
+      }
+      if (bufLen > 0 && rangeless && nextPart <= totalParts()) {
+        // Size metadata was off; the stream is authoritative, so treat the rest as the final part
+        await onPart(await decryptChunk(fileKey, buf.slice(0, bufLen), baseNonce, nextPart));
+        return;
+      }
+      if (rangeless) return;
+      if ((nextPart - 1) * encPartSize <= end && nextPart <= totalParts()) {
+        throw new Error("Connection closed before the requested data arrived.");
+      }
+    } catch (err: any) {
+      if (signal?.aborted || err?.name === "AbortError" || err instanceof FatalDownloadError) throw err;
+      if (err?.name === "OperationError") {
+        throw new Error("Could not decrypt this file (the data or key is corrupted).");
+      }
+      if (/\(4\d\d\)|refused access|not found/i.test(err?.message || "") || ++attempt > maxRetries) throw err;
+      await sleep(Math.min(15_000, 1000 * 2 ** (attempt - 1)));
+    }
+  }
 }

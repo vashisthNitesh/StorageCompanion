@@ -1,9 +1,8 @@
 import { ref } from "vue";
 import { useAuthStore } from "../../stores/auth";
 import { apiRequest } from "../../lib/api";
-import { openEncryptedStream, readChunkWithStallTimeout } from "../../lib/api/storageFetch";
+import { downloadDecryptRanged } from "../../lib/api/storageFetch";
 import { unwrapKey } from "../../lib/crypto/keys";
-import { decryptChunk } from "../../lib/crypto/content";
 import { hexToUint8Array } from "../../lib/crypto/kdf";
 import type { FileNode } from "../../stores/files";
 
@@ -82,83 +81,32 @@ export function useFileDownload() {
 
       downloadStatusText.value[node.id] = "Downloading...";
 
-      // 2. Fetch encrypted bytes: try direct storage edge download first, falling back to authenticated backend proxy
-      // Bounded waits: direct edge URL (10s to respond), then authenticated proxy
-      const { res, controller: streamCtl } = await openEncryptedStream(downloadData);
-
-      // 3. Unwrap File Key with user's Master Key
+      // 2. Unwrap File Key with user's Master Key
       const fileKey = await unwrapKey(authStore.masterKey, downloadData.wrapped_file_key);
       const baseNonce = hexToUint8Array(downloadData.content_nonce);
       const partSize = downloadData.part_size || (8 * 1024 * 1024);
-      const encPartSize = partSize + 16;
-
-      // 4. Stream and decrypt chunk-by-chunk without loading multi-gigabytes into a single ArrayBuffer
-      if (!res.body) {
-        throw new Error("Download stream response body is unavailable.");
-      }
-
-      const reader = res.body.getReader();
       const decryptedParts: Uint8Array[] = [];
 
-      let accumulated = new Uint8Array(encPartSize * 2);
-      let accumulatedLen = 0;
-      let partNumber = 1;
-      let receivedBytes = 0;
-
-      while (true) {
-        const { done, value } = await readChunkWithStallTimeout(reader, streamCtl);
-        if (done) break;
-
-        if (value && value.length > 0) {
-          receivedBytes += value.length;
-          if (totalSize > 0) {
-            const pct = Math.min(99, Math.round((receivedBytes / totalSize) * 100));
-            downloadProgress.value[node.id] = pct;
-            const mbTransferred = (receivedBytes / (1024 * 1024)).toFixed(0);
-            const mbTotal = (totalSize / (1024 * 1024)).toFixed(0);
-            downloadStatusText.value[node.id] = `${pct}% (${mbTransferred}/${mbTotal} MB)`;
-          }
-
-          // Expand buffer if needed
-          if (accumulatedLen + value.length > accumulated.length) {
-            const nextCapacity = Math.max(accumulated.length * 2, accumulatedLen + value.length + encPartSize);
-            const newBuf = new Uint8Array(nextCapacity);
-            newBuf.set(accumulated.subarray(0, accumulatedLen), 0);
-            accumulated = newBuf;
-          }
-          accumulated.set(value, accumulatedLen);
-          accumulatedLen += value.length;
-
-          // Decrypt completed parts
-          while (accumulatedLen >= encPartSize) {
-            const encryptedChunk = accumulated.slice(0, encPartSize);
-            const decryptedChunk = await decryptChunk(fileKey, encryptedChunk, baseNonce, partNumber);
-            partNumber++;
-
-            if (writableStream) {
-              await writableStream.write(decryptedChunk);
-            } else {
-              decryptedParts.push(decryptedChunk);
-            }
-
-            // Shift remaining bytes to front
-            const remaining = accumulatedLen - encPartSize;
-            accumulated.copyWithin(0, encPartSize, accumulatedLen);
-            accumulatedLen = remaining;
-          }
-        }
-      }
-
-      // Decrypt any final remaining chunk
-      if (accumulatedLen > 0) {
-        const finalChunk = accumulated.slice(0, accumulatedLen);
-        const decryptedChunk = await decryptChunk(fileKey, finalChunk, baseNonce, partNumber);
-        if (writableStream) {
-          await writableStream.write(decryptedChunk);
-        } else {
-          decryptedParts.push(decryptedChunk);
-        }
-      }
+      // 3. Ranged, resumable fetch + chunked AES-GCM decryption. Each decrypted part goes
+      //    straight to disk (File System Access API) or into a Blob part list; a dropped
+      //    connection resumes from the next undecrypted part instead of restarting 2.7 GB.
+      await downloadDecryptRanged(downloadData, {
+        fileKey,
+        baseNonce,
+        partSize,
+        plainSize: totalSize,
+        onPart: async (plain) => {
+          if (writableStream) await writableStream.write(plain);
+          else decryptedParts.push(plain);
+        },
+        onProgress: (done, total) => {
+          const pct = Math.min(99, Math.round((done / Math.max(1, total)) * 100));
+          downloadProgress.value[node.id] = pct;
+          const mbDone = (done / (1024 * 1024)).toFixed(0);
+          const mbTotal = (total / (1024 * 1024)).toFixed(0);
+          downloadStatusText.value[node.id] = `${pct}% (${mbDone}/${mbTotal} MB)`;
+        },
+      });
 
       downloadProgress.value[node.id] = 100;
       downloadStatusText.value[node.id] = "Finishing...";
@@ -186,7 +134,10 @@ export function useFileDownload() {
         } catch {}
       }
       console.error("Download failed:", err);
-      alert(err.message || "Failed to download and decrypt file.");
+      const raw = String(err?.message || "");
+      // Never show an HTML error page or stack in the alert
+      const msg = !raw || /<[a-z!]/i.test(raw) ? "Failed to download and decrypt file. Please try again." : raw;
+      alert(`Download failed: ${msg}`);
     } finally {
       downloadingIds.value.delete(node.id);
       delete downloadProgress.value[node.id];
