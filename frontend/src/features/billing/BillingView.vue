@@ -121,7 +121,7 @@ td:last-child{text-align:right;font-family:ui-monospace,monospace}.muted{color:#
 <tr><td>Status</td><td>${escapeHtml(inv.status)}</td></tr>
 <tr><td class="total">Amount</td><td class="total">${escapeHtml(inv.currency)} ${escapeHtml(inv.amount)}</td></tr>
 </table><p class="muted">This is a payment receipt, not a GST tax invoice.</p>
-<script>window.onload=function(){window.print()}<\/script></body></html>`);
+<script>window.onload=function(){window.print()}</${"script"}></body></html>`);
   w.document.close();
 }
 
