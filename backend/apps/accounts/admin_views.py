@@ -117,15 +117,20 @@ class AdminKPIsView(APIView):
         most_popular_plan = max(active_plans, key=lambda x: x["count"]) if active_plans else None
 
         # 5. Activity Time-Series Breakdown
+        # 5. Activity Time-Series Breakdown
+        AUTH_LOGIN_ACTIONS = ["auth.login", "auth.token_refreshed"]
+        UPLOAD_ACTIONS = ["node.create", "file.upload", "storage.upload"]
+        SHARE_ACTIONS = ["share.created", "share.create", "share.link_created"]
+
         trend_points = []
         if period == "daily":
             for h in range(24):
                 slot_time = now - timedelta(hours=23 - h)
                 slot_start = slot_time.replace(minute=0, second=0, microsecond=0)
                 slot_end = slot_start + timedelta(hours=1)
-                logins = AuditLog.objects.filter(action__icontains="login", created_at__gte=slot_start, created_at__lt=slot_end).count()
-                uploads = AuditLog.objects.filter(action__icontains="upload", created_at__gte=slot_start, created_at__lt=slot_end).count()
-                shares = AuditLog.objects.filter(action__icontains="share", created_at__gte=slot_start, created_at__lt=slot_end).count()
+                logins = AuditLog.objects.filter(action__in=AUTH_LOGIN_ACTIONS, created_at__gte=slot_start, created_at__lt=slot_end).count()
+                uploads = AuditLog.objects.filter(action__in=UPLOAD_ACTIONS, created_at__gte=slot_start, created_at__lt=slot_end).count()
+                shares = AuditLog.objects.filter(action__in=SHARE_ACTIONS, created_at__gte=slot_start, created_at__lt=slot_end).count()
                 trend_points.append({
                     "label": slot_start.strftime("%H:00"),
                     "uploads": uploads,
@@ -138,9 +143,9 @@ class AdminKPIsView(APIView):
                 slot_time = now - timedelta(days=6 - d)
                 slot_start = slot_time.replace(hour=0, minute=0, second=0, microsecond=0)
                 slot_end = slot_start + timedelta(days=1)
-                logins = AuditLog.objects.filter(action__icontains="login", created_at__gte=slot_start, created_at__lt=slot_end).count()
-                uploads = AuditLog.objects.filter(action__icontains="upload", created_at__gte=slot_start, created_at__lt=slot_end).count()
-                shares = AuditLog.objects.filter(action__icontains="share", created_at__gte=slot_start, created_at__lt=slot_end).count()
+                logins = AuditLog.objects.filter(action__in=AUTH_LOGIN_ACTIONS, created_at__gte=slot_start, created_at__lt=slot_end).count()
+                uploads = AuditLog.objects.filter(action__in=UPLOAD_ACTIONS, created_at__gte=slot_start, created_at__lt=slot_end).count()
+                shares = AuditLog.objects.filter(action__in=SHARE_ACTIONS, created_at__gte=slot_start, created_at__lt=slot_end).count()
                 trend_points.append({
                     "label": slot_start.strftime("%a"),
                     "uploads": uploads,
@@ -153,9 +158,9 @@ class AdminKPIsView(APIView):
                 slot_time = now - timedelta(days=29 - d)
                 slot_start = slot_time.replace(hour=0, minute=0, second=0, microsecond=0)
                 slot_end = slot_start + timedelta(days=1)
-                logins = AuditLog.objects.filter(action__icontains="login", created_at__gte=slot_start, created_at__lt=slot_end).count()
-                uploads = AuditLog.objects.filter(action__icontains="upload", created_at__gte=slot_start, created_at__lt=slot_end).count()
-                shares = AuditLog.objects.filter(action__icontains="share", created_at__gte=slot_start, created_at__lt=slot_end).count()
+                logins = AuditLog.objects.filter(action__in=AUTH_LOGIN_ACTIONS, created_at__gte=slot_start, created_at__lt=slot_end).count()
+                uploads = AuditLog.objects.filter(action__in=UPLOAD_ACTIONS, created_at__gte=slot_start, created_at__lt=slot_end).count()
+                shares = AuditLog.objects.filter(action__in=SHARE_ACTIONS, created_at__gte=slot_start, created_at__lt=slot_end).count()
                 trend_points.append({
                     "label": slot_start.strftime("%d %b"),
                     "uploads": uploads,
@@ -172,9 +177,9 @@ class AdminKPIsView(APIView):
                     slot_end = slot_start.replace(year=slot_start.year + 1, month=1)
                 else:
                     slot_end = slot_start.replace(month=slot_start.month + 1)
-                logins = AuditLog.objects.filter(action__icontains="login", created_at__gte=slot_start, created_at__lt=slot_end).count()
-                uploads = AuditLog.objects.filter(action__icontains="upload", created_at__gte=slot_start, created_at__lt=slot_end).count()
-                shares = AuditLog.objects.filter(action__icontains="share", created_at__gte=slot_start, created_at__lt=slot_end).count()
+                logins = AuditLog.objects.filter(action__in=AUTH_LOGIN_ACTIONS, created_at__gte=slot_start, created_at__lt=slot_end).count()
+                uploads = AuditLog.objects.filter(action__in=UPLOAD_ACTIONS, created_at__gte=slot_start, created_at__lt=slot_end).count()
+                shares = AuditLog.objects.filter(action__in=SHARE_ACTIONS, created_at__gte=slot_start, created_at__lt=slot_end).count()
                 trend_points.append({
                     "label": slot_start.strftime("%b %Y"),
                     "uploads": uploads,
@@ -194,9 +199,11 @@ class AdminKPIsView(APIView):
                 "created_at": log.created_at.isoformat(),
             })
 
-        # 7. Total Vault Nodes
+        # 7. Vault Nodes
         total_files = Node.objects.filter(type="file", trashed_at__isnull=True).count()
+        period_files = Node.objects.filter(type="file", trashed_at__isnull=True, created_at__gte=start_date).count()
         total_folders = Node.objects.filter(type="folder", trashed_at__isnull=True).count()
+        period_folders = Node.objects.filter(type="folder", trashed_at__isnull=True, created_at__gte=start_date).count()
 
         return Response({
             "period": period,
@@ -205,7 +212,9 @@ class AdminKPIsView(APIView):
                 "new_users": new_users,
                 "active_users": active_users_count,
                 "total_files": total_files,
+                "period_files": period_files,
                 "total_folders": total_folders,
+                "period_folders": period_folders,
                 "monthly_recurring_revenue": float(round(monthly_revenue, 2)),
                 "pool_used_gb": pool_stats["used_gb"],
                 "pool_total_gb": pool_stats["total_pool_gb"],
@@ -366,6 +375,85 @@ class AdminUsersListView(APIView):
         })
 
 
+class AdminFilesListView(APIView):
+    """
+    Global searchable, paginated file view for the Master Admin across all users.
+    Displays file IDs, owner emails, types, sizes, upload dates, upstream storage, and trash status.
+    """
+    permission_classes = [permissions.IsAuthenticated, permissions.IsAdminUser]
+
+    def get(self, request):
+        search = request.query_params.get("search", "").strip().lower()
+        node_type = request.query_params.get("type", "").strip().lower()
+        status_filter = request.query_params.get("status", "").strip().lower()
+        owner_id = request.query_params.get("owner_id", "").strip()
+
+        queryset = (
+            Node.objects.select_related("owner")
+            .annotate(versions_count=Count("versions"))
+            .order_by("-created_at")
+        )
+
+        if search:
+            queryset = queryset.filter(
+                models.Q(owner__email__icontains=search)
+                | models.Q(id__icontains=search)
+                | models.Q(owner__full_name__icontains=search)
+            )
+
+        if owner_id:
+            queryset = queryset.filter(owner_id=owner_id)
+
+        if node_type in ["file", "folder"]:
+            queryset = queryset.filter(type=node_type)
+
+        if status_filter == "trashed":
+            queryset = queryset.filter(trashed_at__isnull=False)
+        elif status_filter == "active":
+            queryset = queryset.filter(trashed_at__isnull=True)
+
+        total_count = queryset.count()
+        total_size = queryset.filter(type=Node.TYPE_FILE).aggregate(s=models.Sum("size_bytes"))["s"] or 0
+
+        # Pagination
+        try:
+            page = max(1, int(request.query_params.get("page", 1)))
+            page_size = min(100, max(1, int(request.query_params.get("page_size", 25))))
+        except ValueError:
+            page = 1
+            page_size = 25
+
+        start_idx = (page - 1) * page_size
+        end_idx = start_idx + page_size
+        paged_nodes = queryset[start_idx:end_idx]
+
+        results = []
+        for n in paged_nodes:
+            results.append({
+                "id": str(n.id),
+                "type": n.type,
+                "size_bytes": n.size_bytes,
+                "owner_id": str(n.owner.id) if n.owner else None,
+                "owner_email": n.owner.email if n.owner else "Unknown",
+                "owner_name": n.owner.full_name if n.owner else "",
+                "created_at": n.created_at.isoformat() if n.created_at else None,
+                "updated_at": n.updated_at.isoformat() if n.updated_at else None,
+                "trashed_at": n.trashed_at.isoformat() if n.trashed_at else None,
+                "is_trashed": bool(n.trashed_at),
+                "upstream": "SpaceByte" if n.spacebyte_hash else "S3 Storage",
+                "spacebyte_hash": n.spacebyte_hash or None,
+                "versions_count": getattr(n, "versions_count", 1),
+            })
+
+        return Response({
+            "total_count": total_count,
+            "total_size_bytes": total_size,
+            "page": page,
+            "page_size": page_size,
+            "results": results,
+        })
+
+
 class AdminUserPlanUpgradeView(APIView):
     """
     Allows Master Admin to upgrade, downgrade, or assign any plan or custom storage quota to a user.
@@ -459,7 +547,10 @@ class AdminUserStatusToggleView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        target_user.is_active = not target_user.is_active
+        if "is_active" in request.data:
+            target_user.is_active = bool(request.data["is_active"])
+        else:
+            target_user.is_active = not target_user.is_active
         target_user.save(update_fields=["is_active"])
 
         AuditLog.objects.create(

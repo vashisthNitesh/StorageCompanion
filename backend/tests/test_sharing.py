@@ -96,3 +96,47 @@ def test_share_password_guessing_is_throttled(auth_client, subscribed_user):
     assert 429 in codes
     # Viewing the link without a password is not counted against the guess limit
     assert c.get(f"/api/v1/public/shares/{token}").status_code == 200
+
+
+@pytest.mark.django_db
+def test_create_share_require_password_empty_rejected(auth_client, subscribed_user):
+    node = Node.objects.create(owner=subscribed_user, type=Node.TYPE_FILE, encrypted_name="ZQ==", name_nonce="n", size_bytes=10)
+    FileVersion.objects.create(node=node, version_no=1, object_key="vault/k", size_bytes=10,
+                               wrapped_file_key="w", content_nonce="00")
+    # require_password=True with empty/whitespace password must be rejected (L-05)
+    res = auth_client.post("/api/v1/shares", {
+        "node_id": str(node.id),
+        "type": "link",
+        "wrapped_key": "wk",
+        "permission": "download",
+        "require_password": True,
+        "password": "   ",
+    }, format="json")
+    assert res.status_code == 400
+    assert "password" in res.data.get("details", {}) or "password" in res.data.get("error", "")
+
+
+@pytest.mark.django_db
+def test_share_download_count_only_increments_on_downloaded(auth_client, subscribed_user):
+    from rest_framework.test import APIClient
+    from apps.sharing.models import Share
+    from apps.sharing.services import hash_token
+
+    node, token = _make_password_share(auth_client, subscribed_user)
+    token_hash = hash_token(token)
+    share = Share.objects.get(link_token_hash=token_hash)
+    assert share.download_count == 0
+
+    c = APIClient()
+    # Getting download url should NOT increment count
+    res_dl = c.get(f"/api/v1/public/shares/{token}/download", {"password": "SecretPassword123!"})
+    assert res_dl.status_code == 200
+    share.refresh_from_db()
+    assert share.download_count == 0
+
+    # Calling /downloaded POST increments count
+    res_done = c.post(f"/api/v1/public/shares/{token}/downloaded")
+    assert res_done.status_code == 200
+    assert res_done.data["download_count"] == 1
+    share.refresh_from_db()
+    assert share.download_count == 1

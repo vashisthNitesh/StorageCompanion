@@ -37,6 +37,7 @@ async function handleLogin() {
     }
     router.push(redirectPath);
   } catch (err: any) {
+    authStore.isLoading = false;
     errorMessage.value = err.message || "Invalid credentials or vault decryption failure.";
   }
 }

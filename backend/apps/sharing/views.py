@@ -134,7 +134,7 @@ class PublicShareInfoView(APIView):
     throttle_scope = "share_auth"
 
     def get(self, request, token):
-        password = request.query_params.get("password")
+        password = request.headers.get("X-Share-Password") or request.query_params.get("password")
         info = get_public_share_info(token=token, password=password)
         return Response(info)
 
@@ -159,9 +159,27 @@ class PublicShareDownloadView(APIView):
     throttle_scope = "share_auth"
 
     def get(self, request, token):
-        password = request.query_params.get("password")
+        password = request.headers.get("X-Share-Password") or request.query_params.get("password")
         download_data = get_public_download_url(token=token, password=password)
         return Response(download_data)
+
+
+class PublicShareDownloadedView(APIView):
+    """
+    Records download success only when the recipient successfully decrypts and saves the file.
+    """
+    permission_classes = [permissions.AllowAny]
+    throttle_classes = [AnonRateThrottle]
+
+    def post(self, request, token):
+        token_hash = hash_token(token)
+        share = Share.objects.filter(link_token_hash=token_hash).first()
+        if not share or not share.is_active:
+            raise NotFound("Share link is invalid or expired.")
+
+        share.download_count += 1
+        share.save(update_fields=["download_count"])
+        return Response({"success": True, "download_count": share.download_count})
 
 
 class PublicShareContentView(APIView):
@@ -174,7 +192,7 @@ class PublicShareContentView(APIView):
     throttle_scope = "share_auth"
 
     def get(self, request, token):
-        password = request.query_params.get("password")
+        password = request.headers.get("X-Share-Password") or request.query_params.get("password")
         token_hash = hash_token(token)
         share = Share.objects.filter(link_token_hash=token_hash).first()
         if not share or not share.is_active:

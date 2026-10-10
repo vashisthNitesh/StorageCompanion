@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { ref, watch } from "vue";
 import { apiRequest } from "../../lib/api";
 import { useAuthStore } from "../../stores/auth";
 import { generateLinkKey, wrapKey, unwrapKey } from "../../lib/crypto/keys";
@@ -22,10 +22,31 @@ const password = ref("");
 const maxDownloads = ref<number | null>(null);
 const errorMessage = ref("");
 
+watch(
+  () => [props.isOpen, props.node?.id],
+  ([open]) => {
+    if (open) {
+      shareUrl.value = null;
+      password.value = "";
+      requirePassword.value = false;
+      errorMessage.value = "";
+      maxDownloads.value = null;
+      copied.value = false;
+      isGenerating.value = false;
+    }
+  }
+);
+
 async function generatePublicLink() {
   if (!props.node) return;
   isGenerating.value = true;
   errorMessage.value = "";
+
+  if (requirePassword.value && (!password.value || password.value.trim().length < 4)) {
+    errorMessage.value = "Enter a password (min 4 characters).";
+    isGenerating.value = false;
+    return;
+  }
 
   try {
     if (!authStore.masterKey) throw new Error("Vault is locked");
@@ -56,7 +77,8 @@ async function generatePublicLink() {
         type: "link",
         wrapped_key: wrappedKey,
         permission: "download",
-        password: requirePassword.value && password.value ? password.value : undefined,
+        require_password: requirePassword.value,
+        password: requirePassword.value ? password.value : undefined,
         max_downloads: maxDownloads.value || undefined,
       }),
     });

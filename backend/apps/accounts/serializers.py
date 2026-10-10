@@ -85,17 +85,29 @@ class UserSerializer(serializers.ModelSerializer):
         except Exception:
             quota = None
 
-        if not quota:
-            return {
-                "bytes_used": 0,
-                "bytes_limit": 0,
-                "percent_used": 0,
-            }
+        subscription = getattr(obj, "subscription", None)
+        active_plan_limit = 0
+        if subscription and subscription.plan and subscription.plan.storage_bytes:
+            active_plan_limit = subscription.plan.storage_bytes
+
+        bytes_limit = quota.bytes_limit if (quota and quota.bytes_limit) else active_plan_limit
+        bytes_used = quota.bytes_used if quota else 0
+
+        # If quota object exists but limit was 0, sync it with the active plan
+        if quota and active_plan_limit > 0 and quota.bytes_limit != active_plan_limit:
+            quota.bytes_limit = active_plan_limit
+            try:
+                quota.save(update_fields=["bytes_limit"])
+            except Exception:
+                pass
+            bytes_limit = active_plan_limit
+
+        percent_used = round((bytes_used / bytes_limit * 100), 2) if bytes_limit > 0 else 0
 
         return {
-            "bytes_used": quota.bytes_used,
-            "bytes_limit": quota.bytes_limit,
-            "percent_used": quota.percent_used,
+            "bytes_used": bytes_used,
+            "bytes_limit": bytes_limit,
+            "percent_used": percent_used,
         }
 
 

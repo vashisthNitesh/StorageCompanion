@@ -147,6 +147,27 @@ def test_admin_user_management_and_upgrade(subscribed_user):
     subscribed_user.refresh_from_db()
     assert subscribed_user.is_active is False
 
+    # L-02: Suspended user must show 'suspended' in plan status even with active sub
+    res_users = client.get("/api/v1/admin/users/")
+    assert res_users.status_code == 200
+    user_entry = next(u for u in res_users.json()["results"] if u["id"] == str(subscribed_user.id))
+    assert user_entry["is_active"] is False
+    assert user_entry["plan"]["status"] == "suspended"
+
+    # Test explicit reactivation (L-01)
+    res_reactivate = client.post(
+        f"/api/v1/admin/users/{subscribed_user.id}/toggle-status/",
+        {"is_active": True},
+        format="json",
+    )
+    assert res_reactivate.status_code == 200
+    assert res_reactivate.json()["is_active"] is True
+
+    # L-12: Test global admin files list
+    res_files = client.get("/api/v1/admin/files/")
+    assert res_files.status_code == 200
+    assert "total_count" in res_files.json()
+
 
 @pytest.mark.django_db
 def test_super_admin_has_no_pack():

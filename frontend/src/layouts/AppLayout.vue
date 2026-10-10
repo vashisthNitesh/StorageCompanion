@@ -174,6 +174,7 @@ onMounted(() => {
           <template v-if="!authStore.isMasterAdmin">
             <router-link
               to="/app/files"
+              @click="filesStore.navigateToRoot()"
               class="flex items-center space-x-3 px-3 py-2 rounded-xl transition-all"
               :class="$route.path === '/app/files' ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/70'"
             >
@@ -362,15 +363,22 @@ onMounted(() => {
         <!-- Breadcrumbs or Admin Title -->
         <div class="flex items-center space-x-2 text-xs font-medium text-slate-500 min-w-0 overflow-x-auto whitespace-nowrap flex-1">
           <template v-if="!authStore.isMasterAdmin">
-            <template v-for="(crumb, idx) in filesStore.breadcrumbs" :key="crumb.id || idx">
-              <button
-                @click="filesStore.navigateUp(idx)"
-                class="hover:text-slate-900 transition-colors"
-                :class="{ 'text-slate-900 font-semibold': idx === filesStore.breadcrumbs.length - 1 }"
-              >
-                {{ crumb.name }}
-              </button>
-              <ChevronRight v-if="idx < filesStore.breadcrumbs.length - 1" class="w-3.5 h-3.5 text-slate-400" />
+            <template v-if="$route.path === '/app/files'">
+              <template v-for="(crumb, idx) in filesStore.breadcrumbs" :key="crumb.id || idx">
+                <button
+                  @click="filesStore.navigateUp(idx)"
+                  class="hover:text-slate-900 transition-colors"
+                  :class="{ 'text-slate-900 font-semibold': idx === filesStore.breadcrumbs.length - 1 }"
+                >
+                  {{ crumb.name }}
+                </button>
+                <ChevronRight v-if="idx < filesStore.breadcrumbs.length - 1" class="w-3.5 h-3.5 text-slate-400" />
+              </template>
+            </template>
+            <template v-else>
+              <div class="text-slate-900 font-semibold text-xs">
+                {{ ($route.meta?.title as string) || 'My Files' }}
+              </div>
             </template>
           </template>
           <template v-else>

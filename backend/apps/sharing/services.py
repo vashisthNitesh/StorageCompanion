@@ -158,10 +158,6 @@ def get_public_download_url(token: str, password: str | None = None) -> dict:
     except Exception:
         presigned_url = f"{settings.S3_ENDPOINT_URL}/{settings.S3_BUCKET_NAME}/{version.object_key}"
 
-    # Increment download count
-    share.download_count += 1
-    share.save(update_fields=["download_count"])
-
     part_size = 16 * 1024 * 1024 if version.size_bytes > 5 * 1024 * 1024 * 1024 else 8 * 1024 * 1024
     stream_url = f"/api/v1/public/shares/{token}/content"
     if password:

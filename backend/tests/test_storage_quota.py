@@ -110,3 +110,17 @@ def test_node_content_streaming_and_download_info(auth_client, subscribed_user):
     assert dl_res.data["download_url"] == f"/api/v1/nodes/{node.id}/content"
     assert dl_res.data["part_size"] == 8 * 1024 * 1024
     assert dl_res.data["size_bytes"] == 100
+
+
+@pytest.mark.django_db
+def test_user_serializer_quota_fallbacks_to_active_plan(subscribed_user):
+    from apps.accounts.serializers import UserSerializer
+    # Wipe the StorageQuota row to simulate missing/zero quota
+    StorageQuota.objects.filter(user=subscribed_user).delete()
+    subscribed_user.refresh_from_db()
+
+    data = UserSerializer(subscribed_user).data
+    assert "quota" in data
+    # Quota bytes_limit must fallback to subscribed_user.subscription.plan.storage_bytes (L-08)
+    assert data["quota"]["bytes_limit"] == subscribed_user.subscription.plan.storage_bytes
+    assert data["quota"]["bytes_limit"] > 0

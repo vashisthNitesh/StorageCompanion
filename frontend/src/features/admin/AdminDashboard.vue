@@ -34,6 +34,8 @@ import {
   ShieldCheck,
   MinusCircle,
   PlusCircle,
+  Folder,
+  FileText,
 } from "lucide-vue-next";
 
 const authStore = useAuthStore();
@@ -327,12 +329,25 @@ async function triggerLifecycle() {
 
 // Toggle User Status (Suspend / Activate)
 async function toggleUserStatus(user: any) {
+  const verb = user.is_active ? "Suspend" : "Reactivate";
+  const confirmMsg = user.is_active
+    ? `Suspend ${user.email}? They will be immediately signed out and blocked from logging in.`
+    : `Reactivate ${user.email}? Their account access will be restored.`;
+  if (!window.confirm(confirmMsg)) return;
+
   try {
+    const nextState = !user.is_active;
     const res = await apiRequest<any>(
       `/api/v1/admin/users/${user.id}/toggle-status/`,
-      { method: "POST" }
+      {
+        method: "POST",
+        body: JSON.stringify({ is_active: nextState }),
+      }
     );
     user.is_active = res.is_active;
+    if (!user.is_active && user.plan) {
+      user.plan.status = "suspended";
+    }
     await fetchKPIs();
     await fetchUsers();
   } catch (err: any) {
@@ -372,8 +387,72 @@ watch(searchQuery, () => {
   searchTimer = setTimeout(runSearchNow, 300);
 });
 
+// Global File Explorer State
+const filesData = ref<{
+  total_count: number;
+  total_size_bytes: number;
+  page: number;
+  page_size: number;
+  results: any[];
+}>({
+  total_count: 0,
+  total_size_bytes: 0,
+  page: 1,
+  page_size: 25,
+  results: [],
+});
+const filesSearchQuery = ref("");
+const filesTypeFilter = ref("");
+const filesStatusFilter = ref("");
+const isLoadingFiles = ref(false);
+
+async function fetchAdminFiles() {
+  isLoadingFiles.value = true;
+  try {
+    const params = new URLSearchParams({
+      search: filesSearchQuery.value,
+      type: filesTypeFilter.value,
+      status: filesStatusFilter.value,
+      page: filesData.value.page.toString(),
+      page_size: filesData.value.page_size.toString(),
+    });
+    const res = await apiRequest<any>(`/api/v1/admin/files/?${params.toString()}`);
+    filesData.value = res;
+  } catch (err) {
+    console.error("Failed to load admin files:", err);
+  } finally {
+    isLoadingFiles.value = false;
+  }
+}
+
+let filesSearchTimer: any = null;
+function handleFilesSearchInput() {
+  clearTimeout(filesSearchTimer);
+  filesSearchTimer = setTimeout(() => {
+    filesData.value.page = 1;
+    fetchAdminFiles();
+  }, 300);
+}
+
+watch(filesSearchQuery, () => {
+  handleFilesSearchInput();
+});
+
+watch([filesTypeFilter, filesStatusFilter], () => {
+  filesData.value.page = 1;
+  fetchAdminFiles();
+});
+
+function formatBytes(bytes: number): string {
+  if (!bytes || bytes === 0) return "0 B";
+  const k = 1024;
+  const sizes = ["B", "KB", "MB", "GB", "TB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
+}
+
 onMounted(async () => {
-  await Promise.all([fetchKPIs(), fetchPoolStatus(), fetchUsers()]);
+  await Promise.all([fetchKPIs(), fetchPoolStatus(), fetchUsers(), fetchAdminFiles()]);
 });
 </script>
 
@@ -769,11 +848,11 @@ onMounted(async () => {
         <!-- Metric badges footer -->
         <div class="grid grid-cols-3 gap-3 pt-3 border-t border-slate-100 text-center">
           <div class="p-2.5 rounded-xl bg-slate-50">
-            <div class="text-[10px] text-slate-500">Vault Files Staged</div>
+            <div class="text-[10px] text-slate-500">Total Files (All Time)</div>
             <div class="text-base font-bold font-mono text-slate-900">{{ kpisData?.kpis?.total_files || 0 }}</div>
           </div>
           <div class="p-2.5 rounded-xl bg-slate-50">
-            <div class="text-[10px] text-slate-500">Vault Folders Created</div>
+            <div class="text-[10px] text-slate-500">Total Folders (All Time)</div>
             <div class="text-base font-bold font-mono text-slate-900">{{ kpisData?.kpis?.total_folders || 0 }}</div>
           </div>
           <div class="p-2.5 rounded-xl bg-slate-50">
@@ -948,8 +1027,14 @@ onMounted(async () => {
               <!-- Plan Status & Retention Window -->
               <td class="py-3 px-4">
                 <div class="space-y-1">
+                  <!-- Suspended (checked first so suspended users with active plans never show as active) -->
+                  <div v-if="!user.is_active || user.plan.status === 'suspended'" class="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider bg-rose-50 text-rose-700 border border-rose-200">
+                    <UserX class="w-3 h-3" />
+                    <span>Suspended</span>
+                  </div>
+
                   <!-- Active -->
-                  <div v-if="user.plan.status === 'active'" class="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200">
+                  <div v-else-if="user.plan.status === 'active'" class="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200">
                     <CheckCircle2 class="w-3 h-3" />
                     <span>Active</span>
                   </div>
@@ -970,12 +1055,6 @@ onMounted(async () => {
                       <span>90-Day Grace:</span>
                       <strong class="font-bold text-rose-700">{{ user.plan.retention_days_remaining }} days to purge</strong>
                     </div>
-                  </div>
-
-                  <!-- Suspended -->
-                  <div v-else-if="user.plan.status === 'suspended' || !user.is_active" class="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider bg-rose-50 text-rose-700 border border-rose-200">
-                    <UserX class="w-3 h-3" />
-                    <span>Suspended</span>
                   </div>
 
                   <!-- Purged -->
@@ -1083,6 +1162,143 @@ onMounted(async () => {
             <tr v-if="usersData.results.length === 0">
               <td colspan="6" class="py-8 text-center text-slate-500 text-xs">
                 No users matched the search query or filters.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Global File Explorer (All Accounts) -->
+    <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-5">
+      <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        <div>
+          <h3 class="text-base font-bold text-slate-900 tracking-tight flex items-center space-x-2">
+            <FileText class="w-4 h-4 text-indigo-600" />
+            <span>Global File Explorer (All Accounts)</span>
+          </h3>
+          <p class="text-xs text-slate-500">
+            System-wide view of all customer vaults, storage consumption, file versions, and upstream SpaceByte/S3 persistence.
+          </p>
+        </div>
+
+        <!-- File Filters -->
+        <div class="flex flex-wrap items-center gap-2.5">
+          <div class="relative">
+            <Search class="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              v-model="filesSearchQuery"
+              @input="handleFilesSearchInput"
+              placeholder="Search file ID or owner..."
+              class="pl-9 pr-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-indigo-500"
+            />
+          </div>
+
+          <select
+            v-model="filesTypeFilter"
+            @change="fetchAdminFiles"
+            class="px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-700 focus:outline-none focus:border-indigo-500"
+          >
+            <option value="">All Types</option>
+            <option value="file">Files Only</option>
+            <option value="folder">Folders Only</option>
+          </select>
+
+          <select
+            v-model="filesStatusFilter"
+            @change="fetchAdminFiles"
+            class="px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-700 focus:outline-none focus:border-indigo-500"
+          >
+            <option value="">All Statuses</option>
+            <option value="active">Active Vault Files</option>
+            <option value="trashed">In Trash</option>
+          </select>
+
+          <button
+            @click="fetchAdminFiles"
+            class="p-2 rounded-xl border border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-50 cursor-pointer"
+            title="Refresh files"
+          >
+            <RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin': isLoadingFiles }" />
+          </button>
+        </div>
+      </div>
+
+      <!-- Quick Metrics -->
+      <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
+        <div class="p-3 rounded-xl bg-slate-50 border border-slate-200/80">
+          <div class="text-[10px] text-slate-500 uppercase font-semibold">Total Vault Nodes</div>
+          <div class="text-lg font-bold font-mono text-slate-900">{{ filesData.total_count }}</div>
+        </div>
+        <div class="p-3 rounded-xl bg-slate-50 border border-slate-200/80">
+          <div class="text-[10px] text-slate-500 uppercase font-semibold">Total Encrypted Storage</div>
+          <div class="text-lg font-bold font-mono text-indigo-700">{{ formatBytes(filesData.total_size_bytes) }}</div>
+        </div>
+        <div class="p-3 rounded-xl bg-slate-50 border border-slate-200/80 col-span-2 sm:col-span-1">
+          <div class="text-[10px] text-slate-500 uppercase font-semibold">Upstream Storage</div>
+          <div class="text-xs font-bold text-slate-900 mt-1 flex items-center space-x-1.5">
+            <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+            <span>SpaceByte & S3 Edge</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Files Table -->
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-xs border-collapse">
+          <thead>
+            <tr class="border-b border-slate-200 text-slate-500 font-semibold uppercase text-[10px] tracking-wider bg-slate-50/70">
+              <th class="py-3 px-4 rounded-l-xl">File / Node ID</th>
+              <th class="py-3 px-4">Owner Account</th>
+              <th class="py-3 px-4">Type</th>
+              <th class="py-3 px-4">Size</th>
+              <th class="py-3 px-4">Upstream Storage</th>
+              <th class="py-3 px-4">Vault Status</th>
+              <th class="py-3 px-4 text-right rounded-r-xl">Created At</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100">
+            <tr v-for="file in filesData.results" :key="file.id" class="hover:bg-slate-50/70 transition-colors">
+              <td class="py-3 px-4 font-mono text-[11px] text-slate-700 flex items-center space-x-2">
+                <Folder v-if="file.type === 'folder'" class="w-4 h-4 text-amber-500 shrink-0" />
+                <FileText v-else class="w-4 h-4 text-blue-600 shrink-0" />
+                <span class="truncate max-w-[140px]" :title="file.id">{{ file.id.slice(0, 13) }}...</span>
+              </td>
+              <td class="py-3 px-4">
+                <div class="font-semibold text-slate-900">{{ file.owner_email }}</div>
+                <div class="text-[10px] text-slate-400">{{ file.owner_name || 'Customer' }}</div>
+              </td>
+              <td class="py-3 px-4 capitalize font-medium">
+                {{ file.type }}
+              </td>
+              <td class="py-3 px-4 font-mono text-slate-900 font-medium">
+                {{ file.type === 'folder' ? '-' : formatBytes(file.size_bytes) }}
+              </td>
+              <td class="py-3 px-4">
+                <span
+                  class="px-2 py-0.5 rounded-full text-[10px] font-semibold font-mono"
+                  :class="file.upstream === 'SpaceByte' ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'bg-slate-100 text-slate-700'"
+                >
+                  {{ file.upstream }}
+                </span>
+              </td>
+              <td class="py-3 px-4">
+                <span
+                  class="px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider"
+                  :class="file.is_trashed ? 'bg-rose-50 text-rose-700 border border-rose-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'"
+                >
+                  {{ file.is_trashed ? 'In Trash' : 'Active' }}
+                </span>
+              </td>
+              <td class="py-3 px-4 text-right text-slate-500 text-[11px]">
+                {{ file.created_at ? new Date(file.created_at).toLocaleDateString() : '-' }}
+              </td>
+            </tr>
+
+            <tr v-if="filesData.results.length === 0">
+              <td colspan="7" class="py-8 text-center text-slate-500 text-xs">
+                No files found matching the search criteria.
               </td>
             </tr>
           </tbody>

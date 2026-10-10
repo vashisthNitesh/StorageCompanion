@@ -197,6 +197,16 @@ export const useFilesStore = defineStore("files", () => {
     }
   }
 
+  function navigateToRoot() {
+    breadcrumbs.value = [{ id: null, name: "My Files" }];
+    currentParentId.value = null;
+    filterMode.value = "files";
+    searchQuery.value = "";
+    searchResults.value = [];
+    selectedNodeIds.value.clear();
+    fetchNodes(null);
+  }
+
   function clearSelection() {
     selectedNodeIds.value.clear();
   }
@@ -220,6 +230,7 @@ export const useFilesStore = defineStore("files", () => {
     restoreNode,
     navigateToFolder,
     navigateUp,
+    navigateToRoot,
     performSearch,
     toggleSelect,
     clearSelection,

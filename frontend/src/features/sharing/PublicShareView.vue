@@ -39,12 +39,11 @@ onMounted(async () => {
   await loadShareInfo();
 });
 
-async function loadShareInfo(password?: string) {
+async function loadShareInfo() {
   isLoading.value = true;
   error.value = "";
   try {
-    const query = password ? `?password=${encodeURIComponent(password)}` : "";
-    const info = await apiRequest(`/api/v1/public/shares/${token}${query}`);
+    const info = await apiRequest(`/api/v1/public/shares/${token}`);
     shareInfo.value = info;
     requiresPassword.value = info.requires_password && !info.is_authenticated;
   } catch (err: any) {
@@ -56,7 +55,23 @@ async function loadShareInfo(password?: string) {
 
 async function unlockWithPassword() {
   if (!passwordInput.value) return;
-  await loadShareInfo(passwordInput.value);
+  isLoading.value = true;
+  error.value = "";
+  try {
+    const info = await apiRequest(`/api/v1/public/shares/${token}/auth`, {
+      method: "POST",
+      body: JSON.stringify({ password: passwordInput.value }),
+    });
+    shareInfo.value = info;
+    requiresPassword.value = false;
+  } catch (err: any) {
+    requiresPassword.value = true;
+    error.value = err.status === 403 || err.message?.toLowerCase().includes("password")
+      ? "Incorrect password."
+      : err.message || "Failed to unlock shared link.";
+  } finally {
+    isLoading.value = false;
+  }
 }
 
 async function downloadAndDecrypt() {
@@ -69,11 +84,18 @@ async function downloadAndDecrypt() {
   error.value = "";
 
   try {
-    const pwQuery = passwordInput.value ? `?password=${encodeURIComponent(passwordInput.value)}` : "";
-    const downloadData = await apiRequest(`/api/v1/public/shares/${token}/download${pwQuery}`);
+    const headers: Record<string, string> = {};
+    if (passwordInput.value) {
+      headers["X-Share-Password"] = passwordInput.value;
+    }
+    const downloadData = await apiRequest(`/api/v1/public/shares/${token}/download`, {
+      headers,
+    });
 
     // Download encrypted payload
-    const res = await apiFetch(downloadData.download_url);
+    const res = await apiFetch(downloadData.download_url, {
+      headers,
+    });
     if (!res.ok) {
       let errMessage = "Failed to download encrypted bytes from storage.";
       try {
@@ -106,11 +128,26 @@ async function downloadAndDecrypt() {
     a.click();
     URL.revokeObjectURL(url);
     downloadSuccess.value = true;
+
+    // Report successful download to increment count only after decryption succeeds
+    try {
+      await apiRequest(`/api/v1/public/shares/${token}/downloaded`, { method: "POST" });
+    } catch {
+      // Non-critical if count bump fails after download
+    }
   } catch (err: any) {
     error.value = err.message || "Decryption failed.";
   } finally {
     isDownloading.value = false;
   }
+}
+
+function formatBytes(bytes: number): string {
+  if (!bytes || bytes === 0) return "0 B";
+  const k = 1024;
+  const sizes = ["B", "KB", "MB", "GB", "TB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(i === 0 ? 0 : 1)) + " " + sizes[i];
 }
 </script>
 
@@ -159,7 +196,7 @@ async function downloadAndDecrypt() {
             />
             <button
               type="submit"
-              class="btn-primary w-full py-3 rounded-xl font-semibold text-white text-xs shadow-sm hover:shadow-md"
+              class="btn-primary w-full py-3 rounded-xl font-semibold text-white text-xs shadow-sm hover:shadow-md cursor-pointer"
             >
               Unlock Share Link
             </button>
@@ -175,7 +212,7 @@ async function downloadAndDecrypt() {
             <div>
               <div class="text-sm font-bold text-slate-900">Encrypted File Ready</div>
               <div class="text-xs text-slate-500 font-mono mt-1">
-                {{ (shareInfo.size_bytes / (1024 * 1024)).toFixed(1) }} MB • AES-256-GCM
+                {{ formatBytes(shareInfo.size_bytes) }} • AES-256-GCM
               </div>
             </div>
           </div>

@@ -293,7 +293,7 @@ async function handleUpgrade(planCode: string) {
     <div class="space-y-4">
       <div class="flex items-center justify-between">
         <h2 class="text-base font-bold text-slate-900 tracking-tight">Available Subscription Packs</h2>
-        <span class="text-xs text-slate-500">Max plan fits within testing 1 TB availability</span>
+        <span class="text-xs text-slate-500">Up to 1 TB encrypted cloud storage per account</span>
       </div>
 
       <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">

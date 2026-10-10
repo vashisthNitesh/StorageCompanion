@@ -127,7 +127,8 @@ export async function apiFetch(
     isSameOrigin &&
     response.status === 401 &&
     !endpoint.includes("/auth/refresh") &&
-    !endpoint.includes("/auth/login")
+    !endpoint.includes("/auth/login") &&
+    !endpoint.includes("/auth/register")
   ) {
     const refreshData = await refreshAccessToken();
     if (refreshData?.access_token) {
