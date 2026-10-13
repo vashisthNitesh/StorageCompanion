@@ -139,6 +139,9 @@ class SpaceByteClient:
                 for p in part_numbers
             ]
             return {"status": "success", "urls": urls}
+        elif "s3/multipart/get-uploaded-parts" in path:
+            # Deterministic empty list unless caller seeded parts via data
+            return {"status": "success", "parts": data.get("_mock_parts", [])}
         elif "s3/multipart/complete" in path:
             return {"status": "success", "message": "Multipart upload completed successfully"}
         elif "s3/simple/presign" in path:
@@ -189,11 +192,23 @@ class SpaceByteClient:
         filename: str,
         mime: str = "application/octet-stream",
         part_count: int = 1,
+        size: int | None = None,
+        extension: str | None = None,
     ) -> dict[str, Any]:
         """
         Creates an S3 multipart upload session and batches presigned URLs for all parts.
+        OpenAPI requires filename, mime, size, and extension on /s3/multipart/create.
         """
-        create_res = self._request("POST", "s3/multipart/create", {"filename": filename, "mime": mime})
+        if not extension:
+            extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else "bin"
+        create_payload: dict[str, Any] = {
+            "filename": filename,
+            "mime": mime,
+            "extension": extension,
+        }
+        if size is not None:
+            create_payload["size"] = int(size)
+        create_res = self._request("POST", "s3/multipart/create", create_payload)
         upload_id = create_res.get("uploadId")
         key = create_res.get("key")
         if not upload_id or not key:
@@ -211,6 +226,7 @@ class SpaceByteClient:
             "upload_id": upload_id,
             "key": key,
             "presigned_urls": urls,
+            "acl": create_res.get("acl", "private"),
         }
 
     def complete_multipart_upload(self, upload_id: str, key: str, parts: list[dict]) -> dict:
@@ -224,6 +240,28 @@ class SpaceByteClient:
             "parts": parts,
         }
         return self._request("POST", "s3/multipart/complete", payload)
+
+    def get_uploaded_parts(self, upload_id: str, key: str) -> list[dict]:
+        """
+        Lists parts already uploaded for a multipart session (resume / authoritative ETags).
+        Returns list of {PartNumber, ETag, Size?}.
+        """
+        res = self._request(
+            "POST",
+            "s3/multipart/get-uploaded-parts",
+            {"uploadId": upload_id, "key": key},
+        )
+        parts = res.get("parts") or res.get("Parts") or []
+        normalized = []
+        for p in parts:
+            if not isinstance(p, dict):
+                continue
+            num = p.get("PartNumber", p.get("partNumber", p.get("part_number")))
+            etag = p.get("ETag", p.get("etag"))
+            if num is None or not etag:
+                continue
+            normalized.append({"PartNumber": int(num), "ETag": str(etag)})
+        return normalized
 
     def abort_multipart_upload(self, upload_id: str, key: str) -> dict:
         """Aborts an in-progress S3 multipart upload on SpaceByte."""
@@ -245,8 +283,14 @@ class SpaceByteClient:
         if not client_extension and "." in client_name:
             client_extension = client_name.rsplit(".", 1)[-1].lower()
 
+        # Spec examples use the S3 object basename, not the full key path.
+        filename_basename = filename.rsplit("/", 1)[-1] if filename else filename
+        if parent_id is None:
+            raw_parent = getattr(settings, "SPACEBYTE_PARENT_FOLDER_ID", "") or ""
+            parent_id = int(raw_parent) if str(raw_parent).isdigit() else None
+
         payload = {
-            "filename": filename,
+            "filename": filename_basename,
             "clientName": client_name,
             "size": size,
             "clientMime": client_mime,
@@ -255,19 +299,44 @@ class SpaceByteClient:
         }
         return self._request("POST", "s3/entries", payload)
 
-    def simple_presign(self, filename: str, mime: str = "application/octet-stream") -> dict:
+    def simple_presign(
+        self,
+        filename: str,
+        mime: str = "application/octet-stream",
+        size: int | None = None,
+        extension: str | None = None,
+    ) -> dict:
         """
         Generates a presigned URL for direct simple upload (< 100 MB).
+        OpenAPI requires filename, mime, size, and extension.
         """
-        return self._request("POST", "s3/simple/presign", {"filename": filename, "mime": mime})
+        if not extension:
+            extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else "bin"
+        payload: dict[str, Any] = {
+            "filename": filename,
+            "mime": mime,
+            "extension": extension,
+        }
+        if size is not None:
+            payload["size"] = int(size)
+        return self._request("POST", "s3/simple/presign", payload)
 
     def create_folder(self, name: str, parent_id: int | None = None) -> dict:
         """Creates a folder in SpaceByte."""
         return self._request("POST", "folders", {"name": name, "parentId": parent_id})
 
-    def delete_entries(self, entry_ids: list[int], delete_forever: bool = False) -> dict:
-        """Deletes file entries in SpaceByte."""
-        return self._request("DELETE", "file-entries", {"entryIds": entry_ids, "deleteForever": delete_forever})
+    def delete_entries(self, entry_ids: list[int] | list[str], delete_forever: bool = False) -> dict:
+        """Move entries to trash or permanently delete them (DELETE /file-entries)."""
+        # OpenAPI types entryIds as strings; deleteForever example is a stringy boolean.
+        payload = {
+            "entryIds": [str(i) for i in entry_ids],
+            "deleteForever": "true" if delete_forever else "false",
+        }
+        return self._request("DELETE", "file-entries", payload)
+
+    def restore_entries(self, entry_ids: list[int] | list[str]) -> dict:
+        """Restore trashed entries (POST /file-entries/restore)."""
+        return self._request("POST", "file-entries/restore", {"entryIds": [str(i) for i in entry_ids]})
 
     def move_entries(self, entry_ids: list[int], destination_id: int | None = None) -> dict:
         """Moves file entries to another folder in SpaceByte."""
