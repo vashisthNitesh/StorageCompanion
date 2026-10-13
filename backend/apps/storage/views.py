@@ -28,6 +28,8 @@ from apps.storage.services import (
     relay_upload_part,
     get_download_info,
     get_s3_client,
+    delete_spacebyte_entries_for_nodes,
+    restore_spacebyte_entries_for_nodes,
 )
 from apps.storage.spacebyte import get_spacebyte_client
 from apps.audit.models import AuditLog
@@ -130,12 +132,7 @@ class NodeDetailView(APIView):
                     quota.save(update_fields=["bytes_used"])
 
             # Clean up SpaceByte upstream entry if present
-            if node.spacebyte_entry_id:
-                try:
-                    sb_client = get_spacebyte_client()
-                    sb_client.delete_entries([node.spacebyte_entry_id], delete_forever=True)
-                except Exception:
-                    pass
+            delete_spacebyte_entries_for_nodes([node], delete_forever=True)
 
             node_id_str = str(node.id)
             node.delete()
@@ -148,9 +145,10 @@ class NodeDetailView(APIView):
             )
             return Response({"success": True, "message": "Permanently deleted."})
 
-        # Soft delete: move to trash
+        # Soft delete: move to trash in-app and on SpaceByte when an upstream entry exists.
         node.trashed_at = timezone.now()
         node.save(update_fields=["trashed_at"])
+        delete_spacebyte_entries_for_nodes([node], delete_forever=False)
 
         AuditLog.objects.create(
             user=request.user,
@@ -171,6 +169,7 @@ class NodeRestoreView(APIView):
 
         node.trashed_at = None
         node.save(update_fields=["trashed_at"])
+        restore_spacebyte_entries_for_nodes([node])
 
         AuditLog.objects.create(
             user=request.user,
