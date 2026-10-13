@@ -11,7 +11,7 @@ def test_spacebyte_client_methods():
     assert not client.is_configured
 
     # Test multipart initialization mock
-    init_res = client.init_multipart_upload("test-file.bin", "application/octet-stream", part_count=3)
+    init_res = client.init_multipart_upload("test-file.bin", "application/octet-stream", part_count=3, size=1024, extension="bin")
     assert "upload_id" in init_res
     assert "key" in init_res
     assert len(init_res["presigned_urls"]) == 3
