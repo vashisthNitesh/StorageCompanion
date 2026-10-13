@@ -54,3 +54,14 @@ def custom_exception_handler(exc, context):
                 "status_code": response.status_code,
             }
     return response
+
+
+class UpstreamStorageError(APIException):
+    status_code = status.HTTP_502_BAD_GATEWAY
+    default_detail = {
+        "error": "upstream_storage_error",
+        "message": "Storage provider could not complete the operation. Please retry.",
+        "code": "UPSTREAM_STORAGE_ERROR",
+    }
+    default_code = "upstream_storage_error"
+

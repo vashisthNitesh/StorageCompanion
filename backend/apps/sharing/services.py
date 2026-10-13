@@ -161,7 +161,12 @@ def get_public_download_url(token: str, password: str | None = None) -> dict:
     share.download_count += 1
     share.save(update_fields=["download_count"])
 
-    part_size = 16 * 1024 * 1024 if version.size_bytes > 5 * 1024 * 1024 * 1024 else 8 * 1024 * 1024
+    if getattr(version, "part_size", None):
+        part_size = version.part_size
+    elif version.size_bytes > 5 * 1024 * 1024 * 1024:
+        part_size = 16 * 1024 * 1024
+    else:
+        part_size = 8 * 1024 * 1024
     stream_url = f"/api/v1/public/shares/{token}/content"
     if password:
         stream_url += f"?password={urllib.parse.quote(password)}"

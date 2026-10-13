@@ -134,6 +134,9 @@ class FileVersion(BaseModel):
     version_no = models.IntegerField(default=1)
     object_key = models.CharField(max_length=255, unique=True, db_index=True)
     size_bytes = models.BigIntegerField()
+    # Plaintext encryption/multipart chunk size used at upload (ciphertext parts are part_size+16).
+    # Legacy rows may be 0 → download falls back to historical 8/16 MiB heuristic.
+    part_size = models.IntegerField(default=0)
     # Encrypted File Key (wrapped with owner's Master Key)
     wrapped_file_key = models.TextField()
     content_nonce = models.CharField(max_length=64)
@@ -180,7 +183,7 @@ class Upload(BaseModel):
     encrypted_name = models.TextField()
     name_nonce = models.CharField(max_length=64)
     expected_size_bytes = models.BigIntegerField()
-    part_size = models.IntegerField(default=8 * 1024 * 1024)  # 8 MB default chunk size
+    part_size = models.IntegerField(default=20 * 1024 * 1024)  # SpaceByte-recommended 20 MB plaintext chunk
     parts = models.JSONField(default=list, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_INITIATED)
     expires_at = models.DateTimeField()
