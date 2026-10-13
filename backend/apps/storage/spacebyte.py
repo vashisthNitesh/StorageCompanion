@@ -104,16 +104,28 @@ class SpaceByteClient:
                 content = response.read().decode("utf-8")
                 return json.loads(content) if content else {}
         except urllib.error.HTTPError as e:
-            raw_err = e.read().decode("utf-8")
-            logger.error("SpaceByte API HTTPError [%s] %s: %s", e.code, url, raw_err)
+            raw_err = e.read().decode("utf-8", errors="ignore")
+            logger.error("SpaceByte API HTTPError [%s] %s: %s", e.code, url, raw_err[:300])
+            clean_message = f"SpaceByte HTTP Error {e.code}"
+            err_json = None
             try:
                 err_json = json.loads(raw_err)
+                if isinstance(err_json, dict) and "message" in err_json:
+                    clean_message = err_json["message"]
             except Exception:
-                err_json = {"message": raw_err}
+                if "<html" in raw_err.lower():
+                    if e.code == 403:
+                        clean_message = "Upstream storage permission denied (HTTP 403): File is inaccessible or was uploaded under a different SpaceByte account."
+                    elif e.code == 404:
+                        clean_message = "Upstream file not found on storage provider (HTTP 404)."
+                    else:
+                        clean_message = f"SpaceByte upstream storage error (HTTP {e.code})."
+                else:
+                    clean_message = f"SpaceByte HTTP Error {e.code}: {raw_err[:120].strip()}"
             raise SpaceByteError(
-                message=err_json.get("message", f"SpaceByte HTTP Error {e.code}"),
+                message=clean_message,
                 status_code=e.code,
-                response_body=err_json,
+                response_body=err_json or {"message": clean_message},
             ) from e
         except Exception as e:
             logger.error("SpaceByte API Connection Error: %s", str(e))
@@ -484,8 +496,23 @@ class SpaceByteClient:
         except urllib.error.HTTPError as e:
             raw_err = e.read().decode("utf-8", errors="ignore")
             logger.error("SpaceByte download HTTPError [%s] for hash %s: %s", e.code, hashes, raw_err[:300])
+            clean_message = f"SpaceByte HTTP Error {e.code}"
+            try:
+                data = json.loads(raw_err)
+                if isinstance(data, dict) and "message" in data:
+                    clean_message = f"SpaceByte Error: {data['message']} (HTTP {e.code})"
+            except Exception:
+                if "<html" in raw_err.lower():
+                    if e.code == 403:
+                        clean_message = "Upstream storage permission denied (HTTP 403): File is inaccessible or was uploaded under a different SpaceByte account."
+                    elif e.code == 404:
+                        clean_message = "Upstream file not found on storage provider (HTTP 404)."
+                    else:
+                        clean_message = f"SpaceByte upstream storage error (HTTP {e.code})."
+                else:
+                    clean_message = f"SpaceByte HTTP Error {e.code}: {raw_err[:120].strip()}"
             raise SpaceByteError(
-                message=f"SpaceByte HTTP Error {e.code}: {raw_err[:200]}",
+                message=clean_message,
                 status_code=e.code,
                 response_body=raw_err,
             ) from e

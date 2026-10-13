@@ -313,9 +313,16 @@ class NodeContentView(APIView):
                         status=status.HTTP_502_BAD_GATEWAY,
                     )
 
+                err_msg = str(e)
+                resp_status = status.HTTP_502_BAD_GATEWAY
+                if getattr(e, "status_code", None) == 403:
+                    resp_status = status.HTTP_403_FORBIDDEN
+                elif getattr(e, "status_code", None) == 404:
+                    resp_status = status.HTTP_404_NOT_FOUND
+
                 return Response(
-                    {"error": f"Failed to stream file from storage upstream: {str(e)}"},
-                    status=status.HTTP_502_BAD_GATEWAY,
+                    {"error": f"Failed to stream file from storage upstream: {err_msg}", "detail": err_msg},
+                    status=resp_status,
                 )
         else:
             try:

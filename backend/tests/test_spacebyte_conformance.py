@@ -183,3 +183,47 @@ def test_trash_and_purge_call_spacebyte_delete(subscribed_user, auth_client, mon
     deleted = purge_user_vault_data(subscribed_user)
     assert deleted >= 1
     assert seen and seen[0][1] is True
+
+
+def test_spacebyte_html_error_sanitization(monkeypatch):
+    import io
+    import urllib.error
+    from apps.storage.spacebyte import SpaceByteClient, SpaceByteError
+
+    html_403_body = b"<!DOCTYPE html><html><head><title>Forbidden</title></head><body><h1>403 Forbidden</h1></body></html>"
+
+    def fake_open_403(*args, **kwargs):
+        raise urllib.error.HTTPError(
+            url="https://spacebyte.in/api/v1/file-entries/download/testHash",
+            code=403,
+            msg="Forbidden",
+            hdrs={},
+            fp=io.BytesIO(html_403_body),
+        )
+
+    client = SpaceByteClient(access_token="tok_test")
+
+    # Test download_stream HTML 403 handling
+    monkeypatch.setattr("urllib.request.OpenerDirector.open", fake_open_403)
+    with pytest.raises(SpaceByteError) as exc_info:
+        client.download_stream("testHash")
+    assert "Upstream storage permission denied (HTTP 403)" in str(exc_info.value)
+    assert "<!DOCTYPE html>" not in str(exc_info.value)
+    assert exc_info.value.status_code == 403
+
+    # Test _request HTML 404 handling
+    html_404_body = b"<!DOCTYPE html><html><head><title>Not Found</title></head></html>"
+    def fake_urlopen_404(*args, **kwargs):
+        raise urllib.error.HTTPError(
+            url="https://spacebyte.in/api/v1/test",
+            code=404,
+            msg="Not Found",
+            hdrs={},
+            fp=io.BytesIO(html_404_body),
+        )
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen_404)
+    with pytest.raises(SpaceByteError) as exc_info_404:
+        client._request("GET", "test")
+    assert "Upstream file not found on storage provider (HTTP 404)" in str(exc_info_404.value)
+    assert "<!DOCTYPE html>" not in str(exc_info_404.value)
+
