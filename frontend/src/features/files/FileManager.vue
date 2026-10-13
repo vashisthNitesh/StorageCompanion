@@ -330,12 +330,44 @@ function triggerVaultFolderUpload() {
   vaultFolderInputRef.value?.click();
 }
 
+async function uploadFilesPreservingFolders(fileList: FileList | File[], rootParentId: string | null) {
+  const files = Array.from(fileList as File[]);
+  // Map relative folder path -> created node id under rootParentId
+  const folderIdByPath = new Map<string, string>();
+
+  async function ensureFolderPath(relDir: string): Promise<string | null> {
+    const parts = relDir.split("/").filter(Boolean);
+    if (parts.length === 0) return rootParentId;
+    let parentId: string | null = rootParentId;
+    let acc = "";
+    for (const part of parts) {
+      acc = acc ? `${acc}/${part}` : part;
+      if (folderIdByPath.has(acc)) {
+        parentId = folderIdByPath.get(acc)!;
+        continue;
+      }
+      const created = await filesStore.createFolder(part, parentId);
+      folderIdByPath.set(acc, created.id);
+      parentId = created.id;
+    }
+    return parentId;
+  }
+
+  for (const file of files) {
+    const rel = (file as File & { webkitRelativePath?: string }).webkitRelativePath || "";
+    let parentId = rootParentId;
+    if (rel && rel.includes("/")) {
+      const dir = rel.split("/").slice(0, -1).join("/");
+      parentId = await ensureFolderPath(dir);
+    }
+    uploadStore.uploadFile(file, parentId);
+  }
+}
+
 function handleVaultFileSelect(event: Event) {
   const target = event.target as HTMLInputElement;
   if (target.files) {
-    Array.from(target.files).forEach((file) => {
-      uploadStore.uploadFile(file, filesStore.currentParentId);
-    });
+    void uploadFilesPreservingFolders(target.files, filesStore.currentParentId);
     target.value = "";
   }
 }
@@ -355,10 +387,8 @@ function onDragLeave(e: DragEvent) {
 function onDrop(e: DragEvent) {
   e.preventDefault();
   isDraggingOver.value = false;
-  if (e.dataTransfer?.files) {
-    Array.from(e.dataTransfer.files).forEach((file) => {
-      uploadStore.uploadFile(file, filesStore.currentParentId);
-    });
+  if (e.dataTransfer?.files?.length) {
+    void uploadFilesPreservingFolders(e.dataTransfer.files, filesStore.currentParentId);
   }
 }
 
