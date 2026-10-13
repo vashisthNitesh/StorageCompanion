@@ -478,9 +478,13 @@ def purge_user_vault_data(user: User) -> int:
     """
     Permanently deletes all encrypted vault files and folders for a user
     whose 90-day data retention window has lapsed without subscription renewal.
-    Reclaims storage quota completely.
+    Reclaims storage quota completely. Also deletes upstream SpaceByte entries.
     """
     from apps.storage.models import Node
+    from apps.storage.services import delete_spacebyte_entries_for_nodes
+
+    nodes = list(Node.objects.filter(owner=user).only("id", "spacebyte_entry_id", "type"))
+    delete_spacebyte_entries_for_nodes(nodes, delete_forever=True)
     # Delete all file/folder nodes owned by user (cascades to FileVersion, chunks)
     deleted_count, _ = Node.objects.filter(owner=user).delete()
 

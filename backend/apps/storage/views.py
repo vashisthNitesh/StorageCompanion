@@ -27,11 +27,13 @@ from apps.storage.services import (
     abort_multipart_upload,
     complete_multipart_upload,
     create_folder,
+    delete_spacebyte_entries_for_nodes,
     get_download_info,
     get_s3_client,
     init_multipart_upload,
     is_descendant_or_self,
     relay_upload_part,
+    restore_spacebyte_entries_for_nodes,
 )
 from apps.storage.spacebyte import get_spacebyte_client
 
@@ -150,9 +152,10 @@ class NodeDetailView(APIView):
 
     def delete(self, request, pk):
         node = self.get_node(pk, request.user)
-        # Soft delete: move to trash
+        # Soft delete: move to trash in-app and on SpaceByte when an upstream entry exists.
         node.trashed_at = timezone.now()
         node.save(update_fields=["trashed_at"])
+        delete_spacebyte_entries_for_nodes([node], delete_forever=False)
 
         AuditLog.objects.create(
             user=request.user,
@@ -178,6 +181,7 @@ class NodeRestoreView(APIView):
             node.parent = None
             update_fields.append("parent")
         node.save(update_fields=update_fields)
+        restore_spacebyte_entries_for_nodes([node])
 
         AuditLog.objects.create(
             user=request.user,
