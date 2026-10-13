@@ -137,6 +137,12 @@ export const useUploadStore = defineStore("upload", () => {
     if (!authStore.masterKey) throw new Error("Vault must be unlocked to upload.");
     const file = uploadItem.file;
 
+    if (!file || file.size <= 0) {
+      uploadItem.status = "error";
+      uploadItem.errorMessage = "Selected file is empty (0 bytes). If this video is currently downloading in another app or browser, please wait until the download finishes.";
+      return;
+    }
+
     try {
       let initData = uploadItem.initData;
       let fileKey = uploadItem.fileKey;

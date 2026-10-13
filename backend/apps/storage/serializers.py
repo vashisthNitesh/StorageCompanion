@@ -53,7 +53,12 @@ class InitUploadSerializer(serializers.Serializer):
     node_id = serializers.UUIDField(required=False, allow_null=True)
     encrypted_name = serializers.CharField()
     name_nonce = serializers.CharField(max_length=64)
-    size_bytes = serializers.IntegerField(min_value=1)
+    size_bytes = serializers.IntegerField(
+        min_value=1,
+        error_messages={
+            "min_value": "File size is 0 bytes. If this file is currently downloading, please wait until the download finishes before uploading."
+        },
+    )
 
 
 class PartSerializer(serializers.Serializer):
