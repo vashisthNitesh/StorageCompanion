@@ -138,6 +138,47 @@ def is_descendant_or_self(candidate_parent: Node | None, node: Node) -> bool:
     return False
 
 
+
+
+def delete_spacebyte_entries_for_nodes(nodes, delete_forever: bool = False) -> int:
+    """
+    Trash or permanently delete SpaceByte FileEntries for the given Nodes.
+    Returns the number of entry IDs submitted upstream (best-effort; logs failures).
+    """
+    entry_ids = []
+    for node in nodes:
+        eid = getattr(node, "spacebyte_entry_id", None)
+        if eid:
+            entry_ids.append(eid)
+    if not entry_ids:
+        return 0
+    try:
+        sb_client = get_spacebyte_client()
+        if not sb_client.is_configured:
+            logger.warning("SpaceByte not configured; skipping upstream delete for %s entries", len(entry_ids))
+            return 0
+        sb_client.delete_entries(entry_ids, delete_forever=delete_forever)
+        return len(entry_ids)
+    except Exception as e:
+        logger.error("SpaceByte delete_entries failed for %s ids: %s", len(entry_ids), e)
+        return 0
+
+
+def restore_spacebyte_entries_for_nodes(nodes) -> int:
+    """Best-effort restore of trashed SpaceByte entries when a vault node is restored."""
+    entry_ids = [n.spacebyte_entry_id for n in nodes if getattr(n, "spacebyte_entry_id", None)]
+    if not entry_ids:
+        return 0
+    try:
+        sb_client = get_spacebyte_client()
+        if not sb_client.is_configured:
+            return 0
+        sb_client.restore_entries(entry_ids)
+        return len(entry_ids)
+    except Exception as e:
+        logger.error("SpaceByte restore_entries failed: %s", e)
+        return 0
+
 def create_folder(user, encrypted_name: str, name_nonce: str, parent_id: str | None = None) -> Node:
     parent = None
     if parent_id:
@@ -191,8 +232,12 @@ def init_multipart_upload(
         if not Node.objects.filter(id=node_id, owner=user, type=Node.TYPE_FILE, deleted_at__isnull=True).exists():
             raise NotFound("File not found.")
 
-    # Determine chunk size: 8 MB default, 16 MB for files > 5 GB
-    part_size = 16 * 1024 * 1024 if size_bytes > 5 * 1024 * 1024 * 1024 else 8 * 1024 * 1024
+    # SpaceByte docs recommend 20 MB parts (max ~3 concurrent). Keep larger parts for huge files
+    # so we stay under S3's 10,000-part limit. Always persist this on FileVersion for decrypt.
+    if size_bytes > 50 * 1024 * 1024 * 1024:
+        part_size = 32 * 1024 * 1024
+    else:
+        part_size = 20 * 1024 * 1024
     num_parts = max(1, math.ceil(size_bytes / part_size))
 
     sb_client = get_spacebyte_client()
@@ -207,6 +252,8 @@ def init_multipart_upload(
                 filename=f"vault_{user.id}_{uuid.uuid4().hex[:8]}.bin",
                 mime="application/octet-stream",
                 part_count=num_parts,
+                size=size_bytes,
+                extension="bin",
             )
             s3_upload_id = sb_init["upload_id"]
             object_key = sb_init["key"]
@@ -319,9 +366,21 @@ def complete_multipart_upload(
     spacebyte_entry = None
     if upload.spacebyte_upload_id:
         try:
-            sb_parts = [{"PartNumber": p["part_number"], "ETag": (p.get("etag") or f'"{p["part_number"]}"')} for p in sorted(parts, key=lambda x: x["part_number"])]
+            # Prefer authoritative ETags from SpaceByte (browser CORS often hides ETag on direct PUT).
+            listed = sb_client.get_uploaded_parts(upload.spacebyte_upload_id, upload.spacebyte_key)
+            if listed:
+                sb_parts = sorted(listed, key=lambda x: x["PartNumber"])
+            else:
+                sb_parts = []
+                for p in sorted(parts, key=lambda x: x["part_number"]):
+                    etag = (p.get("etag") or "").strip()
+                    if not etag:
+                        raise UpstreamStorageError(
+                            f"Missing ETag for part {p['part_number']}. Re-upload that part (relay path returns ETag)."
+                        )
+                    sb_parts.append({"PartNumber": p["part_number"], "ETag": etag})
             sb_client.complete_multipart_upload(upload.spacebyte_upload_id, upload.spacebyte_key, sb_parts)
-            # Create/Register file entry in SpaceByte
+            # Register FileEntry: filename must be S3 basename (not full key) per OpenAPI examples.
             entry_res = sb_client.create_file_entry(
                 filename=upload.spacebyte_key,
                 client_name=f"vault_{upload.id}.bin",
@@ -330,6 +389,8 @@ def complete_multipart_upload(
                 client_extension="bin",
             )
             spacebyte_entry = entry_res.get("fileEntry", {})
+        except UpstreamStorageError:
+            raise
         except Exception as e:
             # Do NOT create a file record pointing at data that was never assembled upstream:
             # that produced files which could never be previewed or downloaded.
@@ -407,6 +468,7 @@ def complete_multipart_upload(
         object_key=upload.object_key,
         spacebyte_file_name=upload.spacebyte_key,
         size_bytes=upload.expected_size_bytes,
+        part_size=upload.part_size,
         wrapped_file_key=wrapped_file_key,
         content_nonce=content_nonce,
         checksum=checksum,
@@ -564,7 +626,13 @@ def get_download_info(node: Node, user, version_no: int | None = None) -> dict:
     if not version:
         raise NotFound("File version not found.")
 
-    part_size = 16 * 1024 * 1024 if version.size_bytes > 5 * 1024 * 1024 * 1024 else 8 * 1024 * 1024
+    # Prefer the part size used at upload time (encryption chunk boundary). Fall back for legacy rows.
+    if getattr(version, "part_size", None):
+        part_size = version.part_size
+    elif version.size_bytes > 5 * 1024 * 1024 * 1024:
+        part_size = 16 * 1024 * 1024
+    else:
+        part_size = 8 * 1024 * 1024
 
     if node.spacebyte_hash:
         # Live QA: resolving the presigned URL made /download take ~11 s, and when resolution
