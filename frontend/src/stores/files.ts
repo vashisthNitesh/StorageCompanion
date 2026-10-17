@@ -143,21 +143,37 @@ export const useFilesStore = defineStore("files", () => {
   }
 
   async function trashNode(nodeId: string) {
-    await apiRequest(`/api/v1/nodes/${nodeId}`, { method: "DELETE" });
+    const res = await apiRequest<{ success: boolean; quota?: any }>(`/api/v1/nodes/${nodeId}`, { method: "DELETE" });
     rawNodes.value = rawNodes.value.filter((n) => n.id !== nodeId);
     selectedNodeIds.value.delete(nodeId);
+    if (res?.quota && authStore.user) {
+      authStore.user.quota = res.quota;
+    } else {
+      authStore.fetchProfile().catch(() => {});
+    }
   }
 
   async function restoreNode(nodeId: string) {
-    await apiRequest(`/api/v1/nodes/${nodeId}/restore`, { method: "POST" });
-    rawNodes.value = rawNodes.value.filter((n) => n.id !== nodeId);
+    const res = await apiRequest<{ success: boolean; quota?: any }>(`/api/v1/nodes/${nodeId}/restore`, { method: "POST" });
+    if (res?.quota && authStore.user) {
+      authStore.user.quota = res.quota;
+    } else {
+      authStore.fetchProfile().catch(() => {});
+    }
+    await fetchNodes();
   }
 
   async function permanentDeleteNode(nodeId: string) {
-    await apiRequest(`/api/v1/nodes/${nodeId}?permanent=true`, { method: "DELETE" });
+    const res = await apiRequest<{ success: boolean; quota?: any }>(`/api/v1/nodes/${nodeId}?permanent=true`, { method: "DELETE" });
     rawNodes.value = rawNodes.value.filter((n) => n.id !== nodeId);
     selectedNodeIds.value.delete(nodeId);
+    if (res?.quota && authStore.user) {
+      authStore.user.quota = res.quota;
+    } else {
+      authStore.fetchProfile().catch(() => {});
+    }
   }
+
 
   async function fetchAllFolders(excludeId?: string): Promise<{ id: string | null; name: string }[]> {
     if (!authStore.masterKey) return [{ id: null, name: "Root (/)" }];

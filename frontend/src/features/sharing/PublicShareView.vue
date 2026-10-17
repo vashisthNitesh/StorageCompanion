@@ -4,7 +4,8 @@ import { useRoute } from "vue-router";
 import { apiRequest, apiFetch } from "../../lib/api";
 import { decryptFile } from "../../lib/crypto/content";
 import { base64ToUint8Array, hexToUint8Array } from "../../lib/crypto/kdf";
-import { Cloud, Lock, Download, AlertCircle, FileText, CheckCircle2 } from "lucide-vue-next";
+import { Cloud, Lock, Download, AlertCircle, FileText, CheckCircle2, Eye, EyeOff } from "lucide-vue-next";
+
 
 const route = useRoute();
 const token = route.params.token as string;
@@ -12,11 +13,13 @@ const token = route.params.token as string;
 const isLoading = ref(true);
 const shareInfo = ref<any>(null);
 const passwordInput = ref("");
+const showPassword = ref(false);
 const requiresPassword = ref(false);
 const error = ref("");
 const isDownloading = ref(false);
 const downloadSuccess = ref(false);
 const fileName = ref("");
+
 
 let linkKeyBytes: Uint8Array | null = null;
 
@@ -148,14 +151,26 @@ async function downloadAndDecrypt() {
           </div>
 
           <form @submit.prevent="unlockWithPassword" class="space-y-3">
-            <input
-              type="password"
-              v-model="passwordInput"
-              required
-              placeholder="Enter password..."
-              class="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 text-sm text-slate-900 placeholder:text-slate-400 focus:bg-white focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100 transition-all"
-            />
+            <div class="relative">
+              <input
+                :type="showPassword ? 'text' : 'password'"
+                v-model="passwordInput"
+                required
+                placeholder="Enter password..."
+                class="w-full px-4 py-3 pr-11 rounded-xl bg-slate-50 border border-slate-200 text-sm text-slate-900 placeholder:text-slate-400 focus:bg-white focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100 transition-all"
+              />
+              <button
+                type="button"
+                @click="showPassword = !showPassword"
+                class="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 focus:outline-none cursor-pointer"
+                :title="showPassword ? 'Hide password' : 'Show password'"
+              >
+                <EyeOff v-if="showPassword" class="w-4 h-4" />
+                <Eye v-else class="w-4 h-4" />
+              </button>
+            </div>
             <button
+
               type="submit"
               class="btn-primary w-full py-3 rounded-xl font-semibold text-white text-xs shadow-sm hover:shadow-md"
             >

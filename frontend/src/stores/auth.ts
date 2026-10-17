@@ -8,7 +8,9 @@ import {
   uint8ArrayToHex,
   uint8ArrayToBase64,
   base64ToUint8Array,
+  hexToUint8Array,
 } from "../lib/crypto/kdf";
+
 import {
   generateMasterKey,
   generateUserKeypair,
@@ -193,6 +195,51 @@ export const useAuthStore = defineStore("auth", () => {
     }
   }
 
+  const googleClientId = ref<string>("");
+
+  async function fetchAuthConfig() {
+    try {
+      const config = await apiRequest<{ google_client_id: string; payment_provider: string }>("/api/v1/auth/config");
+      if (config.google_client_id) {
+        googleClientId.value = config.google_client_id;
+      }
+    } catch {
+      // ignore network errors
+    }
+  }
+
+  async function loginWithGoogle(credential: string) {
+    isLoading.value = true;
+    try {
+      const response = await apiRequest<{
+        success: boolean;
+        user: UserProfile;
+        access_token: string;
+        oauth_vault_hex?: string;
+      }>("/api/v1/auth/google", {
+        method: "POST",
+        body: JSON.stringify({ credential }),
+      });
+
+      setAccessToken(response.access_token);
+      user.value = response.user;
+      if (!response.user.subscription) {
+        await fetchProfile();
+      }
+
+      // Automatic seamless vault unlock
+      if (response.oauth_vault_hex) {
+        masterKey.value = hexToUint8Array(response.oauth_vault_hex);
+        saveMasterKeyToSession(masterKey.value);
+      }
+
+      return { success: true };
+    } finally {
+      isLoading.value = false;
+    }
+  }
+
+
   async function unlockVault(password: string) {
     if (!user.value || !user.value.wrapped_master_key) {
       throw new Error("No user profile found to unlock.");
@@ -313,6 +360,9 @@ export const useAuthStore = defineStore("auth", () => {
     hasActiveSubscription,
     register,
     login,
+    loginWithGoogle,
+    googleClientId,
+    fetchAuthConfig,
     unlockVault,
     fetchProfile,
     initAuth,
@@ -320,3 +370,4 @@ export const useAuthStore = defineStore("auth", () => {
     clearRecoveryPhrase,
   };
 });
+

@@ -48,3 +48,23 @@ def test_refresh_token_cookie_rotation(api_client, subscribed_user):
     assert "user" in res.data
     assert res.data["user"]["email"] == subscribed_user.email
     assert api_client.cookies.get("refresh_token") is not None
+
+
+@pytest.mark.django_db
+def test_google_auth_flow(api_client):
+    res = api_client.post("/api/v1/auth/google", {"credential": "mock_token_googletest"}, format="json")
+    assert res.status_code == 200
+    assert "access_token" in res.data
+    assert "oauth_vault_hex" in res.data
+    assert len(res.data["oauth_vault_hex"]) == 64
+    assert res.data["user"]["email"] == "googletest@example.com"
+    assert res.cookies.get("refresh_token") is not None
+
+
+@pytest.mark.django_db
+def test_auth_config(api_client):
+    res = api_client.get("/api/v1/auth/config")
+    assert res.status_code == 200
+    assert "google_client_id" in res.data
+    assert "payment_provider" in res.data
+

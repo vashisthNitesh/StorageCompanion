@@ -110,3 +110,59 @@ def test_node_content_streaming_and_download_info(auth_client, subscribed_user):
     assert dl_res.data["download_url"] == f"/api/v1/nodes/{node.id}/content"
     assert dl_res.data["part_size"] == 8 * 1024 * 1024
     assert dl_res.data["size_bytes"] == 100
+
+
+@pytest.mark.django_db
+def test_quota_runtime_updates_on_trash_restore_and_delete(auth_client, subscribed_user):
+    from apps.storage.services import recalculate_user_quota
+
+    file_size = 5 * 1024 * 1024
+    node = Node.objects.create(
+        owner=subscribed_user,
+        type=Node.TYPE_FILE,
+        encrypted_name="dGVzdF9maWxl",
+        name_nonce="1234567890",
+        size_bytes=file_size,
+    )
+    FileVersion.objects.create(
+        node=node,
+        version_no=1,
+        object_key="obj_key_1",
+        size_bytes=file_size,
+        wrapped_file_key="wrapped_key",
+        content_nonce="nonce",
+    )
+
+    quota = recalculate_user_quota(subscribed_user)
+    assert quota.bytes_used == file_size
+
+    # 1. Soft delete (move to trash)
+    del_res = auth_client.delete(f"/api/v1/nodes/{node.id}")
+    assert del_res.status_code == 200
+    assert del_res.data["success"] is True
+    assert "quota" in del_res.data
+    assert del_res.data["quota"]["bytes_used"] == 0
+
+    quota.refresh_from_db()
+    assert quota.bytes_used == 0
+
+    # 2. Restore from trash
+    restore_res = auth_client.post(f"/api/v1/nodes/{node.id}/restore")
+    assert restore_res.status_code == 200
+    assert restore_res.data["success"] is True
+    assert "quota" in restore_res.data
+    assert restore_res.data["quota"]["bytes_used"] == file_size
+
+    quota.refresh_from_db()
+    assert quota.bytes_used == file_size
+
+    # 3. Permanent delete
+    perm_del_res = auth_client.delete(f"/api/v1/nodes/{node.id}?permanent=true")
+    assert perm_del_res.status_code == 200
+    assert perm_del_res.data["success"] is True
+    assert "quota" in perm_del_res.data
+    assert perm_del_res.data["quota"]["bytes_used"] == 0
+
+    quota.refresh_from_db()
+    assert quota.bytes_used == 0
+

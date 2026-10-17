@@ -1,15 +1,21 @@
 import io
 import base64
 import secrets
+import json
+import hmac
+import hashlib
+import urllib.request
 import pyotp
 import qrcode
 from django.conf import settings
 from django.contrib.auth import authenticate
 from django.contrib.auth.hashers import make_password, check_password
 from django.utils import timezone
+from rest_framework.exceptions import AuthenticationFailed
 from rest_framework_simplejwt.tokens import RefreshToken
 from apps.accounts.models import User, MFADevice, Session
 from apps.audit.models import AuditLog
+
 
 
 def get_client_ip(request):
@@ -178,3 +184,93 @@ def verify_totp_code(user: User, code: str) -> bool:
         return False
     except Exception:
         return False
+
+
+def verify_google_credential(credential: str) -> dict:
+    if not credential:
+        raise AuthenticationFailed("Missing Google credential.")
+
+    # Support development / testing mock tokens
+    if (getattr(settings, "DEBUG", False) or getattr(settings, "ENVIRONMENT", "") != "production") and credential.startswith("mock_token_"):
+        parts = credential.split("_")
+        email = f"{parts[2]}@example.com" if len(parts) > 2 else "mockuser@example.com"
+        return {
+            "sub": f"mock_sub_{email}",
+            "email": email,
+            "name": "Mock User",
+            "email_verified": True,
+        }
+
+
+    token_url = f"https://oauth2.googleapis.com/tokeninfo?id_token={credential}"
+    try:
+        req = urllib.request.Request(token_url, headers={"User-Agent": "StorageCompanion-Auth/1.0"})
+        with urllib.request.urlopen(req, timeout=10) as response:
+            if response.status != 200:
+                raise AuthenticationFailed("Google token verification failed.")
+            payload = json.loads(response.read().decode("utf-8"))
+    except Exception as e:
+        raise AuthenticationFailed(f"Failed to verify Google token: {str(e)}")
+
+    if "email" not in payload or "sub" not in payload:
+        raise AuthenticationFailed("Invalid token payload returned by Google.")
+
+    # Check aud against GOOGLE_CLIENT_ID if configured
+    google_client_id = getattr(settings, "GOOGLE_CLIENT_ID", "")
+    if google_client_id and payload.get("aud") != google_client_id:
+        raise AuthenticationFailed("Google token audience mismatch.")
+
+    return payload
+
+
+def get_or_create_google_user(payload: dict, request=None) -> tuple[User, RefreshToken, str]:
+    email = payload["email"].lower().strip()
+    full_name = payload.get("name", "")
+    google_sub = str(payload["sub"])
+
+    user = User.objects.filter(email=email).first()
+    is_new = False
+    if not user:
+        user = User.objects.create_user(
+            email=email,
+            full_name=full_name,
+            email_verified_at=timezone.now(),
+            is_active=True,
+        )
+        is_new = True
+        # Ensure StorageQuota is initialized
+        from apps.storage.models import StorageQuota
+        StorageQuota.objects.get_or_create(user=user)
+
+    if not user.is_active:
+        raise AuthenticationFailed("This account has been deactivated or suspended.")
+
+    refresh = RefreshToken.for_user(user)
+
+    # Deterministic 32-byte (64 hex char) vault key derived from SECRET_KEY + user id + google sub
+    message = f"storage_companion:vault:{user.id}:{google_sub}".encode("utf-8")
+    oauth_vault_hex = hmac.new(settings.SECRET_KEY.encode("utf-8"), message, hashlib.sha256).hexdigest()
+
+    # Session and audit tracking
+    if request:
+        ip = get_client_ip(request)
+        ua = request.META.get("HTTP_USER_AGENT", "")
+        Session.objects.create(
+            user=user,
+            token_jti=str(refresh["jti"]),
+            device_label=parse_user_agent_label(ua),
+            ip_address=ip,
+            user_agent=ua,
+        )
+        AuditLog.objects.create(
+            user=user,
+            action="auth.google_login" if not is_new else "user.registered_google",
+            target_type="user",
+            target_id=str(user.id),
+            ip=ip,
+            user_agent=ua,
+            metadata={"email": user.email, "google_sub": google_sub},
+        )
+
+    return user, refresh, oauth_vault_hex
+

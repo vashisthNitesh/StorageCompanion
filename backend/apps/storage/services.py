@@ -6,8 +6,9 @@ from datetime import timedelta
 import boto3
 from botocore.config import Config
 from django.conf import settings
-from django.db import transaction
+from django.db import models, transaction
 from django.utils import timezone
+
 from rest_framework.exceptions import PermissionDenied, NotFound
 
 from apps.common.exceptions import QuotaExceededException, SubscriptionRequiredException, UpstreamStorageError
@@ -614,3 +615,43 @@ def get_download_info(node: Node, user, version_no: int | None = None) -> dict:
         "expires_in": settings.PRESIGNED_URL_TTL,
         "upstream": "spacebyte" if node.spacebyte_hash else "s3",
     }
+
+
+def get_node_descendants(node: Node) -> list[Node]:
+    """Return all active descendant nodes (children, grandchildren, etc.)."""
+    descendants = []
+    current_parents = [node.id]
+    while current_parents:
+        children = list(Node.objects.filter(parent_id__in=current_parents, deleted_at__isnull=True))
+        if not children:
+            break
+        descendants.extend(children)
+        current_parents = [c.id for c in children]
+    return descendants
+
+
+def recalculate_user_quota(user) -> StorageQuota:
+    """
+    Recalculates actual bytes used across all active (non-trashed, non-deleted) files for the user.
+    Synchronizes bytes_limit with active subscription plan if available.
+    """
+    quota, _ = StorageQuota.objects.get_or_create(user=user)
+    active_bytes = (
+        Node.objects.filter(
+            owner=user,
+            type=Node.TYPE_FILE,
+            trashed_at__isnull=True,
+            deleted_at__isnull=True,
+        ).aggregate(total=models.Sum("size_bytes"))["total"]
+        or 0
+    )
+    quota.bytes_used = max(0, active_bytes)
+
+    subscription = getattr(user, "subscription", None)
+    if subscription and subscription.plan and subscription.is_valid:
+        if subscription.plan.storage_bytes and quota.bytes_limit != subscription.plan.storage_bytes:
+            quota.bytes_limit = subscription.plan.storage_bytes
+
+    quota.save(update_fields=["bytes_used", "bytes_limit"])
+    return quota
+

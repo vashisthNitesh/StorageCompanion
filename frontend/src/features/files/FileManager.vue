@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from "vue";
+import { ref, computed, onMounted, onUnmounted, watch } from "vue";
 import { useRouter } from "vue-router";
+
 import { useFilesStore, type FileNode } from "../../stores/files";
 import { useUploadStore } from "../../stores/upload";
 import { useAuthStore } from "../../stores/auth";
@@ -445,7 +446,20 @@ function handleKeydown(e: KeyboardEvent) {
 onMounted(() => {
   window.addEventListener("click", closeContextMenu);
   window.addEventListener("keydown", handleKeydown);
+  if (authStore.masterKey) {
+    filesStore.fetchNodes();
+  }
 });
+
+watch(
+  () => authStore.masterKey,
+  (newKey) => {
+    if (newKey) {
+      filesStore.fetchNodes();
+    }
+  }
+);
+
 
 onUnmounted(() => {
   window.removeEventListener("click", closeContextMenu);

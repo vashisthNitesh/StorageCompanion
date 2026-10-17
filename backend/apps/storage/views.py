@@ -10,6 +10,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.exceptions import NotFound, PermissionDenied
 
+from apps.accounts.serializers import UserSerializer
 from apps.storage.models import Node, FileVersion, StorageQuota, Upload
 from apps.storage.serializers import (
     NodeSerializer,
@@ -30,9 +31,12 @@ from apps.storage.services import (
     get_s3_client,
     delete_spacebyte_entries_for_nodes,
     restore_spacebyte_entries_for_nodes,
+    recalculate_user_quota,
+    get_node_descendants,
 )
 from apps.storage.spacebyte import get_spacebyte_client
 from apps.audit.models import AuditLog
+
 
 logger = logging.getLogger(__name__)
 
@@ -123,19 +127,19 @@ class NodeDetailView(APIView):
         node = self.get_node(pk, request.user)
         is_permanent = request.query_params.get("permanent") == "true" or node.trashed_at is not None
 
-        if is_permanent:
-            # Reclaim quota for deleted file
-            if node.type == Node.TYPE_FILE and node.size_bytes:
-                quota = StorageQuota.objects.filter(user=request.user).first()
-                if quota:
-                    quota.bytes_used = max(0, quota.bytes_used - node.size_bytes)
-                    quota.save(update_fields=["bytes_used"])
+        affected_nodes = [node]
+        if node.type == Node.TYPE_FOLDER:
+            affected_nodes.extend(get_node_descendants(node))
 
-            # Clean up SpaceByte upstream entry if present
-            delete_spacebyte_entries_for_nodes([node], delete_forever=True)
+        if is_permanent:
+            # Clean up SpaceByte upstream entries if present
+            delete_spacebyte_entries_for_nodes(affected_nodes, delete_forever=True)
 
             node_id_str = str(node.id)
             node.delete()
+
+            # Recalculate user quota atomically
+            recalculate_user_quota(request.user)
 
             AuditLog.objects.create(
                 user=request.user,
@@ -143,12 +147,22 @@ class NodeDetailView(APIView):
                 target_type="node",
                 target_id=node_id_str,
             )
-            return Response({"success": True, "message": "Permanently deleted."})
+            return Response({
+                "success": True,
+                "message": "Permanently deleted.",
+                "quota": UserSerializer(request.user).get_quota(request.user),
+            })
 
-        # Soft delete: move to trash in-app and on SpaceByte when an upstream entry exists.
-        node.trashed_at = timezone.now()
-        node.save(update_fields=["trashed_at"])
-        delete_spacebyte_entries_for_nodes([node], delete_forever=False)
+        # Soft delete: move to trash in-app and on SpaceByte
+        now = timezone.now()
+        for n in affected_nodes:
+            n.trashed_at = now
+            n.save(update_fields=["trashed_at"])
+
+        delete_spacebyte_entries_for_nodes(affected_nodes, delete_forever=False)
+
+        # Recalculate quota: trashed items are subtracted from active storage usage
+        recalculate_user_quota(request.user)
 
         AuditLog.objects.create(
             user=request.user,
@@ -156,7 +170,11 @@ class NodeDetailView(APIView):
             target_type="node",
             target_id=str(node.id),
         )
-        return Response({"success": True, "message": "Moved to trash."})
+        return Response({
+            "success": True,
+            "message": "Moved to trash.",
+            "quota": UserSerializer(request.user).get_quota(request.user),
+        })
 
 
 class NodeRestoreView(APIView):
@@ -167,9 +185,18 @@ class NodeRestoreView(APIView):
         if not node:
             raise NotFound("Node not found.")
 
-        node.trashed_at = None
-        node.save(update_fields=["trashed_at"])
-        restore_spacebyte_entries_for_nodes([node])
+        affected_nodes = [node]
+        if node.type == Node.TYPE_FOLDER:
+            affected_nodes.extend(get_node_descendants(node))
+
+        for n in affected_nodes:
+            n.trashed_at = None
+            n.save(update_fields=["trashed_at"])
+
+        restore_spacebyte_entries_for_nodes(affected_nodes)
+
+        # Recalculate quota: restored items are added back to active storage usage
+        recalculate_user_quota(request.user)
 
         AuditLog.objects.create(
             user=request.user,
@@ -177,7 +204,12 @@ class NodeRestoreView(APIView):
             target_type="node",
             target_id=str(node.id),
         )
-        return Response({"success": True, "message": "Restored from trash."})
+        return Response({
+            "success": True,
+            "message": "Restored from trash.",
+            "quota": UserSerializer(request.user).get_quota(request.user),
+        })
+
 
 
 class NodeVersionsView(APIView):
@@ -369,7 +401,11 @@ class UploadCompleteView(APIView):
             thumbnail_object_key=data.get("thumbnail_object_key", ""),
             thumbnail_nonce=data.get("thumbnail_nonce", ""),
         )
-        return Response(NodeSerializer(node).data, status=status.HTTP_200_OK)
+        recalculate_user_quota(request.user)
+        resp_data = NodeSerializer(node).data
+        resp_data["quota"] = UserSerializer(request.user).get_quota(request.user)
+        return Response(resp_data, status=status.HTTP_200_OK)
+
 
 
 class UploadAbortView(APIView):

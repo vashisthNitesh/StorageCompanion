@@ -14,14 +14,18 @@ from apps.accounts.serializers import (
     SessionSerializer,
     ChangePasswordSerializer,
     RecoverySerializer,
+    GoogleAuthSerializer,
 )
 from apps.accounts.services import (
     register_user,
     create_user_session,
     setup_totp_mfa,
     verify_totp_code,
+    verify_google_credential,
+    get_or_create_google_user,
 )
 from apps.audit.models import AuditLog
+
 
 
 def set_refresh_cookie(response: Response, refresh_token: str) -> None:
@@ -319,3 +323,38 @@ class SessionRevokeView(APIView):
             target_id=str(session.id),
         )
         return Response({"success": True, "message": "Session revoked."})
+
+
+class GoogleAuthView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        serializer = GoogleAuthSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        credential = serializer.validated_data["credential"]
+
+        payload = verify_google_credential(credential)
+        user, refresh, oauth_vault_hex = get_or_create_google_user(payload, request=request)
+
+        response = Response(
+            {
+                "success": True,
+                "user": UserSerializer(user).data,
+                "access_token": str(refresh.access_token),
+                "oauth_vault_hex": oauth_vault_hex,
+            },
+            status=status.HTTP_200_OK,
+        )
+        set_refresh_cookie(response, str(refresh))
+        return response
+
+
+class AuthConfigView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        return Response({
+            "google_client_id": getattr(settings, "GOOGLE_CLIENT_ID", ""),
+            "payment_provider": getattr(settings, "PAYMENT_PROVIDER", "razorpay"),
+        })
+

@@ -4,7 +4,7 @@ import { apiRequest } from "../../lib/api";
 import { useAuthStore } from "../../stores/auth";
 import { generateLinkKey, wrapKey } from "../../lib/crypto/keys";
 import { uint8ArrayToBase64 } from "../../lib/crypto/kdf";
-import { X, Copy, Check, Link, Lock, Calendar, AlertCircle } from "lucide-vue-next";
+import { X, Copy, Check, Link, Lock, Calendar, AlertCircle, Eye, EyeOff } from "lucide-vue-next";
 
 const props = defineProps<{
   isOpen: boolean;
@@ -19,8 +19,10 @@ const shareUrl = ref<string | null>(null);
 const copied = ref(false);
 const requirePassword = ref(false);
 const password = ref("");
+const showPassword = ref(false);
 const maxDownloads = ref<number | null>(null);
 const errorMessage = ref("");
+
 
 async function generatePublicLink() {
   if (!props.node) return;
@@ -106,13 +108,25 @@ function copyToClipboard() {
         </label>
 
         <div v-if="requirePassword" class="space-y-1">
-          <input
-            type="password"
-            v-model="password"
-            placeholder="Set link password..."
-            class="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-900 focus:bg-white focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100 transition-all"
-          />
+          <div class="relative">
+            <input
+              :type="showPassword ? 'text' : 'password'"
+              v-model="password"
+              placeholder="Set link password..."
+              class="w-full px-3.5 py-2.5 pr-10 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-900 focus:bg-white focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100 transition-all"
+            />
+            <button
+              type="button"
+              @click="showPassword = !showPassword"
+              class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 focus:outline-none cursor-pointer"
+              :title="showPassword ? 'Hide password' : 'Show password'"
+            >
+              <EyeOff v-if="showPassword" class="w-4 h-4" />
+              <Eye v-else class="w-4 h-4" />
+            </button>
+          </div>
         </div>
+
 
         <div>
           <label class="block text-xs font-semibold text-slate-700 mb-1">Max Downloads (Optional)</label>

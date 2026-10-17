@@ -23,7 +23,10 @@ import {
   Menu,
   X,
   Trash2,
+  Eye,
+  EyeOff,
 } from "lucide-vue-next";
+
 
 const router = useRouter();
 const authStore = useAuthStore();
@@ -35,8 +38,10 @@ const searchInput = ref("");
 const fileInputRef = ref<HTMLInputElement | null>(null);
 
 const unlockPassword = ref("");
+const showUnlockPassword = ref(false);
 const isUnlocking = ref(false);
 const unlockError = ref("");
+
 
 async function handleUnlockVault() {
   if (!unlockPassword.value) return;
@@ -540,15 +545,27 @@ onMounted(() => {
         <form @submit.prevent="handleUnlockVault" class="space-y-4">
           <div>
             <label class="block text-xs font-semibold text-slate-700 mb-1">Master Password</label>
-            <input
-              type="password"
-              v-model="unlockPassword"
-              required
-              autofocus
-              placeholder="Enter your password"
-              class="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 text-xs placeholder:text-slate-400 focus:bg-white focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all"
-            />
+            <div class="relative">
+              <input
+                :type="showUnlockPassword ? 'text' : 'password'"
+                v-model="unlockPassword"
+                required
+                autofocus
+                placeholder="Enter your password"
+                class="w-full px-3.5 py-2.5 pr-10 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 text-xs placeholder:text-slate-400 focus:bg-white focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all"
+              />
+              <button
+                type="button"
+                @click="showUnlockPassword = !showUnlockPassword"
+                class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 focus:outline-none cursor-pointer"
+                :title="showUnlockPassword ? 'Hide password' : 'Show password'"
+              >
+                <EyeOff v-if="showUnlockPassword" class="w-4 h-4" />
+                <Eye v-else class="w-4 h-4" />
+              </button>
+            </div>
           </div>
+
 
           <div class="flex items-center justify-between pt-2">
             <button

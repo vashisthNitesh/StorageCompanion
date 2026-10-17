@@ -15,7 +15,10 @@ import {
   QrCode,
   Trash2,
   Loader2,
+  Eye,
+  EyeOff,
 } from "lucide-vue-next";
+
 
 const authStore = useAuthStore();
 
@@ -23,9 +26,13 @@ const authStore = useAuthStore();
 const currentPassword = ref("");
 const newPassword = ref("");
 const confirmNewPassword = ref("");
+const showCurrentPassword = ref(false);
+const showNewPassword = ref(false);
+const showConfirmNewPassword = ref(false);
 const passwordMessage = ref("");
 const passwordError = ref("");
 const isChangingPassword = ref(false);
+
 
 // MFA
 const mfaStep = ref<"initial" | "enrolling">("initial");
@@ -170,29 +177,65 @@ async function revokeSession(sessionId: string) {
       </div>
 
       <form @submit.prevent="handleChangePassword" class="space-y-3 max-w-md">
-        <input
-          type="password"
-          v-model="currentPassword"
-          required
-          placeholder="Current password"
-          class="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-900 placeholder:text-slate-400 focus:bg-white focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100 transition-all"
-        />
-        <input
-          type="password"
-          v-model="newPassword"
-          required
-          minlength="10"
-          placeholder="New password (min 10 chars)"
-          class="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-900 placeholder:text-slate-400 focus:bg-white focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100 transition-all"
-        />
-        <input
-          type="password"
-          v-model="confirmNewPassword"
-          required
-          minlength="10"
-          placeholder="Confirm new password"
-          class="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-900 placeholder:text-slate-400 focus:bg-white focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100 transition-all"
-        />
+        <div class="relative">
+          <input
+            :type="showCurrentPassword ? 'text' : 'password'"
+            v-model="currentPassword"
+            required
+            placeholder="Current password"
+            class="w-full px-3.5 py-2.5 pr-10 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-900 placeholder:text-slate-400 focus:bg-white focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100 transition-all"
+          />
+          <button
+            type="button"
+            @click="showCurrentPassword = !showCurrentPassword"
+            class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 focus:outline-none cursor-pointer"
+            :title="showCurrentPassword ? 'Hide password' : 'Show password'"
+          >
+            <EyeOff v-if="showCurrentPassword" class="w-4 h-4" />
+            <Eye v-else class="w-4 h-4" />
+          </button>
+        </div>
+
+        <div class="relative">
+          <input
+            :type="showNewPassword ? 'text' : 'password'"
+            v-model="newPassword"
+            required
+            minlength="10"
+            placeholder="New password (min 10 chars)"
+            class="w-full px-3.5 py-2.5 pr-10 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-900 placeholder:text-slate-400 focus:bg-white focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100 transition-all"
+          />
+          <button
+            type="button"
+            @click="showNewPassword = !showNewPassword"
+            class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 focus:outline-none cursor-pointer"
+            :title="showNewPassword ? 'Hide password' : 'Show password'"
+          >
+            <EyeOff v-if="showNewPassword" class="w-4 h-4" />
+            <Eye v-else class="w-4 h-4" />
+          </button>
+        </div>
+
+        <div class="relative">
+          <input
+            :type="showConfirmNewPassword ? 'text' : 'password'"
+            v-model="confirmNewPassword"
+            required
+            minlength="10"
+            placeholder="Confirm new password"
+            class="w-full px-3.5 py-2.5 pr-10 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-900 placeholder:text-slate-400 focus:bg-white focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100 transition-all"
+          />
+          <button
+            type="button"
+            @click="showConfirmNewPassword = !showConfirmNewPassword"
+            class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 focus:outline-none cursor-pointer"
+            :title="showConfirmNewPassword ? 'Hide password' : 'Show password'"
+          >
+            <EyeOff v-if="showConfirmNewPassword" class="w-4 h-4" />
+            <Eye v-else class="w-4 h-4" />
+          </button>
+        </div>
+
 
         <button
           type="submit"

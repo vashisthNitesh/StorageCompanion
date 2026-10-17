@@ -33,6 +33,7 @@ env = environ.Env(
     STRIPE_PUBLISHABLE_KEY=(str, "pk_test_sample"),
     STRIPE_SECRET_KEY=(str, "sk_test_sample"),
     STRIPE_WEBHOOK_SECRET=(str, "whsec_sample"),
+    GOOGLE_CLIENT_ID=(str, ""),
 )
 
 # Read .env if present
@@ -45,6 +46,7 @@ if env_file.exists():
 SECRET_KEY = env("SECRET_KEY")
 DEBUG = env("DEBUG")
 ALLOWED_HOSTS = env("ALLOWED_HOSTS")
+GOOGLE_CLIENT_ID = env("GOOGLE_CLIENT_ID")
 
 INSTALLED_APPS = [
     "django.contrib.admin",

@@ -187,3 +187,8 @@ class RecoverySerializer(serializers.Serializer):
     new_wrapped_master_key = serializers.CharField()
     new_kdf_salt = serializers.CharField()
     new_kdf_params = serializers.JSONField()
+
+
+class GoogleAuthSerializer(serializers.Serializer):
+    credential = serializers.CharField(required=True)
+

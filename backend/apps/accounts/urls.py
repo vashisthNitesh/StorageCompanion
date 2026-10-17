@@ -11,11 +11,16 @@ from apps.accounts.views import (
     MFADisableView,
     SessionListView,
     SessionRevokeView,
+    GoogleAuthView,
+    AuthConfigView,
 )
 
 urlpatterns = [
     path("register", RegisterView.as_view(), name="auth-register"),
     path("login", LoginView.as_view(), name="auth-login"),
+    path("google", GoogleAuthView.as_view(), name="auth-google"),
+    path("google/", GoogleAuthView.as_view(), name="auth-google-slash"),
+    path("config", AuthConfigView.as_view(), name="auth-config"),
     path("refresh", RefreshTokenView.as_view(), name="auth-refresh"),
     path("logout", LogoutView.as_view(), name="auth-logout"),
     path("me", MeView.as_view(), name="auth-me"),
@@ -26,3 +31,4 @@ urlpatterns = [
     path("sessions", SessionListView.as_view(), name="auth-sessions"),
     path("sessions/<uuid:session_id>", SessionRevokeView.as_view(), name="auth-session-revoke"),
 ]
+
