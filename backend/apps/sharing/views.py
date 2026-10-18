@@ -53,18 +53,10 @@ class ShareListCreateView(APIView):
         data = serializer.validated_data
 
         if data["type"] == Share.TYPE_LINK:
-            share, raw_token = create_public_link_share(
-                user=request.user,
-                node_id=data["node_id"],
-                wrapped_key=data["wrapped_key"],
-                permission=data.get("permission", Share.PERM_DOWNLOAD),
-                password=data.get("password"),
-                expires_at=data.get("expires_at"),
-                max_downloads=data.get("max_downloads"),
+            return Response(
+                {"error": "File sharing via link has been disabled."},
+                status=status.HTTP_403_FORBIDDEN,
             )
-            resp_data = ShareSerializer(share).data
-            resp_data["raw_token"] = raw_token
-            return Response(resp_data, status=status.HTTP_201_CREATED)
         else:
             share = create_user_share(
                 user=request.user,

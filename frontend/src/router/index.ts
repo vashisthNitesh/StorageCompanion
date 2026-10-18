@@ -34,11 +34,10 @@ const routes: RouteRecordRaw[] = [
     name: "register",
     component: () => import("../features/auth/RegisterView.vue"),
   },
-  // Public Link Decrypt View (Zero-knowledge fragment key)
+  // Public Link Decrypt View (Disabled - link sharing removed)
   {
     path: "/s/:token",
-    name: "public-share",
-    component: () => import("../features/sharing/PublicShareView.vue"),
+    redirect: "/login",
   },
   // Authenticated Application
   {
@@ -57,8 +56,7 @@ const routes: RouteRecordRaw[] = [
       },
       {
         path: "shared",
-        name: "shared",
-        component: () => import("../features/sharing/SharedFilesView.vue"),
+        redirect: "/app/files",
       },
       {
         path: "trash",
@@ -118,7 +116,7 @@ router.beforeEach(async (to, _from, next) => {
     }
 
     // Superadmin restriction: redirect away from customer vault/billing pages to admin dashboard
-    if (authStore.isMasterAdmin && (to.path === "/app" || to.path === "/app/files" || to.path === "/app/shared" || to.path === "/app/trash" || to.path === "/app/billing")) {
+    if (authStore.isMasterAdmin && (to.path === "/app" || to.path === "/app/files" || to.path === "/app/trash" || to.path === "/app/billing")) {
       next({ path: "/app/admin" });
       return;
     }

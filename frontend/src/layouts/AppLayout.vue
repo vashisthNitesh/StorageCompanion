@@ -7,7 +7,6 @@ import { useUploadStore } from "../stores/upload";
 import {
   Lock,
   Folder,
-  Share2,
   Settings,
   CreditCard,
   LogOut,
@@ -147,15 +146,6 @@ onMounted(() => {
             >
               <Folder class="w-4 h-4" :class="$route.path === '/app/files' ? 'text-blue-600' : 'text-slate-400'" />
               <span>Encrypted Vault</span>
-            </router-link>
-
-            <router-link
-              to="/app/shared"
-              class="flex items-center space-x-3 px-3 py-2 rounded-xl transition-all"
-              :class="$route.path === '/app/shared' ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/70'"
-            >
-              <Share2 class="w-4 h-4" :class="$route.path === '/app/shared' ? 'text-blue-600' : 'text-slate-400'" />
-              <span>Shared Links</span>
             </router-link>
 
             <router-link
@@ -321,16 +311,6 @@ onMounted(() => {
               >
                 <Folder class="w-4 h-4" :class="$route.path === '/app/files' ? 'text-blue-600' : 'text-slate-400'" />
                 <span>Encrypted Vault</span>
-              </router-link>
-
-              <router-link
-                to="/app/shared"
-                @click="isMobileSidebarOpen = false"
-                class="flex items-center space-x-3 px-3 py-2 rounded-xl transition-all"
-                :class="$route.path === '/app/shared' ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/70'"
-              >
-                <Share2 class="w-4 h-4" :class="$route.path === '/app/shared' ? 'text-blue-600' : 'text-slate-400'" />
-                <span>Shared Links</span>
               </router-link>
 
               <router-link
@@ -523,7 +503,7 @@ onMounted(() => {
 
     <!-- Unlock Vault Modal (when user session is valid but client-side masterKey is locked) -->
     <div
-      v-if="!authStore.isVaultUnlocked && !authStore.isMasterAdmin && ($route.path.startsWith('/app/files') || $route.path.startsWith('/app/shared'))"
+      v-if="!authStore.isVaultUnlocked && !authStore.isMasterAdmin && $route.path.startsWith('/app/files')"
       class="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4"
     >
       <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-5">

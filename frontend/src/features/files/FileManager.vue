@@ -7,7 +7,6 @@ import { useUploadStore } from "../../stores/upload";
 import { useAuthStore } from "../../stores/auth";
 import { useFileDownload } from "./useFileDownload";
 import PreviewModal from "./PreviewModal.vue";
-import ShareModal from "../sharing/ShareModal.vue";
 import {
   Folder,
   FolderPlus,
@@ -25,7 +24,6 @@ import {
   UploadCloud,
   MoreVertical,
   Download,
-  Share2,
   Trash2,
   Edit2,
   Lock,
@@ -81,8 +79,6 @@ const activeSort = ref<"name_asc" | "name_desc" | "size_desc" | "size_asc">("nam
 // Modals
 const previewNode = ref<FileNode | null>(null);
 const isPreviewOpen = ref(false);
-const shareTargetNode = ref<FileNode | null>(null);
-const isShareOpen = ref(false);
 
 // Context menu
 const contextMenu = ref<{ x: number; y: number; node: FileNode | null; visible: boolean }>({
@@ -343,12 +339,6 @@ async function submitRename() {
   }
 }
 
-function triggerShare(node: FileNode) {
-  shareTargetNode.value = node;
-  isShareOpen.value = true;
-  closeContextMenu();
-}
-
 async function triggerTrash(node: FileNode) {
   await filesStore.trashNode(node.id);
   closeContextMenu();
@@ -435,7 +425,6 @@ function handleKeydown(e: KeyboardEvent) {
   if (e.key === "Escape") {
     closeContextMenu();
     isPreviewOpen.value = false;
-    isShareOpen.value = false;
     showCreateFolderModal.value = false;
     showRenameModal.value = false;
     showMoveModal.value = false;
@@ -895,15 +884,6 @@ onUnmounted(() => {
                 <Eye class="w-3.5 h-3.5" />
               </button>
 
-              <!-- Share Action -->
-              <button
-                @click.stop="triggerShare(file)"
-                class="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
-                title="Share link"
-              >
-                <Share2 class="w-3.5 h-3.5" />
-              </button>
-
               <!-- More Action -->
               <button
                 @click.stop="openContextMenu($event, file)"
@@ -952,14 +932,6 @@ onUnmounted(() => {
       >
         <History class="w-3.5 h-3.5 text-slate-500" />
         <span>Version History</span>
-      </button>
-
-      <button
-        @click="triggerShare(contextMenu.node)"
-        class="w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl hover:bg-slate-100 text-slate-700 hover:text-slate-900 transition-colors"
-      >
-        <Share2 class="w-3.5 h-3.5 text-slate-500" />
-        <span>Share Link (#key)</span>
       </button>
 
       <!-- Move Option -->
@@ -1139,13 +1111,6 @@ onUnmounted(() => {
       :is-open="isPreviewOpen"
       :node="previewNode"
       @close="isPreviewOpen = false"
-    />
-
-    <!-- Share Modal -->
-    <ShareModal
-      :is-open="isShareOpen"
-      :node="shareTargetNode"
-      @close="isShareOpen = false"
     />
   </div>
 </template>
