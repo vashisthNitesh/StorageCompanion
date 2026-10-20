@@ -1,4 +1,3 @@
-import os
 from datetime import timedelta
 from pathlib import Path
 import environ
@@ -10,30 +9,28 @@ env = environ.Env(
     DEBUG=(bool, False),
     ENVIRONMENT=(str, "dev"),
     SECRET_KEY=(str, "insecure-dev-key-change-in-production"),
-    ALLOWED_HOSTS=(list, ["localhost", "127.0.0.1", "web", ".onrender.com", "*"]),
+    ALLOWED_HOSTS=(list, ["localhost", "127.0.0.1"]),
     DATABASE_URL=(str, "sqlite:///db.sqlite3"),
-    REDIS_URL=(str, "redis://localhost:6379/0"),
-    CELERY_BROKER_URL=(str, "redis://localhost:6379/0"),
-    CELERY_RESULT_BACKEND=(str, "redis://localhost:6379/0"),
-    S3_ENDPOINT_URL=(str, "http://localhost:9000"),
-    S3_ACCESS_KEY_ID=(str, "minioadmin"),
-    S3_SECRET_ACCESS_KEY=(str, "minioadmin"),
-    S3_BUCKET_NAME=(str, "speedcloud-files"),
-    S3_REGION_NAME=(str, "auto"),
-    PRESIGNED_URL_TTL=(int, 86400),  # 24 hours for resilient large multi-gigabyte file transfers
     SPACEBYTE_BASE_URL=(str, "https://spacebyte.in/api/v1"),
     SPACEBYTE_ACCESS_TOKEN=(str, ""),
     SPACEBYTE_STORAGE_POOL_LIMIT_BYTES=(int, 1000 * 1024 * 1024 * 1024),  # 1 TB testing allocation
     SPACEBYTE_PARENT_FOLDER_ID=(str, ""),
-    PAYMENT_PROVIDER=(str, "razorpay"),
     DEFAULT_CURRENCY=(str, "INR"),
-    RAZORPAY_KEY_ID=(str, "rzp_test_sample"),
-    RAZORPAY_KEY_SECRET=(str, "sample_secret_key"),
-    RAZORPAY_WEBHOOK_SECRET=(str, "sample_webhook_secret"),
-    STRIPE_PUBLISHABLE_KEY=(str, "pk_test_sample"),
-    STRIPE_SECRET_KEY=(str, "sk_test_sample"),
-    STRIPE_WEBHOOK_SECRET=(str, "whsec_sample"),
+    # Payments are refused until real Razorpay keys are configured.
+    RAZORPAY_KEY_ID=(str, ""),
+    RAZORPAY_KEY_SECRET=(str, ""),
+    RAZORPAY_WEBHOOK_SECRET=(str, ""),
     GOOGLE_CLIENT_ID=(str, ""),
+    # Secret used to derive vault keys for Google sign-in accounts. Defaults to SECRET_KEY;
+    # set it explicitly before ever rotating SECRET_KEY or Google users lose their files.
+    VAULT_KEY_SECRET=(str, ""),
+    # Seller details printed on invoices. Without a GSTIN the invoice is a plain receipt.
+    BUSINESS_NAME=(str, "SmartSpace"),
+    BUSINESS_ADDRESS=(str, ""),
+    BUSINESS_GSTIN=(str, ""),
+    BUSINESS_STATE_CODE=(str, ""),
+    # Number of reverse proxies in front of Django (Render's edge + nginx) for client-IP throttling.
+    NUM_PROXIES=(int, 0),
 )
 
 # Read .env if present
@@ -45,8 +42,10 @@ if env_file.exists():
 
 SECRET_KEY = env("SECRET_KEY")
 DEBUG = env("DEBUG")
+ENVIRONMENT = env("ENVIRONMENT")
 ALLOWED_HOSTS = env("ALLOWED_HOSTS")
 GOOGLE_CLIENT_ID = env("GOOGLE_CLIENT_ID")
+VAULT_KEY_SECRET = env("VAULT_KEY_SECRET") or SECRET_KEY
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -63,7 +62,6 @@ INSTALLED_APPS = [
     "apps.common",
     "apps.accounts",
     "apps.storage",
-    "apps.sharing",
     "apps.billing",
     "apps.audit",
 ]
@@ -77,7 +75,7 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
-    "apps.audit.middleware.AuditLogMiddleware",
+    "apps.common.middleware.ContentSecurityPolicyMiddleware",
 ]
 
 ROOT_URLCONF = "config.urls"
@@ -102,7 +100,6 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = "config.wsgi.application"
-ASGI_APPLICATION = "config.asgi.application"
 
 # Database (Supports PostgreSQL / Neon DB / SQLite)
 DATABASES = {
@@ -118,6 +115,10 @@ if "neon.tech" in db_host or "neon.tech" in db_url:
     DATABASES["default"]["CONN_MAX_AGE"] = env.int("CONN_MAX_AGE", default=0)
 else:
     DATABASES["default"]["CONN_MAX_AGE"] = env.int("CONN_MAX_AGE", default=60)
+
+if DATABASES["default"]["ENGINE"].endswith("sqlite3"):
+    # Local development: wait for concurrent upload writes instead of failing with "database is locked".
+    DATABASES["default"].setdefault("OPTIONS", {})["timeout"] = 20
 
 # Password validation & Argon2id hasher
 PASSWORD_HASHERS = [
@@ -152,7 +153,10 @@ dist_path = BASE_DIR.parent / "frontend" / "dist"
 if (dist_path / "assets").exists():
     STATICFILES_DIRS.append(dist_path / "assets")
 
-STATICFILES_STORAGE = "whitenoise.storage.CompressedStaticFilesStorage"
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "whitenoise.storage.CompressedStaticFilesStorage"},
+}
 WHITENOISE_INDEX_FILE = True
 WHITENOISE_ROOT = dist_path if dist_path.exists() else None
 
@@ -161,7 +165,7 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # Django REST Framework
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
-        "apps.accounts.authentication.CookieJWTAuthentication",
+        "apps.accounts.authentication.SessionJWTAuthentication",
     ),
     "DEFAULT_PERMISSION_CLASSES": (
         "rest_framework.permissions.IsAuthenticated",
@@ -172,19 +176,22 @@ REST_FRAMEWORK = {
         "rest_framework.throttling.AnonRateThrottle",
         "rest_framework.throttling.UserRateThrottle",
     ],
+    # Upload relay sends one request per 20 MB part, so the per-user budget is generous.
+    # Login, Google sign-in, refresh and MFA endpoints add a stricter "auth" scope on top.
     "DEFAULT_THROTTLE_RATES": {
-        "anon": "100/day",
-        "user": "1000/day",
+        "anon": "300/hour",
+        "user": "20000/day",
         "auth": "10/minute",
-        "uploads": "100/minute",
-        "share_auth": "10/hour",
+        "refresh": "60/minute",
     },
+    "NUM_PROXIES": env("NUM_PROXIES") or None,
     "EXCEPTION_HANDLER": "apps.common.exceptions.custom_exception_handler",
 }
 
 # SimpleJWT Settings
 SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(days=1),
+    # Access tokens are short-lived; every request also checks the token's session is not revoked.
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=30),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=30),
     "ROTATE_REFRESH_TOKENS": True,
     "BLACKLIST_AFTER_ROTATION": True,
@@ -204,34 +211,37 @@ SIMPLE_JWT = {
     "AUTH_COOKIE_SAMESITE": "Strict",
 }
 
-# Celery Configuration
-CELERY_BROKER_URL = env("CELERY_BROKER_URL")
-CELERY_RESULT_BACKEND = env("CELERY_RESULT_BACKEND")
-CELERY_ACCEPT_CONTENT = ["json"]
-CELERY_TASK_SERIALIZER = "json"
-CELERY_RESULT_SERIALIZER = "json"
-CELERY_TIMEZONE = TIME_ZONE
-
-# Object Storage (R2 / MinIO)
-S3_ENDPOINT_URL = env("S3_ENDPOINT_URL")
-S3_ACCESS_KEY_ID = env("S3_ACCESS_KEY_ID")
-S3_SECRET_ACCESS_KEY = env("S3_SECRET_ACCESS_KEY")
-S3_BUCKET_NAME = env("S3_BUCKET_NAME")
-S3_REGION_NAME = env("S3_REGION_NAME")
-PRESIGNED_URL_TTL = env("PRESIGNED_URL_TTL")
-
-# Payments (Razorpay)
-PAYMENT_PROVIDER = env("PAYMENT_PROVIDER")
+# Payments (Razorpay). The placeholder values that older configs shipped with are public,
+# so they are treated as "not configured" rather than as real secrets.
+_PLACEHOLDER_SECRETS = {"rzp_test_sample", "sample_secret_key", "sample_webhook_secret"}
 DEFAULT_CURRENCY = env("DEFAULT_CURRENCY")
-RAZORPAY_KEY_ID = env("RAZORPAY_KEY_ID")
-RAZORPAY_KEY_SECRET = env("RAZORPAY_KEY_SECRET")
-RAZORPAY_WEBHOOK_SECRET = env("RAZORPAY_WEBHOOK_SECRET")
-STRIPE_PUBLISHABLE_KEY = env("STRIPE_PUBLISHABLE_KEY")
-STRIPE_SECRET_KEY = env("STRIPE_SECRET_KEY")
-STRIPE_WEBHOOK_SECRET = env("STRIPE_WEBHOOK_SECRET")
- 
+RAZORPAY_KEY_ID = "" if env("RAZORPAY_KEY_ID") in _PLACEHOLDER_SECRETS else env("RAZORPAY_KEY_ID")
+RAZORPAY_KEY_SECRET = "" if env("RAZORPAY_KEY_SECRET") in _PLACEHOLDER_SECRETS else env("RAZORPAY_KEY_SECRET")
+RAZORPAY_WEBHOOK_SECRET = "" if env("RAZORPAY_WEBHOOK_SECRET") in _PLACEHOLDER_SECRETS else env("RAZORPAY_WEBHOOK_SECRET")
+
+# Invoice seller details
+BUSINESS_NAME = env("BUSINESS_NAME")
+BUSINESS_ADDRESS = env("BUSINESS_ADDRESS")
+BUSINESS_GSTIN = env("BUSINESS_GSTIN")
+BUSINESS_STATE_CODE = env("BUSINESS_STATE_CODE")
+
 # SpaceByte Cloud Storage Upstream Integration
 SPACEBYTE_BASE_URL = env("SPACEBYTE_BASE_URL")
 SPACEBYTE_ACCESS_TOKEN = env("SPACEBYTE_ACCESS_TOKEN")
 SPACEBYTE_STORAGE_POOL_LIMIT_BYTES = env("SPACEBYTE_STORAGE_POOL_LIMIT_BYTES")
 SPACEBYTE_PARENT_FOLDER_ID = env("SPACEBYTE_PARENT_FOLDER_ID")
+
+# Content-Security-Policy sent by Django responses (nginx sends the same policy for the SPA).
+CONTENT_SECURITY_POLICY = "; ".join([
+    "default-src 'self'",
+    "script-src 'self' https://accounts.google.com/gsi/client https://checkout.razorpay.com https://*.razorpay.com",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com/gsi/style",
+    "font-src 'self' https://fonts.gstatic.com",
+    "img-src 'self' data: blob: https://*.googleusercontent.com https://*.razorpay.com",
+    "connect-src 'self' https://accounts.google.com/gsi/ https://*.razorpay.com",
+    "frame-src https://accounts.google.com/gsi/ https://*.razorpay.com",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+])

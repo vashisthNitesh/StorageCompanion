@@ -1,14 +1,11 @@
 import logging
-import urllib.error
-import urllib.request
-from django.conf import settings
 from django.http import StreamingHttpResponse
 from django.utils import timezone
 from rest_framework import status, permissions, generics
 from rest_framework.parsers import BaseParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework.exceptions import NotFound, PermissionDenied
+from rest_framework.exceptions import NotFound, ValidationError
 
 from apps.accounts.serializers import UserSerializer
 from apps.storage.models import Node, FileVersion, StorageQuota, Upload
@@ -23,12 +20,12 @@ from apps.storage.serializers import (
 )
 from apps.storage.services import (
     create_folder,
+    move_node,
     init_multipart_upload,
     complete_multipart_upload,
     abort_multipart_upload,
     relay_upload_part,
     get_download_info,
-    get_s3_client,
     delete_spacebyte_entries_for_nodes,
     restore_spacebyte_entries_for_nodes,
     recalculate_user_quota,
@@ -49,27 +46,29 @@ class BinaryParser(BaseParser):
 
 
 class NodeListView(generics.ListCreateAPIView):
+    """
+    Lists the user's folders and files. Names are encrypted, so the browser needs every
+    item to sort, filter and search; results are therefore not paginated.
+    """
     serializer_class = NodeSerializer
     permission_classes = [permissions.IsAuthenticated]
+    pagination_class = None
 
     def get_queryset(self):
         user = self.request.user
         queryset = Node.objects.filter(owner=user, deleted_at__isnull=True)
 
-        is_trashed = self.request.query_params.get("trashed") == "true"
-        if is_trashed:
-            return queryset.filter(trashed_at__isnull=False)
-        else:
-            queryset = queryset.filter(trashed_at__isnull=True)
+        if self.request.query_params.get("trashed") == "true":
+            # Only top-level trashed items: children of a trashed folder are restored with it.
+            return queryset.filter(trashed_at__isnull=False).exclude(parent__trashed_at__isnull=False)
 
+        queryset = queryset.filter(trashed_at__isnull=True)
         parent_param = self.request.query_params.get("parent")
         if parent_param:
             return queryset.filter(parent_id=parent_param)
-        elif self.request.query_params.get("all") == "true":
+        if self.request.query_params.get("all") == "true":
             return queryset
-        else:
-            # Root directory by default
-            return queryset.filter(parent__isnull=True)
+        return queryset.filter(parent__isnull=True)
 
     def create(self, request, *args, **kwargs):
         serializer = CreateFolderSerializer(data=request.data)
@@ -106,13 +105,7 @@ class NodeDetailView(APIView):
             node.encrypted_name = data["encrypted_name"]
             node.name_nonce = data.get("name_nonce", node.name_nonce)
         if "parent" in data:
-            parent_id = data["parent"]
-            parent = None
-            if parent_id:
-                parent = Node.objects.filter(id=parent_id, owner=request.user, type=Node.TYPE_FOLDER).first()
-                if not parent:
-                    return Response({"error": "Target parent folder not found."}, status=400)
-            node.parent = parent
+            move_node(node, request.user, data["parent"])
 
         node.save()
         AuditLog.objects.create(
@@ -132,13 +125,10 @@ class NodeDetailView(APIView):
             affected_nodes.extend(get_node_descendants(node))
 
         if is_permanent:
-            # Clean up SpaceByte upstream entries if present
             delete_spacebyte_entries_for_nodes(affected_nodes, delete_forever=True)
 
             node_id_str = str(node.id)
             node.delete()
-
-            # Recalculate user quota atomically
             recalculate_user_quota(request.user)
 
             AuditLog.objects.create(
@@ -155,13 +145,8 @@ class NodeDetailView(APIView):
 
         # Soft delete: move to trash in-app and on SpaceByte
         now = timezone.now()
-        for n in affected_nodes:
-            n.trashed_at = now
-            n.save(update_fields=["trashed_at"])
-
+        Node.objects.filter(id__in=[n.id for n in affected_nodes]).update(trashed_at=now)
         delete_spacebyte_entries_for_nodes(affected_nodes, delete_forever=False)
-
-        # Recalculate quota: trashed items are subtracted from active storage usage
         recalculate_user_quota(request.user)
 
         AuditLog.objects.create(
@@ -189,13 +174,12 @@ class NodeRestoreView(APIView):
         if node.type == Node.TYPE_FOLDER:
             affected_nodes.extend(get_node_descendants(node))
 
-        for n in affected_nodes:
-            n.trashed_at = None
-            n.save(update_fields=["trashed_at"])
+        Node.objects.filter(id__in=[n.id for n in affected_nodes]).update(trashed_at=None)
+        # If the original folder is still in the trash, restore the item to the top level.
+        if node.parent_id and Node.objects.filter(id=node.parent_id, trashed_at__isnull=False).exists():
+            Node.objects.filter(id=node.id).update(parent=None)
 
         restore_spacebyte_entries_for_nodes(affected_nodes)
-
-        # Recalculate quota: restored items are added back to active storage usage
         recalculate_user_quota(request.user)
 
         AuditLog.objects.create(
@@ -211,7 +195,6 @@ class NodeRestoreView(APIView):
         })
 
 
-
 class NodeVersionsView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -223,6 +206,16 @@ class NodeVersionsView(APIView):
         return Response(FileVersionSerializer(versions, many=True).data)
 
 
+def parse_version(request) -> int | None:
+    raw = request.query_params.get("v")
+    if not raw:
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        raise ValidationError("Invalid version number.")
+
+
 class NodeDownloadView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -231,12 +224,7 @@ class NodeDownloadView(APIView):
         if not node:
             raise NotFound("Node not found.")
 
-        version_no = request.query_params.get("v")
-        download_info = get_download_info(
-            node=node,
-            user=request.user,
-            version_no=int(version_no) if version_no else None,
-        )
+        download_info = get_download_info(node=node, user=request.user, version_no=parse_version(request))
 
         AuditLog.objects.create(
             user=request.user,
@@ -249,10 +237,8 @@ class NodeDownloadView(APIView):
 
 class NodeContentView(APIView):
     """
-    Streams encrypted file bytes directly to authenticated clients.
-    Handles upstream SpaceByte authentication (Bearer token) and S3 streaming seamlessly,
-    completely preventing 401 Unauthorized and CORS errors in browser decryption.
-    Supports HTTP Range requests for video/audio seeking.
+    Streams encrypted file bytes from SpaceByte to the authenticated owner.
+    The browser decrypts them; the server never sees plaintext.
     """
     permission_classes = [permissions.IsAuthenticated]
 
@@ -261,107 +247,65 @@ class NodeContentView(APIView):
         if not node:
             raise NotFound("File not found.")
         if node.type != Node.TYPE_FILE:
-            return Response({"error": "Folders cannot be streamed."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": "Folders cannot be downloaded directly."}, status=status.HTTP_400_BAD_REQUEST)
 
-        version_no = request.query_params.get("v")
         versions = FileVersion.objects.filter(node=node)
-        if version_no:
-            version = versions.filter(version_no=int(version_no)).first()
-        else:
-            version = versions.order_by("-version_no").first()
-
+        version_no = parse_version(request)
+        version = versions.filter(version_no=version_no).first() if version_no else versions.order_by("-version_no").first()
         if not version:
             raise NotFound("File version not found.")
+        if not node.spacebyte_hash:
+            return Response({"error": "This file's content is not available."}, status=status.HTTP_404_NOT_FOUND)
 
-        def _stream_s3():
-            s3 = get_s3_client()
-            params = {"Bucket": settings.S3_BUCKET_NAME, "Key": version.object_key}
-            if "HTTP_RANGE" in request.META:
-                params["Range"] = request.META["HTTP_RANGE"]
-            s3_obj = s3.get_object(**params)
-            status_code = 206 if "Range" in params else 200
-            streaming_resp = StreamingHttpResponse(
-                s3_obj["Body"].iter_chunks(chunk_size=256 * 1024),
-                status=status_code,
-                content_type="application/octet-stream",
+        sb_client = get_spacebyte_client()
+        try:
+            upstream_resp, resp_status, resp_headers = sb_client.download_stream(
+                node.spacebyte_hash,
+                range_header=request.META.get("HTTP_RANGE"),
+                timeout=60,
             )
-            if "ContentLength" in s3_obj:
-                streaming_resp["Content-Length"] = str(s3_obj["ContentLength"])
-            if "ContentRange" in s3_obj:
-                streaming_resp["Content-Range"] = str(s3_obj["ContentRange"])
-            streaming_resp["Accept-Ranges"] = "bytes"
-            streaming_resp["Access-Control-Allow-Origin"] = "*"
-            return streaming_resp
-
-        # If SpaceByte hash is available, stream from SpaceByte with Bearer token
-        if node.spacebyte_hash:
-            sb_client = get_spacebyte_client()
-            range_header = request.META.get("HTTP_RANGE")
-            try:
-                upstream_resp, resp_status, resp_headers = sb_client.download_stream(
-                    node.spacebyte_hash,
-                    range_header=range_header,
-                )
-                def _stream_generator(upstream_file, chunk_size=256 * 1024):
-                    try:
-                        while True:
-                            chunk = upstream_file.read(chunk_size)
-                            if not chunk:
-                                break
-                            yield chunk
-                    finally:
-                        if hasattr(upstream_file, "close"):
-                            try:
-                                upstream_file.close()
-                            except Exception:
-                                pass
-
-                streaming_resp = StreamingHttpResponse(
-                    _stream_generator(upstream_resp),
-                    status=resp_status,
-                    content_type=resp_headers.get("Content-Type", "application/octet-stream"),
-                )
-                if resp_headers.get("Content-Length"):
-                    streaming_resp["Content-Length"] = resp_headers["Content-Length"]
-                if resp_headers.get("Content-Range"):
-                    streaming_resp["Content-Range"] = resp_headers["Content-Range"]
-                streaming_resp["Accept-Ranges"] = resp_headers.get("Accept-Ranges", "bytes")
-                streaming_resp["Access-Control-Allow-Origin"] = "*"
-                return streaming_resp
-            except Exception as e:
-                logger.warning("SpaceByte download stream failed (%s), attempting S3 fallback: %s", type(e).__name__, e)
-                if version and version.object_key:
-                    try:
-                        return _stream_s3()
-                    except Exception as s3_err:
-                        logger.error("S3 fallback stream also failed: %s", s3_err)
-
-                if not sb_client.is_configured:
-                    return Response(
-                        {
-                            "error": "SpaceByte upstream storage is not configured (SPACEBYTE_ACCESS_TOKEN is missing or empty in .env). Please configure it to preview/download SpaceByte files.",
-                            "code": "spacebyte_not_configured",
-                        },
-                        status=status.HTTP_502_BAD_GATEWAY,
-                    )
-
-                err_msg = str(e)
-                resp_status = status.HTTP_502_BAD_GATEWAY
-                if getattr(e, "status_code", None) == 403:
-                    resp_status = status.HTTP_403_FORBIDDEN
-                elif getattr(e, "status_code", None) == 404:
-                    resp_status = status.HTTP_404_NOT_FOUND
-
+        except Exception as e:
+            logger.warning("SpaceByte download stream failed for node %s: %s", node.id, e)
+            if not sb_client.is_configured:
                 return Response(
-                    {"error": f"Failed to stream file from storage upstream: {err_msg}", "detail": err_msg},
-                    status=resp_status,
+                    {"error": "File storage is not configured on the server.", "code": "spacebyte_not_configured"},
+                    status=status.HTTP_502_BAD_GATEWAY,
                 )
-        else:
+            upstream_status = getattr(e, "status_code", None)
+            if upstream_status == 404:
+                return Response({"error": "This file was not found in storage."}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {"error": "Could not download this file from storage. Please try again."},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        def _stream_generator(upstream_file, chunk_size=256 * 1024):
             try:
-                return _stream_s3()
-            except Exception as e:
-                logger.error("Failed to retrieve file from S3: %s", e)
-                return Response({"error": "Failed to retrieve file from storage."}, status=status.HTTP_502_BAD_GATEWAY)
+                while True:
+                    chunk = upstream_file.read(chunk_size)
+                    if not chunk:
+                        break
+                    yield chunk
+            finally:
+                close = getattr(upstream_file, "close", None)
+                if close:
+                    try:
+                        close()
+                    except Exception:
+                        pass
+
+        streaming_resp = StreamingHttpResponse(
+            _stream_generator(upstream_resp),
+            status=resp_status,
+            content_type="application/octet-stream",
+        )
+        if resp_headers.get("Content-Length"):
+            streaming_resp["Content-Length"] = resp_headers["Content-Length"]
+        if resp_headers.get("Content-Range"):
+            streaming_resp["Content-Range"] = resp_headers["Content-Range"]
+        streaming_resp["Accept-Ranges"] = resp_headers.get("Accept-Ranges", "bytes")
+        streaming_resp["Cache-Control"] = "no-store"
+        return streaming_resp
 
 
 class UploadInitView(APIView):
@@ -394,18 +338,13 @@ class UploadCompleteView(APIView):
         node = complete_multipart_upload(
             upload_id=upload_id,
             user=request.user,
-            parts=data["parts"],
             wrapped_file_key=data["wrapped_file_key"],
             content_nonce=data["content_nonce"],
             checksum=data.get("checksum", ""),
-            thumbnail_object_key=data.get("thumbnail_object_key", ""),
-            thumbnail_nonce=data.get("thumbnail_nonce", ""),
         )
-        recalculate_user_quota(request.user)
         resp_data = NodeSerializer(node).data
         resp_data["quota"] = UserSerializer(request.user).get_quota(request.user)
         return Response(resp_data, status=status.HTTP_200_OK)
-
 
 
 class UploadAbortView(APIView):
@@ -424,26 +363,19 @@ class UploadPartRelayView(APIView):
         upload = Upload.objects.filter(id=upload_id, user=request.user).first()
         if not upload:
             raise NotFound("Upload session not found.")
-        if upload.status not in [Upload.STATUS_UPLOADING, Upload.STATUS_INITIATED]:
+        if upload.status != Upload.STATUS_UPLOADING:
             return Response({"error": "Upload session is not active."}, status=status.HTTP_400_BAD_REQUEST)
 
         chunk_bytes = request.data if isinstance(request.data, (bytes, bytearray)) else request.body
         if not chunk_bytes:
             return Response({"error": "No chunk data received."}, status=status.HTTP_400_BAD_REQUEST)
 
-        try:
-            etag = relay_upload_part(upload, int(part_number), chunk_bytes)
-            return Response({
-                "status": "success",
-                "part_number": int(part_number),
-                "etag": etag,
-            })
-        except Exception as e:
-            logger.error("Relay upload part %s failed: %s", part_number, e)
-            return Response(
-                {"error": f"Failed to relay chunk {part_number} to upstream storage: {str(e)}"},
-                status=status.HTTP_502_BAD_GATEWAY,
-            )
+        etag = relay_upload_part(upload, int(part_number), bytes(chunk_bytes))
+        return Response({
+            "status": "success",
+            "part_number": int(part_number),
+            "etag": etag,
+        })
 
 
 class QuotaView(APIView):
@@ -482,19 +414,15 @@ class QuotaView(APIView):
 
 class StoragePoolStatusView(APIView):
     """
-    Returns system-wide 1 TB SpaceByte testing storage pool metrics,
-    connection health, user quota summary, and supported billing intervals.
-    Restricted exclusively to Master Admins.
+    Returns system-wide SpaceByte storage pool metrics. Restricted to admins.
     """
     permission_classes = [permissions.IsAuthenticated, permissions.IsAdminUser]
 
     def get(self, request):
         stats = StorageQuota.get_global_pool_stats()
-        from apps.storage.spacebyte import get_spacebyte_client
-        sb_client = get_spacebyte_client()
-        stats["is_connected"] = sb_client.is_configured
+        stats["is_connected"] = get_spacebyte_client().is_configured
         stats["billing_intervals_supported"] = ["monthly", "yearly"]
         stats["user_quota"] = StorageQuotaSerializer(
-            getattr(request.user, "storage_quota", None) or StorageQuota.objects.get_or_create(user=request.user)[0]
+            StorageQuota.objects.get_or_create(user=request.user)[0]
         ).data
         return Response(stats)

@@ -79,8 +79,12 @@ class SpaceByteClient:
         timeout: int = 15,
     ) -> dict:
         if not self.is_configured:
-            logger.info("SpaceByte token not configured; invoking development mock response for %s %s", method, path)
-            return self._mock_response(method, path, data)
+            # Offline mock responses are only for local development and the test suite.
+            # In production a missing token must fail loudly instead of "storing" nothing.
+            if getattr(settings, "DEBUG", False):
+                logger.info("SpaceByte token not configured; using development mock response for %s %s", method, path)
+                return self._mock_response(method, path, data)
+            raise SpaceByteError("Storage provider is not configured (SPACEBYTE_ACCESS_TOKEN is missing).", status_code=503)
 
         url = f"{self.base_url}/{path.lstrip('/')}"
         if params:
@@ -275,7 +279,11 @@ class SpaceByteClient:
             etag = p.get("ETag", p.get("etag"))
             if num is None or not etag:
                 continue
-            normalized.append({"PartNumber": int(num), "ETag": str(etag)})
+            item = {"PartNumber": int(num), "ETag": str(etag)}
+            size = p.get("Size", p.get("size"))
+            if size is not None:
+                item["Size"] = int(size)
+            normalized.append(item)
         return normalized
 
     def abort_multipart_upload(self, upload_id: str, key: str) -> dict:
@@ -342,13 +350,13 @@ class SpaceByteClient:
         """Creates a folder in SpaceByte."""
         return self._request("POST", "folders", {"name": name, "parentId": parent_id})
 
-    def delete_entries(self, entry_ids: list[int] | list[str], delete_forever: bool = False) -> dict:
+    def delete_entries(self, entry_ids: list[int] | list[str], delete_forever: bool = False, timeout: int = 90) -> dict:
         """Move entries to trash or permanently delete (DELETE /file-entries)."""
         payload = {
-            "entryIds": [str(i) for i in entry_ids],
-            "deleteForever": "true" if delete_forever else "false",
+            "entryIds": [int(i) if str(i).isdigit() else str(i) for i in entry_ids],
+            "deleteForever": bool(delete_forever),
         }
-        return self._request("DELETE", "file-entries", payload)
+        return self._request("DELETE", "file-entries", payload, timeout=timeout)
 
     def restore_entries(self, entry_ids: list[int] | list[str]) -> dict:
         """Restore trashed entries (POST /file-entries/restore)."""

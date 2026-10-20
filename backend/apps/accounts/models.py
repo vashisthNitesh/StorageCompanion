@@ -49,6 +49,9 @@ class User(AbstractBaseUser, PermissionsMixin, BaseModel):
     # Master key wrapped with the 24-word recovery phrase
     recovery_wrapped_master_key = models.TextField(blank=True, default="")
     
+    # Google account subject ("sub" claim) once the user has signed in with Google
+    google_sub = models.CharField(max_length=255, null=True, blank=True, unique=True)
+
     # Verification & Security
     email_verified_at = models.DateTimeField(null=True, blank=True)
     mfa_enabled = models.BooleanField(default=False)

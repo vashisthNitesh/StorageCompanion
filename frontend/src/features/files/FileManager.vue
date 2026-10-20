@@ -1,1116 +1,348 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from "vue";
-import { useRouter } from "vue-router";
-
-import { useFilesStore, type FileNode } from "../../stores/files";
-import { useUploadStore } from "../../stores/upload";
-import { useAuthStore } from "../../stores/auth";
-import { useFileDownload } from "./useFileDownload";
-import PreviewModal from "./PreviewModal.vue";
+import { ref, computed, watch, onMounted } from "vue";
 import {
-  Folder,
+  ChevronRight,
   FolderPlus,
+  Upload,
   FolderUp,
-  FileText,
-  FileSpreadsheet,
-  FileVideo,
-  FileAudio,
-  FileImage,
-  FileCode,
-  FileArchive,
-  File,
   LayoutGrid,
   List,
+  RefreshCw,
+  SearchX,
   UploadCloud,
-  MoreVertical,
-  Download,
-  Trash2,
-  Edit2,
-  Lock,
-  Eye,
+  AlertCircle,
   Loader2,
-  ShieldCheck,
-  Sparkles,
-  ArrowUpDown,
-  Search,
-  Plus,
-  FolderInput,
-  History,
+  CreditCard,
 } from "lucide-vue-next";
-import { apiRequest } from "../../lib/api";
+import { useFilesStore, type FileNode } from "../../stores/files";
+import { useAuthStore } from "../../stores/auth";
+import { useUploadStore } from "../../stores/upload";
+import { useToastStore } from "../../stores/toast";
+import { useFilePicker } from "../../composables/useFilePicker";
+import { FILTERS, kindOf, type FilterKey } from "./fileTypes";
+import { useFileDownload } from "./useFileDownload";
+import { formatBytes } from "../../lib/format";
+import FileListView from "./FileListView.vue";
+import FileGridView from "./FileGridView.vue";
+import ItemMenu, { type ItemAction } from "./ItemMenu.vue";
+import NameDialog from "./NameDialog.vue";
+import MoveDialog from "./MoveDialog.vue";
+import VersionsDialog from "./VersionsDialog.vue";
 
-const router = useRouter();
 const filesStore = useFilesStore();
-const uploadStore = useUploadStore();
 const authStore = useAuthStore();
-const { isDownloading, downloadFile, getProgress, getStatusText } = useFileDownload();
+const uploadStore = useUploadStore();
+const toast = useToastStore();
+const picker = useFilePicker();
+const { downloadFile } = useFileDownload();
 
-const isDraggingOver = ref(false);
-const showCreateFolderModal = ref(false);
-const newFolderName = ref("");
-const folderError = ref("");
-const showRenameModal = ref(false);
-const renameTargetNode = ref<FileNode | null>(null);
-const renameInput = ref("");
+const filter = ref<FilterKey>("all");
+const sort = ref<"name" | "-name" | "-updated" | "-size">("name");
+const selectedId = ref<string | null>(null);
+const dragDepth = ref(0);
 
-// Move Modal
-const showMoveModal = ref(false);
-const moveTargetNode = ref<FileNode | null>(null);
-const availableFolders = ref<{ id: string | null; name: string }[]>([]);
-const selectedDestinationId = ref<string | null>(null);
-const isMoving = ref(false);
-const moveError = ref("");
+const menu = ref<{ node: FileNode | null; x: number; y: number }>({ node: null, x: 0, y: 0 });
+const nameDialog = ref<null | { mode: "create" } | { mode: "rename"; node: FileNode }>(null);
+const moveTarget = ref<FileNode | null>(null);
+const versionsTarget = ref<FileNode | null>(null);
+const versionInput = ref<HTMLInputElement | null>(null);
+const versionFor = ref<FileNode | null>(null);
 
-// Version History Modal
-const showVersionsModal = ref(false);
-const versionsTargetNode = ref<FileNode | null>(null);
-const fileVersions = ref<any[]>([]);
-const isLoadingVersions = ref(false);
-const versionsError = ref("");
+const SORTS = [
+  { key: "name", label: "Name (A–Z)" },
+  { key: "-name", label: "Name (Z–A)" },
+  { key: "-updated", label: "Last modified" },
+  { key: "-size", label: "Largest first" },
+] as const;
 
-// In-vault file input refs
-const vaultFileInputRef = ref<HTMLInputElement | null>(null);
-const vaultFolderInputRef = ref<HTMLInputElement | null>(null);
-
-// Filters & Sorting
-const activeFilter = ref<"all" | "folders" | "documents" | "media" | "archives">("all");
-const activeSort = ref<"name_asc" | "name_desc" | "size_desc" | "size_asc">("name_asc");
-
-// Modals
-const previewNode = ref<FileNode | null>(null);
-const isPreviewOpen = ref(false);
-
-// Context menu
-const contextMenu = ref<{ x: number; y: number; node: FileNode | null; visible: boolean }>({
-  x: 0,
-  y: 0,
-  node: null,
-  visible: false,
-});
-
-function formatBytes(bytes: number): string {
-  if (!bytes || bytes === 0) return "0 B";
-  const k = 1024;
-  const sizes = ["B", "KB", "MB", "GB", "TB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
-}
-
-interface FileMeta {
-  label: string;
-  ext: string;
-  category: "doc" | "video" | "audio" | "image" | "archive" | "code" | "sheet" | "file";
-  badgeClass: string;
-  iconBgClass: string;
-  icon: any;
-  typeName: string;
-}
-
-function getFileMeta(name: string): FileMeta {
-  const ext = name?.split(".").pop()?.toLowerCase() || "";
-
-  if (["pdf"].includes(ext)) {
-    return {
-      label: "PDF",
-      ext,
-      category: "doc",
-      badgeClass: "bg-rose-50 text-rose-600 border-rose-200/80",
-      iconBgClass: "bg-rose-50 text-rose-600 border-rose-100",
-      icon: FileText,
-      typeName: "PDF Document",
-    };
-  }
-  if (["docx", "doc", "odt", "rtf"].includes(ext)) {
-    return {
-      label: ext.toUpperCase(),
-      ext,
-      category: "doc",
-      badgeClass: "bg-blue-50 text-blue-600 border-blue-200/80",
-      iconBgClass: "bg-blue-50 text-blue-600 border-blue-100",
-      icon: FileText,
-      typeName: "Word Document",
-    };
-  }
-  if (["xlsx", "xls", "csv", "tsv"].includes(ext)) {
-    return {
-      label: ext.toUpperCase(),
-      ext,
-      category: "sheet",
-      badgeClass: "bg-emerald-50 text-emerald-600 border-emerald-200/80",
-      iconBgClass: "bg-emerald-50 text-emerald-600 border-emerald-100",
-      icon: FileSpreadsheet,
-      typeName: "Spreadsheet",
-    };
-  }
-  if (["mp4", "webm", "mkv", "mov", "avi", "m4v"].includes(ext)) {
-    return {
-      label: "VIDEO",
-      ext,
-      category: "video",
-      badgeClass: "bg-purple-50 text-purple-600 border-purple-200/80",
-      iconBgClass: "bg-purple-50 text-purple-600 border-purple-100",
-      icon: FileVideo,
-      typeName: "Video",
-    };
-  }
-  if (["mp3", "wav", "ogg", "m4a", "flac", "aac"].includes(ext)) {
-    return {
-      label: "AUDIO",
-      ext,
-      category: "audio",
-      badgeClass: "bg-amber-50 text-amber-600 border-amber-200/80",
-      iconBgClass: "bg-amber-50 text-amber-600 border-amber-100",
-      icon: FileAudio,
-      typeName: "Audio",
-    };
-  }
-  if (["png", "jpg", "jpeg", "webp", "gif", "svg", "bmp", "avif"].includes(ext)) {
-    return {
-      label: "IMAGE",
-      ext,
-      category: "image",
-      badgeClass: "bg-teal-50 text-teal-600 border-teal-200/80",
-      iconBgClass: "bg-teal-50 text-teal-600 border-teal-100",
-      icon: FileImage,
-      typeName: "Image",
-    };
-  }
-  if (["zip", "tar", "gz", "7z", "rar", "bz2"].includes(ext)) {
-    return {
-      label: "ZIP",
-      ext,
-      category: "archive",
-      badgeClass: "bg-slate-100 text-slate-700 border-slate-200",
-      iconBgClass: "bg-slate-100 text-slate-600 border-slate-200",
-      icon: FileArchive,
-      typeName: "Archive",
-    };
-  }
-  if (["js", "ts", "py", "html", "css", "json", "vue", "rs", "go", "java", "c", "cpp", "sql", "sh", "yaml", "yml"].includes(ext)) {
-    return {
-      label: "CODE",
-      ext,
-      category: "code",
-      badgeClass: "bg-sky-50 text-sky-600 border-sky-200/80",
-      iconBgClass: "bg-sky-50 text-sky-600 border-sky-100",
-      icon: FileCode,
-      typeName: "Source Code",
-    };
-  }
-  return {
-    label: ext ? ext.toUpperCase() : "FILE",
-    ext,
-    category: "file",
-    badgeClass: "bg-slate-100 text-slate-600 border-slate-200",
-    iconBgClass: "bg-slate-50 text-slate-600 border-slate-200",
-    icon: File,
-    typeName: "Encrypted File",
+function applyFilterAndSort<T extends FileNode>(list: T[]): T[] {
+  const kinds = FILTERS.find((f) => f.key === filter.value)?.kinds || [];
+  const filtered = kinds.length ? list.filter((n) => kinds.includes(kindOf(n))) : [...list];
+  const cmp: Record<typeof sort.value, (a: T, b: T) => number> = {
+    name: (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }),
+    "-name": (a, b) => b.name.localeCompare(a.name, undefined, { numeric: true, sensitivity: "base" }),
+    "-updated": (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
+    "-size": (a, b) => (b.size_bytes || 0) - (a.size_bytes || 0),
   };
+  // Folders always first, like every desktop file manager.
+  return filtered.sort((a, b) => (a.type === b.type ? cmp[sort.value](a, b) : a.type === "folder" ? -1 : 1));
 }
 
-const filteredNodes = computed(() => {
-  let list = [...filesStore.nodes];
+const items = computed(() => applyFilterAndSort(filesStore.nodes));
+const results = computed(() => applyFilterAndSort(filesStore.searchResults));
+const searching = computed(() => filesStore.isSearchActive);
+const visible = computed(() => (searching.value ? results.value : items.value));
+const totalSize = computed(() => items.value.reduce((s, n) => s + (n.type === "file" ? n.size_bytes : 0), 0));
 
-  if (activeFilter.value === "folders") {
-    list = list.filter((n) => n.type === "folder");
-  } else if (activeFilter.value === "documents") {
-    list = list.filter((n) => n.type === "file" && ["doc", "sheet"].includes(getFileMeta(n.name).category));
-  } else if (activeFilter.value === "media") {
-    list = list.filter((n) => n.type === "file" && ["video", "audio", "image"].includes(getFileMeta(n.name).category));
-  } else if (activeFilter.value === "archives") {
-    list = list.filter((n) => n.type === "file" && getFileMeta(n.name).category === "archive");
-  }
+const canUpload = computed(() => authStore.canUpload);
+const noPlan = computed(() => !authStore.user?.subscription?.has_active_subscription);
 
-  if (activeSort.value === "name_asc") {
-    list.sort((a, b) => a.name.localeCompare(b.name));
-  } else if (activeSort.value === "name_desc") {
-    list.sort((a, b) => b.name.localeCompare(a.name));
-  } else if (activeSort.value === "size_desc") {
-    list.sort((a, b) => (b.size_bytes || 0) - (a.size_bytes || 0));
-  } else if (activeSort.value === "size_asc") {
-    list.sort((a, b) => (a.size_bytes || 0) - (b.size_bytes || 0));
-  }
-
-  return list;
-});
-
-const folders = computed(() => filteredNodes.value.filter((n) => n.type === "folder"));
-const files = computed(() => filteredNodes.value.filter((n) => n.type === "file"));
-
-const totalFilesSize = computed(() => {
-  const total = files.value.reduce((acc, f) => acc + (f.size_bytes || 0), 0);
-  return formatBytes(total);
-});
-
-function handleNodeClick(node: FileNode) {
+function open(node: FileNode) {
   if (node.type === "folder") {
-    filesStore.navigateToFolder(node.id, node.name);
+    selectedId.value = null;
+    if (searching.value) void filesStore.openFolderFromSearch(node.id);
+    else void filesStore.openFolder(node.id, node.name);
   } else {
-    previewNode.value = node;
-    isPreviewOpen.value = true;
+    void downloadFile(node);
   }
 }
 
-function openContextMenu(event: MouseEvent, node: FileNode) {
-  event.preventDefault();
-  contextMenu.value = {
-    x: Math.min(event.clientX, window.innerWidth - 220),
-    y: Math.min(event.clientY, window.innerHeight - 240),
-    node,
-    visible: true,
-  };
+function openMenu(node: FileNode, x: number, y: number) {
+  selectedId.value = node.id;
+  menu.value = { node, x, y };
 }
 
-function closeContextMenu() {
-  contextMenu.value.visible = false;
-}
-
-function triggerCreateFolder() {
-  newFolderName.value = "";
-  folderError.value = "";
-  showCreateFolderModal.value = true;
-}
-
-async function submitCreateFolder() {
-  const name = newFolderName.value.trim();
-  if (!name) {
-    folderError.value = "Folder name cannot be blank.";
-    return;
-  }
-  try {
-    await filesStore.createFolder(name);
-    showCreateFolderModal.value = false;
-  } catch (err: any) {
-    folderError.value = err.message || "Failed to create folder.";
-  }
-}
-
-async function triggerMove(node: FileNode) {
-  moveTargetNode.value = node;
-  moveError.value = "";
-  selectedDestinationId.value = null;
-  showMoveModal.value = true;
-  closeContextMenu();
-  availableFolders.value = await filesStore.fetchAllFolders(node.id);
-}
-
-async function submitMove() {
-  if (!moveTargetNode.value) return;
-  isMoving.value = true;
-  moveError.value = "";
-  try {
-    await filesStore.moveNode(moveTargetNode.value.id, selectedDestinationId.value);
-    showMoveModal.value = false;
-  } catch (err: any) {
-    moveError.value = err.message || "Failed to move item.";
-  } finally {
-    isMoving.value = false;
-  }
-}
-
-async function triggerVersions(node: FileNode) {
-  versionsTargetNode.value = node;
-  versionsError.value = "";
-  fileVersions.value = [];
-  isLoadingVersions.value = true;
-  showVersionsModal.value = true;
-  closeContextMenu();
-  try {
-    const res = await apiRequest(`/api/v1/nodes/${node.id}/versions`);
-    fileVersions.value = Array.isArray(res) ? res : (res as any).results || [];
-  } catch (err: any) {
-    versionsError.value = err.message || "Failed to load version history.";
-  } finally {
-    isLoadingVersions.value = false;
-  }
-}
-
-function triggerRename(node: FileNode) {
-  renameTargetNode.value = node;
-  renameInput.value = node.name;
-  showRenameModal.value = true;
-  closeContextMenu();
-}
-
-async function submitRename() {
-  if (renameTargetNode.value && renameInput.value.trim()) {
-    await filesStore.renameNode(renameTargetNode.value.id, renameInput.value.trim());
-    showRenameModal.value = false;
-  }
-}
-
-async function triggerTrash(node: FileNode) {
-  await filesStore.trashNode(node.id);
-  closeContextMenu();
-}
-
-function triggerVaultFileUpload() {
-  if (!authStore.hasActiveSubscription) {
-    router.push({ path: "/app/billing", query: { gate: "required" } });
-    return;
-  }
-  vaultFileInputRef.value?.click();
-}
-
-function triggerVaultFolderUpload() {
-  if (!authStore.hasActiveSubscription) {
-    router.push({ path: "/app/billing", query: { gate: "required" } });
-    return;
-  }
-  vaultFolderInputRef.value?.click();
-}
-
-async function uploadFilesPreservingFolders(fileList: FileList | File[], rootParentId: string | null) {
-  const files = Array.from(fileList as File[]);
-  const folderIdByPath = new Map<string, string>();
-
-  async function ensureFolderPath(relDir: string): Promise<string | null> {
-    const parts = relDir.split("/").filter(Boolean);
-    if (parts.length === 0) return rootParentId;
-    let parentId: string | null = rootParentId;
-    let acc = "";
-    for (const part of parts) {
-      acc = acc ? `${acc}/${part}` : part;
-      if (folderIdByPath.has(acc)) {
-        parentId = folderIdByPath.get(acc)!;
-        continue;
+async function onMenu(action: ItemAction) {
+  const node = menu.value.node;
+  menu.value = { node: null, x: 0, y: 0 };
+  if (!node) return;
+  switch (action) {
+    case "open":
+    case "download":
+      return open(node);
+    case "rename":
+      nameDialog.value = { mode: "rename", node };
+      return;
+    case "move":
+      moveTarget.value = node;
+      return;
+    case "versions":
+      versionsTarget.value = node;
+      return;
+    case "new-version":
+      if (!canUpload.value) {
+        toast.info("Choose a plan to upload files.");
+        return;
       }
-      const created = await filesStore.createFolder(part, parentId);
-      folderIdByPath.set(acc, created.id);
-      parentId = created.id;
-    }
-    return parentId;
-  }
-
-  for (const file of files) {
-    const rel = (file as File & { webkitRelativePath?: string }).webkitRelativePath || "";
-    let parentId = rootParentId;
-    if (rel && rel.includes("/")) {
-      const dir = rel.split("/").slice(0, -1).join("/");
-      parentId = await ensureFolderPath(dir);
-    }
-    uploadStore.uploadFile(file, parentId);
+      versionFor.value = node;
+      versionInput.value?.click();
+      return;
+    case "trash":
+      try {
+        await filesStore.trashNode(node.id);
+        toast.success(`“${node.name}” moved to trash.`);
+      } catch (err: any) {
+        toast.error(err.message || "Couldn't move to trash.");
+      }
   }
 }
 
-function handleVaultFileSelect(event: Event) {
-  const target = event.target as HTMLInputElement;
-  if (target.files) {
-    void uploadFilesPreservingFolders(target.files, filesStore.currentParentId);
-    target.value = "";
+async function submitName(name: string) {
+  const dialog = nameDialog.value;
+  if (!dialog) return;
+  if (dialog.mode === "create") {
+    await filesStore.createFolder(name);
+    toast.success(`Folder “${name}” created.`);
+  } else {
+    await filesStore.renameNode(dialog.node.id, name);
   }
 }
 
-function onDragOver(e: DragEvent) {
-  e.preventDefault();
-  isDraggingOver.value = true;
-}
-
-function onDragLeave(e: DragEvent) {
-  // Only dismiss if leaving the container boundaries
-  if (e.currentTarget === e.target) {
-    isDraggingOver.value = false;
+function onVersionPicked(e: Event) {
+  const input = e.target as HTMLInputElement;
+  const file = input.files?.[0];
+  if (file && versionFor.value) {
+    uploadStore.uploadNewVersion(file, versionFor.value);
+    toast.info(`Uploading a new version of “${versionFor.value.name}”.`);
   }
+  input.value = "";
+  versionFor.value = null;
 }
 
 function onDrop(e: DragEvent) {
-  e.preventDefault();
-  isDraggingOver.value = false;
-  if (e.dataTransfer?.files?.length) {
-    void uploadFilesPreservingFolders(e.dataTransfer.files, filesStore.currentParentId);
+  dragDepth.value = 0;
+  const files = e.dataTransfer?.files;
+  if (!files?.length) return;
+  if (!canUpload.value) {
+    toast.info("Choose a plan to start uploading files.");
+    return;
   }
+  void uploadStore.uploadFiles(files, filesStore.currentParentId);
 }
 
-function handleKeydown(e: KeyboardEvent) {
-  if (e.key === "Escape") {
-    closeContextMenu();
-    isPreviewOpen.value = false;
-    showCreateFolderModal.value = false;
-    showRenameModal.value = false;
-    showMoveModal.value = false;
-    showVersionsModal.value = false;
-  }
+function onDragEnter(e: DragEvent) {
+  if (e.dataTransfer?.types.includes("Files")) dragDepth.value++;
 }
 
-onMounted(() => {
-  window.addEventListener("click", closeContextMenu);
-  window.addEventListener("keydown", handleKeydown);
-  if (authStore.masterKey) {
-    filesStore.fetchNodes();
-  }
-});
+function load() {
+  if (authStore.masterKey) void filesStore.fetchNodes(filesStore.currentParentId);
+}
 
-watch(
-  () => authStore.masterKey,
-  (newKey) => {
-    if (newKey) {
-      filesStore.fetchNodes();
-    }
-  }
-);
-
-
-onUnmounted(() => {
-  window.removeEventListener("click", closeContextMenu);
-  window.removeEventListener("keydown", handleKeydown);
-});
+onMounted(load);
+watch(() => authStore.masterKey, (key) => key && load());
+watch(() => filesStore.currentParentId, () => (selectedId.value = null));
 </script>
 
 <template>
   <div
-    class="h-full flex flex-col space-y-5 relative text-slate-900"
-    @dragover="onDragOver"
-    @dragleave="onDragLeave"
-    @drop="onDrop"
+    class="relative min-h-[60vh]"
+    @dragenter.prevent="onDragEnter"
+    @dragover.prevent
+    @dragleave="dragDepth = Math.max(0, dragDepth - 1)"
+    @drop.prevent="onDrop"
   >
-    <!-- Hidden In-Vault Upload Inputs -->
-    <input ref="vaultFileInputRef" type="file" multiple class="hidden" @change="handleVaultFileSelect" />
-    <input ref="vaultFolderInputRef" type="file" webkitdirectory directory class="hidden" @change="handleVaultFileSelect" />
+    <input ref="versionInput" type="file" class="hidden" @change="onVersionPicked" />
 
-    <!-- Full Drag & Drop Overlay -->
-    <div
-      v-if="isDraggingOver"
-      class="fixed inset-0 z-50 bg-blue-600/10 backdrop-blur-sm border-4 border-dashed border-blue-500 rounded-3xl flex items-center justify-center pointer-events-none transition-all"
-    >
-      <div class="p-8 rounded-3xl bg-white/95 border border-blue-200 text-center space-y-3 shadow-2xl scale-105 transition-transform">
-        <div class="w-16 h-16 rounded-2xl bg-blue-50 border border-blue-100 flex items-center justify-center mx-auto text-blue-600">
-          <UploadCloud class="w-8 h-8 animate-bounce" />
-        </div>
-        <div class="text-base font-bold text-slate-900">Drop files anywhere to encrypt & upload</div>
-        <div class="flex items-center justify-center space-x-2 text-xs text-slate-500">
-          <span class="inline-flex items-center space-x-1 px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 font-mono font-medium">
-            <Lock class="w-3 h-3" />
-            <span>AES-256-GCM Slicing</span>
-          </span>
-          <span>•</span>
-          <span>Zero-Knowledge Vault</span>
-        </div>
-      </div>
-    </div>
-
-    <!-- Vault Action Bar & Primary Controls -->
-    <div class="bg-white rounded-2xl border border-slate-200/90 p-4 shadow-xs flex flex-wrap items-center justify-between gap-3">
-      <!-- Left: In-Vault Upload Actions & Folder Creation -->
-      <div class="flex flex-wrap items-center gap-2.5">
-        <!-- Primary Upload Button -->
-        <button
-          @click="triggerVaultFileUpload"
-          class="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white px-4 py-2 rounded-xl text-xs font-semibold shadow-sm shadow-blue-500/20 hover:shadow-md hover:shadow-blue-500/25 active:scale-95 transition-all flex items-center space-x-2"
-        >
-          <UploadCloud class="w-4 h-4" />
-          <span>Upload Files</span>
-        </button>
-
-        <!-- Upload Folder Button -->
-        <button
-          @click="triggerVaultFolderUpload"
-          class="btn-secondary px-3.5 py-2 rounded-xl text-xs font-semibold text-slate-700 hover:text-slate-900 flex items-center space-x-1.5 shadow-2xs hover:bg-slate-100 transition-colors"
-          title="Upload entire folder directory"
-        >
-          <FolderUp class="w-4 h-4 text-indigo-600" />
-          <span class="hidden sm:inline">Upload Folder</span>
-        </button>
-
-        <!-- New Folder Button -->
-        <button
-          @click="triggerCreateFolder"
-          class="btn-secondary px-3.5 py-2 rounded-xl text-xs font-semibold text-slate-700 hover:text-slate-900 flex items-center space-x-1.5 shadow-2xs hover:bg-slate-100 transition-colors"
-        >
-          <FolderPlus class="w-4 h-4 text-blue-600" />
-          <span>New Folder</span>
-        </button>
-      </div>
-
-      <!-- Right: Category Filters, Sort, and View Mode Toggle -->
-      <div class="flex items-center gap-2.5">
-        <!-- Category Filter Pills -->
-        <div class="hidden md:flex items-center p-0.5 rounded-xl bg-slate-100 border border-slate-200 text-xs font-medium text-slate-600">
-          <button
-            @click="activeFilter = 'all'"
-            class="px-2.5 py-1 rounded-lg transition-all"
-            :class="activeFilter === 'all' ? 'bg-white text-slate-900 shadow-xs font-semibold' : 'hover:text-slate-900'"
-          >
-            All ({{ filesStore.nodes.length }})
-          </button>
-          <button
-            @click="activeFilter = 'documents'"
-            class="px-2.5 py-1 rounded-lg transition-all"
-            :class="activeFilter === 'documents' ? 'bg-white text-slate-900 shadow-xs font-semibold' : 'hover:text-slate-900'"
-          >
-            Documents
-          </button>
-          <button
-            @click="activeFilter = 'media'"
-            class="px-2.5 py-1 rounded-lg transition-all"
-            :class="activeFilter === 'media' ? 'bg-white text-slate-900 shadow-xs font-semibold' : 'hover:text-slate-900'"
-          >
-            Media
-          </button>
-        </div>
-
-        <!-- Sort Select -->
-        <div class="relative">
-          <select
-            v-model="activeSort"
-            class="appearance-none bg-slate-100/80 hover:bg-slate-100 border border-slate-200 text-xs font-medium text-slate-700 py-1.5 pl-2.5 pr-7 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-100 transition-colors cursor-pointer"
-          >
-            <option value="name_asc">Name (A–Z)</option>
-            <option value="name_desc">Name (Z–A)</option>
-            <option value="size_desc">Size (Largest)</option>
-            <option value="size_asc">Size (Smallest)</option>
-          </select>
-          <ArrowUpDown class="w-3 h-3 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-        </div>
-
-        <!-- Grid / List Switcher -->
-        <div class="flex items-center p-0.5 rounded-xl bg-slate-100 border border-slate-200">
-          <button
-            @click="filesStore.viewMode = 'grid'"
-            class="p-1.5 rounded-lg transition-all"
-            :class="filesStore.viewMode === 'grid' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500 hover:text-slate-900'"
-            title="Grid view"
-          >
-            <LayoutGrid class="w-3.5 h-3.5" />
-          </button>
-          <button
-            @click="filesStore.viewMode = 'list'"
-            class="p-1.5 rounded-lg transition-all"
-            :class="filesStore.viewMode === 'list' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500 hover:text-slate-900'"
-            title="List view"
-          >
-            <List class="w-3.5 h-3.5" />
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Quick In-Vault Dropzone Banner (Interactive) -->
-    <div
-      @click="triggerVaultFileUpload"
-      class="bg-gradient-to-r from-blue-50/70 via-indigo-50/40 to-slate-50/60 border border-dashed border-blue-200/90 hover:border-blue-400/90 rounded-2xl p-3.5 px-5 flex items-center justify-between cursor-pointer group shadow-2xs transition-all hover:bg-blue-50/90"
-    >
-      <div class="flex items-center space-x-3.5">
-        <div class="w-10 h-10 rounded-xl bg-white border border-blue-100 flex items-center justify-center text-blue-600 shadow-2xs group-hover:scale-105 group-hover:text-blue-700 transition-all">
-          <UploadCloud class="w-5 h-5" />
-        </div>
-        <div>
-          <div class="text-xs font-bold text-slate-900 flex items-center space-x-2">
-            <span>Drag & drop files or folders here to encrypt & store</span>
-            <span class="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-100/70 text-blue-700 font-mono">
-              <Lock class="w-2.5 h-2.5" />
-              <span>AES-256-GCM</span>
-            </span>
-          </div>
-          <p class="text-[11px] text-slate-500 mt-0.5">
-            Files are sliced into 8MB chunks and encrypted client-side before upload.
-          </p>
-        </div>
-      </div>
-      <button
-        @click.stop="triggerVaultFileUpload"
-        class="hidden sm:inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-white border border-slate-200 text-slate-700 text-xs font-semibold hover:border-blue-300 hover:text-blue-600 shadow-2xs transition-colors"
-      >
-        <Plus class="w-3.5 h-3.5" />
-        <span>Browse Files</span>
-      </button>
-    </div>
-
-    <!-- Loading Skeletons -->
-    <div v-if="filesStore.isLoading" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-      <div v-for="i in 10" :key="i" class="p-4 rounded-2xl bg-white border border-slate-200 animate-pulse space-y-3">
-        <div class="w-10 h-10 rounded-xl bg-slate-100"></div>
-        <div class="h-3 bg-slate-100 rounded w-3/4"></div>
-        <div class="h-2 bg-slate-100 rounded w-1/2"></div>
-      </div>
-    </div>
-
-    <!-- Empty Vault State -->
-    <div
-      v-else-if="filesStore.nodes.length === 0"
-      class="flex-1 flex flex-col items-center justify-center p-12 text-center rounded-3xl border border-dashed border-slate-300 bg-white/80 shadow-2xs space-y-4"
-    >
-      <div class="w-16 h-16 rounded-2xl bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600 shadow-xs">
-        <UploadCloud class="w-8 h-8" />
-      </div>
-      <div class="space-y-1">
-        <h3 class="text-sm font-bold text-slate-900">This vault folder is empty</h3>
-        <p class="text-xs text-slate-500 max-w-sm">
-          Upload files or create a subfolder to get started. All contents are fully encrypted in memory.
-        </p>
-      </div>
-      <div class="flex items-center space-x-2 pt-2">
-        <button
-          @click="triggerVaultFileUpload"
-          class="btn-primary px-4 py-2 rounded-xl text-xs font-semibold flex items-center space-x-1.5 shadow-sm"
-        >
-          <UploadCloud class="w-4 h-4" />
-          <span>Upload Encrypted Files</span>
-        </button>
-        <button
-          @click="triggerCreateFolder"
-          class="btn-secondary px-4 py-2 rounded-xl text-xs font-semibold text-slate-700 shadow-xs"
-        >
-          Create a Folder
-        </button>
-      </div>
-    </div>
-
-    <!-- Main Content Area -->
-    <div v-else class="space-y-6">
-      <!-- 1. Folders Section (if any folders present) -->
-      <div v-if="folders.length > 0" class="space-y-3">
-        <div class="flex items-center justify-between text-xs font-bold text-slate-700 tracking-tight">
-          <div class="flex items-center space-x-2">
-            <span>Folders</span>
-            <span class="px-2 py-0.5 rounded-full bg-amber-50 border border-amber-200/80 text-amber-700 text-[10px] font-mono">
-              {{ folders.length }}
-            </span>
-          </div>
-        </div>
-
-        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3.5">
-          <div
-            v-for="folder in folders"
-            :key="folder.id"
-            @click="handleNodeClick(folder)"
-            @contextmenu="openContextMenu($event, folder)"
-            class="group p-3.5 rounded-2xl bg-white border border-slate-200/90 hover:border-amber-300 shadow-2xs hover:shadow-md hover:-translate-y-0.5 cursor-pointer flex flex-col justify-between space-y-3 relative select-none transition-all"
-          >
-            <div class="flex items-start justify-between">
-              <div class="w-10 h-10 rounded-xl bg-amber-50 border border-amber-200/80 flex items-center justify-center text-amber-600 shadow-2xs group-hover:scale-105 transition-transform">
-                <Folder class="w-5 h-5 fill-amber-500/25" />
-              </div>
-
-              <!-- Quick action dots -->
-              <button
-                @click.stop="openContextMenu($event, folder)"
-                class="p-1 rounded-lg text-slate-400 hover:text-slate-900 hover:bg-slate-100 opacity-0 group-hover:opacity-100 transition-opacity"
-                title="Folder options"
-              >
-                <MoreVertical class="w-3.5 h-3.5" />
-              </button>
-            </div>
-
-            <div class="min-w-0">
-              <div class="text-xs font-bold text-slate-900 truncate group-hover:text-amber-700 transition-colors" :title="folder.name">
-                {{ folder.name }}
-              </div>
-              <div class="text-[10px] text-slate-400 font-mono mt-0.5">
-                Encrypted Directory
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- 2. Files Section (if any files present) -->
-      <div v-if="files.length > 0" class="space-y-3">
-        <div class="flex items-center justify-between text-xs font-bold text-slate-700 tracking-tight">
-          <div class="flex items-center space-x-2">
-            <span>Files</span>
-            <span class="px-2 py-0.5 rounded-full bg-blue-50 border border-blue-200/80 text-blue-700 text-[10px] font-mono">
-              {{ files.length }}
-            </span>
-            <span class="text-[11px] text-slate-400 font-mono font-normal">
-              • {{ totalFilesSize }} total
-            </span>
-          </div>
-        </div>
-
-        <!-- Files Grid View -->
-        <div v-if="filesStore.viewMode === 'grid'" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3.5">
-          <div
-            v-for="file in files"
-            :key="file.id"
-            @click="handleNodeClick(file)"
-            @contextmenu="openContextMenu($event, file)"
-            class="group p-4 rounded-2xl bg-white border border-slate-200/90 hover:border-blue-300 shadow-2xs hover:shadow-lg hover:-translate-y-1 cursor-pointer flex flex-col justify-between space-y-3.5 relative select-none transition-all duration-200"
-          >
-            <!-- Card Header: Type Badge & Action Buttons -->
-            <div class="flex items-center justify-between">
-              <span
-                class="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold border tracking-wider uppercase"
-                :class="getFileMeta(file.name).badgeClass"
-              >
-                {{ getFileMeta(file.name).label }}
-              </span>
-
-              <div class="flex items-center space-x-1">
-                <!-- Direct Download Button with Tooltip -->
-                <button
-                  @click.stop="downloadFile(file)"
-                  class="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors flex items-center space-x-1"
-                  :title="`Download ${file.name}`"
-                >
-                  <Loader2 v-if="isDownloading(file.id)" class="w-3.5 h-3.5 text-blue-600 animate-spin" />
-                  <Download v-else class="w-3.5 h-3.5" />
-                  <span v-if="isDownloading(file.id)" class="text-[10px] font-mono text-blue-600 font-semibold">{{ getProgress(file.id) }}%</span>
-                </button>
-
-                <!-- More Button -->
-                <button
-                  @click.stop="openContextMenu($event, file)"
-                  class="p-1.5 rounded-lg text-slate-400 hover:text-slate-900 hover:bg-slate-100 transition-colors"
-                  title="File options"
-                >
-                  <MoreVertical class="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </div>
-
-            <!-- Card Center: Rich Visual Icon with Soft Ambient Glow -->
-            <div class="py-2 flex items-center justify-center">
-              <div
-                class="w-14 h-14 rounded-2xl border flex items-center justify-center shadow-2xs group-hover:scale-105 transition-transform"
-                :class="getFileMeta(file.name).iconBgClass"
-              >
-                <component :is="getFileMeta(file.name).icon" class="w-7 h-7" />
-              </div>
-            </div>
-
-            <!-- Card Footer: Name, Monospace Size, and Action Strip -->
-            <div class="space-y-2">
-              <div class="min-w-0">
-                <div
-                  class="text-xs font-bold text-slate-900 line-clamp-2 group-hover:text-blue-600 transition-colors leading-snug"
-                  :title="file.name"
-                >
-                  {{ file.name }}
-                </div>
-                <div class="flex items-center justify-between text-[10px] text-slate-400 font-mono mt-1">
-                  <span>{{ formatBytes(file.size_bytes) }}</span>
-                  <span class="flex items-center space-x-0.5 text-slate-400">
-                    <Lock class="w-2.5 h-2.5" />
-                    <span>E2EE</span>
-                  </span>
-                </div>
-              </div>
-
-              <!-- Quick Action Strip on Card Hover -->
-              <div class="pt-1 border-t border-slate-100 flex items-center justify-between gap-1 opacity-90 group-hover:opacity-100">
-                <button
-                  @click.stop="handleNodeClick(file)"
-                  class="flex-1 py-1 px-2 rounded-lg text-[11px] font-medium text-slate-600 hover:text-blue-600 hover:bg-blue-50 flex items-center justify-center space-x-1 transition-colors"
-                >
-                  <Eye class="w-3 h-3" />
-                  <span>Preview</span>
-                </button>
-                <button
-                  @click.stop="downloadFile(file)"
-                  class="flex-1 py-1 px-2 rounded-lg text-[11px] font-semibold text-blue-600 hover:bg-blue-50 flex items-center justify-center space-x-1 transition-colors"
-                >
-                  <Loader2 v-if="isDownloading(file.id)" class="w-3 h-3 animate-spin" />
-                  <Download v-else class="w-3 h-3" />
-                  <span>{{ isDownloading(file.id) ? (getStatusText(file.id) || 'Downloading...') : 'Download' }}</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Files List / Table View -->
-        <div v-else class="bg-white rounded-2xl border border-slate-200/90 overflow-hidden divide-y divide-slate-100 shadow-2xs">
-          <!-- Table Header -->
-          <div class="grid grid-cols-12 px-4 py-2.5 bg-slate-50/80 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-            <div class="col-span-6 sm:col-span-5">Name</div>
-            <div class="hidden sm:block sm:col-span-3">Type</div>
-            <div class="col-span-3 sm:col-span-2 text-right sm:text-left">Size</div>
-            <div class="col-span-3 sm:col-span-2 text-right">Actions</div>
-          </div>
-
-          <!-- Table Rows -->
-          <div
-            v-for="file in files"
-            :key="file.id"
-            @click="handleNodeClick(file)"
-            @contextmenu="openContextMenu($event, file)"
-            class="grid grid-cols-12 items-center px-4 py-3 hover:bg-blue-50/40 cursor-pointer transition-colors text-xs select-none group"
-          >
-            <!-- Name Column -->
-            <div class="col-span-6 sm:col-span-5 flex items-center space-x-3 min-w-0 pr-2">
-              <div
-                class="w-8 h-8 rounded-lg border flex items-center justify-center shrink-0"
-                :class="getFileMeta(file.name).iconBgClass"
-              >
-                <component :is="getFileMeta(file.name).icon" class="w-4 h-4" />
-              </div>
-              <div class="min-w-0">
-                <span class="font-semibold text-slate-900 truncate block group-hover:text-blue-600 transition-colors" :title="file.name">
-                  {{ file.name }}
-                </span>
-                <span class="text-[10px] text-slate-400 sm:hidden">
-                  {{ formatBytes(file.size_bytes) }}
-                </span>
-              </div>
-            </div>
-
-            <!-- Type Column -->
-            <div class="hidden sm:flex sm:col-span-3 items-center space-x-2">
-              <span
-                class="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold border"
-                :class="getFileMeta(file.name).badgeClass"
-              >
-                {{ getFileMeta(file.name).label }}
-              </span>
-              <span class="text-slate-500 text-xs truncate">
-                {{ getFileMeta(file.name).typeName }}
-              </span>
-            </div>
-
-            <!-- Size Column -->
-            <div class="col-span-3 sm:col-span-2 text-right sm:text-left font-mono text-[11px] text-slate-600">
-              {{ formatBytes(file.size_bytes) }}
-            </div>
-
-            <!-- Actions Column: Direct Download, Preview, Share, More -->
-            <div class="col-span-3 sm:col-span-2 flex items-center justify-end space-x-1">
-              <!-- Direct Download Action -->
-              <button
-                @click.stop="downloadFile(file)"
-                class="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors flex items-center space-x-1"
-                :title="`Download ${file.name}`"
-              >
-                <Loader2 v-if="isDownloading(file.id)" class="w-3.5 h-3.5 text-blue-600 animate-spin" />
-                <Download v-else class="w-3.5 h-3.5" />
-                <span v-if="isDownloading(file.id)" class="text-[10px] font-mono text-blue-600 font-semibold">{{ getProgress(file.id) }}%</span>
-              </button>
-
-              <!-- Preview Action -->
-              <button
-                @click.stop="handleNodeClick(file)"
-                class="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
-                title="Preview"
-              >
-                <Eye class="w-3.5 h-3.5" />
-              </button>
-
-              <!-- More Action -->
-              <button
-                @click.stop="openContextMenu($event, file)"
-                class="p-1.5 rounded-lg text-slate-400 hover:text-slate-900 hover:bg-slate-100 transition-colors"
-                title="More actions"
-              >
-                <MoreVertical class="w-3.5 h-3.5" />
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Context Menu Dropdown -->
-    <div
-      v-if="contextMenu.visible && contextMenu.node"
-      :style="{ top: `${contextMenu.y}px`, left: `${contextMenu.x}px` }"
-      class="fixed z-50 w-52 rounded-2xl p-1.5 shadow-2xl space-y-0.5 text-xs font-medium text-slate-700 border border-slate-200 bg-white"
-    >
-      <!-- Direct Download Option for Files -->
-      <button
-        v-if="contextMenu.node.type === 'file'"
-        @click="downloadFile(contextMenu.node); closeContextMenu()"
-        class="w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl hover:bg-blue-50 text-blue-700 font-semibold transition-colors"
-      >
-        <Download class="w-3.5 h-3.5 text-blue-600" />
-        <span>Download Decrypted File</span>
-      </button>
-
-      <!-- Preview Option for Files -->
-      <button
-        v-if="contextMenu.node.type === 'file'"
-        @click="previewNode = contextMenu.node; isPreviewOpen = true; closeContextMenu()"
-        class="w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl hover:bg-slate-100 text-slate-700 hover:text-slate-900 transition-colors"
-      >
-        <Eye class="w-3.5 h-3.5 text-slate-500" />
-        <span>Preview & Decrypt</span>
-      </button>
-
-      <!-- Versions Option for Files -->
-      <button
-        v-if="contextMenu.node.type === 'file'"
-        @click="triggerVersions(contextMenu.node)"
-        class="w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl hover:bg-slate-100 text-slate-700 hover:text-slate-900 transition-colors"
-      >
-        <History class="w-3.5 h-3.5 text-slate-500" />
-        <span>Version History</span>
-      </button>
-
-      <!-- Move Option -->
-      <button
-        @click="triggerMove(contextMenu.node)"
-        class="w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl hover:bg-slate-100 text-slate-700 hover:text-slate-900 transition-colors"
-      >
-        <FolderInput class="w-3.5 h-3.5 text-slate-500" />
-        <span>Move to...</span>
-      </button>
-
-      <button
-        @click="triggerRename(contextMenu.node)"
-        class="w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl hover:bg-slate-100 text-slate-700 hover:text-slate-900 transition-colors"
-      >
-        <Edit2 class="w-3.5 h-3.5 text-slate-500" />
-        <span>Rename</span>
-      </button>
-
-      <div class="border-t border-slate-100 my-1"></div>
-
-      <button
-        @click="triggerTrash(contextMenu.node)"
-        class="w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl hover:bg-rose-50 text-rose-600 transition-colors"
-      >
-        <Trash2 class="w-3.5 h-3.5" />
-        <span>Move to Trash</span>
-      </button>
-    </div>
-
-    <!-- Create Folder Modal -->
-    <div v-if="showCreateFolderModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs">
-      <div class="bg-white w-full max-w-sm rounded-2xl p-6 border border-slate-200 space-y-4 shadow-xl">
-        <div class="flex items-center space-x-2.5 text-slate-900">
-          <FolderPlus class="w-5 h-5 text-blue-600" />
-          <h3 class="text-sm font-bold">Create New Folder</h3>
-        </div>
-        <div class="space-y-1.5">
-          <input
-            type="text"
-            v-model="newFolderName"
-            @input="folderError = ''"
-            placeholder="Folder name..."
-            class="w-full px-3.5 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all"
-            autofocus
-            @keyup.enter="submitCreateFolder"
-          />
-          <p v-if="folderError" class="text-xs text-rose-600 font-medium">{{ folderError }}</p>
-        </div>
-        <div class="flex justify-end space-x-2 pt-1">
-          <button @click="showCreateFolderModal = false" class="btn-secondary px-3.5 py-1.5 rounded-xl text-xs font-medium">
-            Cancel
-          </button>
-          <button @click="submitCreateFolder" class="btn-primary px-4 py-1.5 rounded-xl text-xs font-semibold">
-            Create Folder
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Move Modal -->
-    <div v-if="showMoveModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs">
-      <div class="bg-white w-full max-w-sm rounded-2xl p-6 border border-slate-200 space-y-4 shadow-xl">
-        <div class="flex items-center space-x-2.5 text-slate-900">
-          <FolderInput class="w-5 h-5 text-blue-600" />
-          <h3 class="text-sm font-bold">Move "{{ moveTargetNode?.name }}"</h3>
-        </div>
-        <p class="text-xs text-slate-500">Choose destination folder to place this item:</p>
-        <div v-if="moveError" class="text-xs text-rose-600 font-medium">{{ moveError }}</div>
-        <div class="max-h-48 overflow-y-auto space-y-1 rounded-xl border border-slate-200 p-2 bg-slate-50">
-          <label
-            v-for="folder in availableFolders"
-            :key="folder.id || 'root'"
-            class="flex items-center space-x-2.5 p-2 rounded-lg cursor-pointer hover:bg-white text-xs text-slate-800 transition-colors"
-          >
-            <input
-              type="radio"
-              :value="folder.id"
-              v-model="selectedDestinationId"
-              class="text-blue-600 focus:ring-blue-500 border-slate-300"
-            />
-            <Folder class="w-4 h-4 text-amber-500 shrink-0" />
-            <span class="truncate font-medium">{{ folder.name }}</span>
-          </label>
-        </div>
-        <div class="flex justify-end space-x-2 pt-1">
-          <button @click="showMoveModal = false" class="btn-secondary px-3.5 py-1.5 rounded-xl text-xs font-medium">
-            Cancel
-          </button>
-          <button @click="submitMove" :disabled="isMoving" class="btn-primary px-4 py-1.5 rounded-xl text-xs font-semibold flex items-center space-x-1.5">
-            <Loader2 v-if="isMoving" class="w-3.5 h-3.5 animate-spin" />
-            <span>Move Here</span>
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Version History Modal -->
-    <div v-if="showVersionsModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs">
-      <div class="bg-white w-full max-w-md rounded-2xl p-6 border border-slate-200 space-y-4 shadow-xl">
-        <div class="flex items-center justify-between">
-          <div class="flex items-center space-x-2.5 text-slate-900">
-            <History class="w-5 h-5 text-blue-600" />
-            <h3 class="text-sm font-bold">Version History</h3>
-          </div>
-          <button @click="showVersionsModal = false" class="text-slate-400 hover:text-slate-600 font-bold p-1">✕</button>
-        </div>
-        <p class="text-xs text-slate-600 truncate font-semibold">
-          {{ versionsTargetNode?.name }}
-        </p>
-        <div v-if="isLoadingVersions" class="text-center py-6 text-xs text-slate-500 flex items-center justify-center space-x-2">
-          <Loader2 class="w-4 h-4 animate-spin text-blue-600" />
-          <span>Loading versions...</span>
-        </div>
-        <div v-else-if="versionsError" class="text-xs text-rose-600 font-medium">
-          {{ versionsError }}
-        </div>
-        <div v-else-if="fileVersions.length === 0" class="text-xs text-slate-500 text-center py-4">
-          No previous versions recorded.
-        </div>
-        <div v-else class="max-h-60 overflow-y-auto divide-y divide-slate-100 rounded-xl border border-slate-200">
-          <div
-            v-for="ver in fileVersions"
-            :key="ver.id"
-            class="p-3 flex items-center justify-between hover:bg-slate-50 transition-colors text-xs"
-          >
-            <div>
-              <div class="font-bold text-slate-900">Version {{ ver.version_no }}</div>
-              <div class="text-[11px] text-slate-500">
-                {{ formatBytes(ver.size_bytes) }} • {{ new Date(ver.created_at).toLocaleDateString() }} {{ new Date(ver.created_at).toLocaleTimeString() }}
-              </div>
-            </div>
+    <!-- Header: breadcrumbs + actions -->
+    <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <nav v-if="!searching" aria-label="Folder path" class="min-w-0">
+        <ol class="flex flex-wrap items-center gap-1 text-lg font-semibold text-slate-900 sm:text-xl">
+          <li v-for="(crumb, i) in filesStore.breadcrumbs" :key="crumb.id ?? 'root'" class="flex min-w-0 items-center gap-1">
+            <ChevronRight v-if="i > 0" class="h-4 w-4 shrink-0 text-slate-400" />
             <button
-              @click="downloadFile(versionsTargetNode!, ver.version_no)"
-              class="px-2.5 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold text-xs flex items-center space-x-1 transition-colors"
+              v-if="i < filesStore.breadcrumbs.length - 1"
+              class="max-w-[12rem] truncate rounded-md px-1.5 py-0.5 text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+              @click="filesStore.navigateToCrumb(i)"
             >
-              <Download class="w-3.5 h-3.5" />
-              <span>Download</span>
+              {{ crumb.name }}
             </button>
+            <span v-else class="max-w-[16rem] truncate px-1.5" aria-current="page">{{ crumb.name }}</span>
+          </li>
+        </ol>
+      </nav>
+      <div v-else class="min-w-0">
+        <h1 class="page-title">Search results</h1>
+        <p class="page-subtitle truncate">
+          <template v-if="filesStore.isSearching">Searching for “{{ filesStore.searchQuery }}”…</template>
+          <template v-else>{{ results.length }} {{ results.length === 1 ? "match" : "matches" }} for “{{ filesStore.searchQuery }}”</template>
+        </p>
+      </div>
+
+      <div v-if="!searching" class="flex flex-wrap items-center gap-2">
+        <button class="btn-secondary" title="Create a new folder here" @click="nameDialog = { mode: 'create' }">
+          <FolderPlus class="h-4 w-4" /> New folder
+        </button>
+        <button class="btn-secondary hidden sm:inline-flex" title="Upload a whole folder" @click="picker.pickFolder()">
+          <FolderUp class="h-4 w-4" /> Upload folder
+        </button>
+        <button class="btn-primary" title="Upload files to this folder" @click="picker.pickFiles()">
+          <Upload class="h-4 w-4" /> Upload
+        </button>
+      </div>
+      <button v-else class="btn-secondary self-start sm:self-auto" @click="filesStore.clearSearch()">Clear search</button>
+    </div>
+
+    <!-- Filter / sort / view -->
+    <div class="mt-5 flex flex-wrap items-center gap-2">
+      <label class="sr-only" for="filter">Show</label>
+      <select id="filter" v-model="filter" class="input h-9 w-auto pr-8">
+        <option v-for="f in FILTERS" :key="f.key" :value="f.key">{{ f.label }}</option>
+      </select>
+      <label class="sr-only" for="sort">Sort by</label>
+      <select id="sort" v-model="sort" class="input h-9 w-auto pr-8">
+        <option v-for="s in SORTS" :key="s.key" :value="s.key">Sort: {{ s.label }}</option>
+      </select>
+      <span v-if="!searching && items.length" class="hidden text-sm text-slate-500 md:inline">
+        {{ items.length }} {{ items.length === 1 ? "item" : "items" }}<template v-if="totalSize"> · {{ formatBytes(totalSize) }}</template>
+      </span>
+      <div class="ml-auto flex items-center gap-1 rounded-lg border border-slate-200 bg-white p-0.5" role="group" aria-label="View">
+        <button
+          class="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-sm"
+          :class="filesStore.viewMode === 'list' ? 'bg-slate-100 text-slate-900' : 'text-slate-500 hover:text-slate-900'"
+          :aria-pressed="filesStore.viewMode === 'list'"
+          title="List view"
+          @click="filesStore.setViewMode('list')"
+        >
+          <List class="h-4 w-4" /><span class="hidden sm:inline">List</span>
+        </button>
+        <button
+          class="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-sm"
+          :class="filesStore.viewMode === 'grid' ? 'bg-slate-100 text-slate-900' : 'text-slate-500 hover:text-slate-900'"
+          :aria-pressed="filesStore.viewMode === 'grid'"
+          title="Grid view"
+          @click="filesStore.setViewMode('grid')"
+        >
+          <LayoutGrid class="h-4 w-4" /><span class="hidden sm:inline">Grid</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="mt-4">
+      <!-- Vault locked / opening -->
+      <div v-if="!authStore.masterKey" class="card card-body flex items-center justify-center gap-2 py-16 text-sm text-slate-500">
+        <Loader2 class="h-4 w-4 animate-spin" /> Waiting for your vault to unlock…
+      </div>
+
+      <!-- Search states -->
+      <template v-else-if="searching">
+        <div v-if="filesStore.isSearching && !results.length" class="card card-body flex items-center justify-center gap-2 py-16 text-sm text-slate-500">
+          <Loader2 class="h-4 w-4 animate-spin" /> Searching all your folders…
+        </div>
+        <div v-else-if="filesStore.searchError" class="card card-body py-12 text-center">
+          <AlertCircle class="mx-auto h-8 w-8 text-rose-500" />
+          <p class="mt-3 text-sm text-slate-700">{{ filesStore.searchError }}</p>
+          <button class="btn-secondary mt-4" @click="filesStore.search(filesStore.searchQuery)"><RefreshCw class="h-4 w-4" /> Try again</button>
+        </div>
+        <div v-else-if="!results.length" class="card card-body py-16 text-center">
+          <SearchX class="mx-auto h-10 w-10 text-slate-300" />
+          <p class="mt-3 font-medium text-slate-900">No matches</p>
+          <p class="mt-1 text-sm text-slate-500">Try a different word or part of the file name.</p>
+        </div>
+        <FileListView v-else :items="results" :selected-id="selectedId" show-location @select="selectedId = $event.id" @open="open" @menu="openMenu" />
+      </template>
+
+      <!-- Folder states -->
+      <div v-else-if="filesStore.isLoading && !items.length" class="card overflow-hidden" aria-busy="true">
+        <div v-for="i in 6" :key="i" class="flex items-center gap-3 border-b border-slate-100 px-4 py-3 last:border-0">
+          <div class="h-9 w-9 animate-pulse rounded-lg bg-slate-100"></div>
+          <div class="h-3 w-1/3 animate-pulse rounded bg-slate-100"></div>
+        </div>
+      </div>
+      <div v-else-if="filesStore.loadError" class="card card-body py-12 text-center">
+        <AlertCircle class="mx-auto h-8 w-8 text-rose-500" />
+        <p class="mt-3 text-sm text-slate-700">{{ filesStore.loadError }}</p>
+        <button class="btn-secondary mt-4" @click="load"><RefreshCw class="h-4 w-4" /> Try again</button>
+      </div>
+      <div v-else-if="!filesStore.nodes.length" class="card card-body flex flex-col items-center py-16 text-center">
+        <span class="flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-50 text-brand-600"><UploadCloud class="h-7 w-7" /></span>
+        <template v-if="noPlan">
+          <p class="mt-4 font-medium text-slate-900">Welcome to SmartSpace</p>
+          <p class="mt-1 max-w-sm text-sm text-slate-500">Choose a plan to start uploading. Your files are encrypted on this device before they leave it.</p>
+          <router-link to="/app/billing" class="btn-primary mt-5"><CreditCard class="h-4 w-4" /> See plans</router-link>
+        </template>
+        <template v-else>
+          <p class="mt-4 font-medium text-slate-900">{{ filesStore.currentParentId ? "This folder is empty" : "No files yet" }}</p>
+          <p class="mt-1 max-w-sm text-sm text-slate-500">Drag files here, or use the buttons below.</p>
+          <div class="mt-5 flex flex-wrap justify-center gap-2">
+            <button class="btn-primary" @click="picker.pickFiles()"><Upload class="h-4 w-4" /> Upload files</button>
+            <button class="btn-secondary" @click="nameDialog = { mode: 'create' }"><FolderPlus class="h-4 w-4" /> New folder</button>
           </div>
-        </div>
-        <div class="flex justify-end pt-1">
-          <button @click="showVersionsModal = false" class="btn-secondary px-4 py-1.5 rounded-xl text-xs font-medium">
-            Close
-          </button>
-        </div>
+        </template>
+      </div>
+      <div v-else-if="!items.length" class="card card-body py-12 text-center text-sm text-slate-500">
+        Nothing here matches “{{ FILTERS.find((f) => f.key === filter)?.label }}”.
+        <button class="ml-1 font-medium text-brand-600 hover:underline" @click="filter = 'all'">Show everything</button>
+      </div>
+      <template v-else>
+        <FileListView v-if="filesStore.viewMode === 'list'" :items="visible" :selected-id="selectedId" @select="selectedId = $event.id" @open="open" @menu="openMenu" />
+        <FileGridView v-else :items="visible" :selected-id="selectedId" @select="selectedId = $event.id" @open="open" @menu="openMenu" />
+        <p class="mt-3 text-xs text-slate-400 hidden sm:block">Tip: double-click a folder to open it or a file to download it. Right-click for more options.</p>
+      </template>
+    </div>
+
+    <!-- Drop overlay -->
+    <div
+      v-if="dragDepth > 0"
+      class="pointer-events-none fixed inset-0 z-40 flex items-center justify-center bg-brand-600/10 p-6 backdrop-blur-[1px]"
+    >
+      <div class="rounded-2xl border-2 border-dashed border-brand-500 bg-white px-10 py-8 text-center shadow-pop">
+        <UploadCloud class="mx-auto h-10 w-10 text-brand-600" />
+        <p class="mt-3 font-medium text-slate-900">Drop to upload to “{{ filesStore.breadcrumbs.at(-1)?.name }}”</p>
+        <p class="mt-1 text-sm text-slate-500">Files are encrypted before they're uploaded.</p>
       </div>
     </div>
 
-    <!-- Rename Modal -->
-    <div v-if="showRenameModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs">
-      <div class="bg-white w-full max-w-sm rounded-2xl p-6 border border-slate-200 space-y-4 shadow-xl">
-        <div class="flex items-center space-x-2.5 text-slate-900">
-          <Edit2 class="w-5 h-5 text-blue-600" />
-          <h3 class="text-sm font-bold">Rename</h3>
-        </div>
-        <input
-          type="text"
-          v-model="renameInput"
-          class="w-full px-3.5 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all"
-          autofocus
-          @keyup.enter="submitRename"
-        />
-        <div class="flex justify-end space-x-2 pt-1">
-          <button @click="showRenameModal = false" class="btn-secondary px-3.5 py-1.5 rounded-xl text-xs font-medium">
-            Cancel
-          </button>
-          <button @click="submitRename" class="btn-primary px-4 py-1.5 rounded-xl text-xs font-semibold">
-            Save Changes
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Preview Modal -->
-    <PreviewModal
-      :is-open="isPreviewOpen"
-      :node="previewNode"
-      @close="isPreviewOpen = false"
+    <ItemMenu :node="menu.node" :x="menu.x" :y="menu.y" @select="onMenu" @close="menu = { node: null, x: 0, y: 0 }" />
+    <NameDialog
+      :open="!!nameDialog"
+      :title="nameDialog?.mode === 'rename' ? 'Rename' : 'New folder'"
+      :label="nameDialog?.mode === 'rename' ? 'New name' : 'Folder name'"
+      :initial="nameDialog?.mode === 'rename' ? nameDialog.node.name : 'Untitled folder'"
+      :confirm-label="nameDialog?.mode === 'rename' ? 'Rename' : 'Create'"
+      :submit="submitName"
+      @close="nameDialog = null"
     />
+    <MoveDialog :open="!!moveTarget" :node="moveTarget" @close="moveTarget = null" @moved="toast.success('Moved.')" />
+    <VersionsDialog :open="!!versionsTarget" :node="versionsTarget" @close="versionsTarget = null" />
   </div>
 </template>

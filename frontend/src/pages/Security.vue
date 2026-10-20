@@ -1,80 +1,65 @@
 <script setup lang="ts">
-import { ShieldCheck, Lock, Key, ArrowLeft, AlertTriangle } from "lucide-vue-next";
+import { KeyRound, Lock, Server, ShieldCheck, Smartphone, AlertTriangle } from "lucide-vue-next";
+import SiteHeader from "./components/SiteHeader.vue";
+import SiteFooter from "./components/SiteFooter.vue";
+
+const points = [
+  {
+    icon: KeyRound,
+    title: "Your key is made on your device",
+    text: "When you sign up with email, your browser creates a random 256-bit key for your vault and locks it with a key derived from your password using Argon2id. We only ever store the locked version.",
+  },
+  {
+    icon: Lock,
+    title: "Files are encrypted before upload",
+    text: "Each file gets its own key and is encrypted with AES-256-GCM in 20 MB pieces before it leaves your device. File and folder names are encrypted too.",
+  },
+  {
+    icon: Server,
+    title: "We store data we can't read",
+    text: "Our servers and our storage provider hold only encrypted bytes. Decryption happens in your browser when you download.",
+  },
+  {
+    icon: ShieldCheck,
+    title: "Protected sign-in",
+    text: "Optional two-step verification with an authenticator app, automatic lock-out after repeated wrong passwords, and the ability to sign out any device instantly.",
+  },
+  {
+    icon: Smartphone,
+    title: "Short-lived sessions",
+    text: "Sign-in tokens last 30 minutes and are renewed through a secure, HTTP-only cookie. Signing out or revoking a device ends its session immediately.",
+  },
+];
 </script>
 
 <template>
-  <div class="min-h-screen bg-[#F8FAFC] text-slate-800 flex flex-col selection:bg-brand-600 selection:text-white">
-    <!-- Top Nav -->
-    <header class="border-b border-slate-200 bg-white/90 sticky top-0 z-30 backdrop-blur-md shadow-xs">
-      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-        <router-link to="/" class="flex items-center space-x-2 text-slate-600 hover:text-slate-900 text-xs font-semibold transition-colors">
-          <ArrowLeft class="w-4 h-4" />
-          <span>Back to smartspacedata.com</span>
-        </router-link>
-        <span class="font-bold text-slate-900 text-sm tracking-tight">SmartSpace Data Security Architecture</span>
-        <router-link to="/register" class="text-xs font-semibold text-brand-600 hover:text-brand-700 transition-colors">
-          Get Started
-        </router-link>
-      </div>
-    </header>
+  <div class="min-h-screen bg-white">
+    <SiteHeader />
+    <main class="mx-auto max-w-3xl px-4 py-16 sm:px-6 sm:py-20">
+      <h1 class="text-4xl font-semibold tracking-tight text-slate-900">How we protect your files</h1>
+      <p class="mt-4 text-lg text-slate-600">SmartSpace is built so your files stay private, even from us.</p>
 
-    <main class="flex-1 max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-16 w-full space-y-12">
-      <div class="text-center space-y-3">
-        <div class="inline-flex items-center space-x-1.5 px-3.5 py-1.5 rounded-full bg-emerald-50 border border-emerald-200 text-xs font-mono font-semibold text-emerald-700">
-          <ShieldCheck class="w-3.5 h-3.5" />
-          <span>DPDP ACT COMPLIANT • ZERO-KNOWLEDGE SPEC</span>
-        </div>
-        <h1 class="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">
-          How Your Data Stays 100% Private
-        </h1>
-        <p class="text-slate-600 text-xs sm:text-sm max-w-2xl mx-auto leading-relaxed">
-          Engineered so no operator, third-party hosting layer, or external entity can inspect your uncompressed RAW files.
-        </p>
-      </div>
-
-      <!-- Warning Box: Zero-Knowledge Trade-offs -->
-      <div class="p-5 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs space-y-2 shadow-xs">
-        <div class="flex items-center space-x-2 font-bold text-amber-800">
-          <AlertTriangle class="w-4 h-4 text-amber-600" />
-          <span>Critical Zero-Knowledge Operational Rule</span>
-        </div>
-        <p class="leading-relaxed">
-          Because SmartSpace Data cannot read your Master Key or your password, <strong>password recovery is cryptographically impossible without your 24-word recovery phrase</strong>. When registering, you must record and securely back up this phrase. If you lose both your password and your recovery phrase, your vault cannot be recovered.
-        </p>
-      </div>
-
-      <!-- Deep Dive Grid -->
-      <div class="space-y-6">
-        <div class="p-6 rounded-2xl bg-white border border-slate-200 shadow-xs hover:shadow-sm transition-all space-y-3">
-          <div class="flex items-center space-x-2.5 text-brand-600">
-            <Lock class="w-5 h-5" />
-            <h2 class="text-base font-bold text-slate-900">1. Client Key Derivation (Argon2id in WebAssembly)</h2>
+      <ul class="mt-12 space-y-8">
+        <li v-for="p in points" :key="p.title" class="flex gap-4">
+          <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-600"><component :is="p.icon" class="h-5 w-5" /></span>
+          <div>
+            <h2 class="font-semibold text-slate-900">{{ p.title }}</h2>
+            <p class="mt-1 leading-relaxed text-slate-600">{{ p.text }}</p>
           </div>
-          <p class="text-xs text-slate-600 leading-relaxed">
-            When you enter your password in your browser, the client runs Argon2id using WebAssembly (64 MB RAM cost, 3 iterations). This derives a 256-bit Key Encryption Key (KEK) that exists strictly in your local device memory. Your plaintext password is never used as a database encryption key.
-          </p>
-        </div>
+        </li>
+      </ul>
 
-        <div class="p-6 rounded-2xl bg-white border border-slate-200 shadow-xs hover:shadow-sm transition-all space-y-3">
-          <div class="flex items-center space-x-2.5 text-brand-600">
-            <Key class="w-5 h-5" />
-            <h2 class="text-base font-bold text-slate-900">2. 100% RAW Uncompressed AES-256-GCM Slicing</h2>
-          </div>
-          <p class="text-xs text-slate-600 leading-relaxed">
-            Every file you upload is assigned a brand new 256-bit random File Key generated via <code>crypto.getRandomValues()</code>. Files are split into chunks in a background Web Worker, encrypted with AES-256-GCM using deterministic nonces, and sent directly to presigned storage with zero compression.
-          </p>
-        </div>
-
-        <div class="p-6 rounded-2xl bg-white border border-slate-200 shadow-xs hover:shadow-sm transition-all space-y-3">
-          <div class="flex items-center space-x-2.5 text-brand-600">
-            <ShieldCheck class="w-5 h-5" />
-            <h2 class="text-base font-bold text-slate-900">3. Encrypted Metadata & Client-Side Search</h2>
-          </div>
-          <p class="text-xs text-slate-600 leading-relaxed">
-            File and folder names are encrypted with your Master Key before saving to the database. The server sees only Base64 ciphertext. To provide instant search without privacy leakage, your browser decrypts names and maintains a local index inside IndexedDB.
-          </p>
-        </div>
+      <div class="mt-12 rounded-2xl border border-amber-200 bg-amber-50 p-6">
+        <h2 class="flex items-center gap-2 font-semibold text-amber-900"><AlertTriangle class="h-5 w-5" /> Two things to know</h2>
+        <ul class="mt-3 list-disc space-y-2 pl-5 text-sm leading-relaxed text-amber-900">
+          <li><strong>We can't reset your password.</strong> In an email account, your password is the only way to unlock your files. If you forget it, they can't be recovered.</li>
+          <li>
+            <strong>Google sign-in trades some privacy for convenience.</strong> Accounts created with Google don't have a separate password, so their vault key is derived on our
+            servers. Files are still encrypted at rest, but for the strongest privacy create your account with email and a password.
+          </li>
+        </ul>
       </div>
     </main>
+    <SiteFooter />
   </div>
 </template>

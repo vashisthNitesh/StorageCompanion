@@ -3,10 +3,10 @@ from apps.billing.models import Plan
 
 
 class Command(BaseCommand):
-    help = "Seed SmartSpace Data 5 subscription plans (Entry, Smart, Value, Super, Mega). No dummy users or dummy files."
+    help = "Seed SmartSpace 5 subscription plans (Entry, Smart, Value, Super, Mega). No dummy users or dummy files."
 
     def handle(self, *args, **options):
-        self.stdout.write("Seeding SmartSpace Data subscription plans...")
+        self.stdout.write("Seeding SmartSpace subscription plans...")
 
         # 1. Entry Pack (25 GB - ₹39/mo)
         Plan.objects.update_or_create(
@@ -51,7 +51,7 @@ class Command(BaseCommand):
                     "100% Original RAW Quality",
                     "Zero Egress Bandwidth Fees",
                     "Client-Side Decrypted Search",
-                    "Password-Protected Share Links",
+                    "File Version History",
                 ],
             },
         )
@@ -72,11 +72,10 @@ class Command(BaseCommand):
                 "is_active": True,
                 "features": [
                     "200 GB Encrypted Storage",
-                    "Hero Pack - Most Popular",
                     "100% Original RAW Quality",
                     "Zero Bandwidth Limits",
                     "Cryptographic File Integrity Verification",
-                    "Fastest Direct S3 Presigned Uploads",
+                    "Resumable Chunked Uploads",
                 ],
             },
         )
@@ -98,7 +97,7 @@ class Command(BaseCommand):
                 "features": [
                     "400 GB Encrypted Storage",
                     "Extended 90-Day File Version History",
-                    "Granular Share Permissions & Expiry Dates",
+                    "Two-Factor Authentication",
                     "High-Throughput Parallel Uploads",
                     "Priority Direct WhatsApp & Email Support",
                 ],
@@ -133,5 +132,5 @@ class Command(BaseCommand):
         Plan.objects.filter(code__in=["personal", "business"]).update(is_active=False)
 
         self.stdout.write(
-            self.style.SUCCESS("✓ All 5 SmartSpace Data plans successfully seeded (no dummy accounts created).")
+            self.style.SUCCESS("✓ All 5 SmartSpace plans successfully seeded (no dummy accounts created).")
         )

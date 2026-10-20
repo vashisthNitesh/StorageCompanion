@@ -1,4 +1,4 @@
-# SpeedCloud Cryptographic Specification (Zero-Knowledge Architecture)
+# SmartSpace Cryptographic Specification
 
 This document formally specifies the end-to-end client-side encryption architecture of SpeedCloud / CloudVault.
 
@@ -59,76 +59,61 @@ User Password (client input)
   `wrapped_file_key = AES_GCM_Encrypt(MasterKey, IV_12bytes, FileKey)`.
 - Stored in `FileVersion.wrapped_file_key`.
 
-### 2.4 Recovery Phrase & Recovery Key
-- At signup, a 24-word BIP-39 mnemonic phrase is generated.
-- The phrase derives a 256-bit Recovery Key via PBKDF2-HMAC-SHA512 (2048 iterations).
-- The Master Key is wrapped with this Recovery Key:
-  `recovery_wrapped_master_key = AES_GCM_Encrypt(RecoveryKey, IV_12bytes, MasterKey)`.
-- If the user forgets their password, providing the 24 words allows un-wrapping the Master Key, entering a new password, and re-wrapping with a new KEK.
+### 2.4 Recovery-wrapped Master Key
+- At signup the browser also wraps the Master Key with a key derived from a random 24-word phrase
+  (`recovery_wrapped_master_key`). The phrase is not shown to the user and there is no recovery
+  flow yet, so a forgotten password currently means the vault cannot be opened.
+
+### 2.5 Google sign-in accounts
+- Accounts created with Google sign-in have no password, so their Master Key is derived on the
+  server: `HMAC-SHA256(VAULT_KEY_SECRET, "storage_companion:vault:{user_id}:{google_sub}")`.
+- The key is returned to the browser after sign-in (and from `GET /auth/vault/google-key` for new
+  tabs). Files are still encrypted at rest, but the operator could derive this key, so these vaults
+  are not zero-knowledge. `VAULT_KEY_SECRET` must never change.
+- Password accounts never receive a key from the server, even if they later sign in with Google.
 
 ---
 
-## 3. Content Encryption & Direct-to-R2 Uploads
+## 3. Content Encryption & Uploads
 
 ### 3.1 Chunking
-- Files are chunked client-side:
-  - Files ≤ 5 GB: **8 MB** chunk size.
-  - Files > 5 GB: **16 MB** chunk size.
+- New uploads use **20 MB** parts (**32 MB** for files over 50 GB). The part size is stored on each
+  `FileVersion` (`part_size`); older rows fall back to 8 MB (16 MB above 5 GB).
 
 ### 3.2 AES-256-GCM Chunk Encryption
-Each chunk $i$ ($i \in [1, N]$) is encrypted independently:
+Each part $i$ ($i \in [1, N]$) is encrypted independently with the File Key:
 $$\text{ChunkNonce}_i = \text{BaseNonce}_{12\text{ bytes}} \oplus \text{BigEndian}(i)$$
-- **Nonce Invariant**: A nonce is **never** reused across chunks under the same File Key.
-- Chunk bytes are encrypted in a dedicated Web Worker (`encrypt.worker.ts`) using the Web Cryptography API (`SubtleCrypto.encrypt`).
+- A nonce is never reused under the same File Key. Every encrypted part is exactly
+  `plaintext + 16` bytes (GCM tag).
 
-### 3.3 Zero App Server Transit
-- The encrypted chunks are uploaded directly from browser to Cloudflare R2 / S3 via presigned PUT URLs.
-- The Gunicorn/Django backend and Nginx reverse proxy never receive or process file bytes.
+### 3.3 Upload relay
+- The browser sends each encrypted part to `POST /api/v1/uploads/{id}/parts/{n}`; the server
+  forwards it to SpaceByte with a presigned URL that never leaves the server.
+- The server only ever sees ciphertext. It checks that every part has exactly the size implied by
+  the declared file size, so the quota charged always equals the bytes stored.
 
 ---
 
 ## 4. Metadata & Name Encryption
 
 - File and folder names are encrypted in the browser using AES-256-GCM with the Master Key.
-- Database records only contain `encrypted_name` (ciphertext base64) and `name_nonce` (12 bytes base64).
+- Database records only contain `encrypted_name` (ciphertext base64) and `name_nonce`.
 - The database knows only:
   - Node hierarchy (`id`, `parent_id`, `type`)
   - Timestamps (`created_at`, `updated_at`, `trashed_at`)
-  - Encrypted file sizes in bytes
+  - File sizes in bytes
 
 ---
 
-## 5. Sharing Cryptography
-
-### 5.1 Public Share Links
-- The client generates a random 256-bit `LinkKey`.
-- The `FileKey` is encrypted with the `LinkKey`:
-  `wrapped_key = AES_GCM_Encrypt(LinkKey, IV, FileKey)`.
-- The URL issued is formatted as:
-  `https://speedcloud.app/s/<token>#<LinkKeyBase64Url>`
-- **Crucial Security Property**: Everything after the `#` fragment is **never** sent to the server in HTTP requests (RFC 3986 §3.5). The server hosts the encrypted payload and token, but cannot decrypt without the fragment key.
-- Optional Password Protection: Password hashed client-side or checked on server; unlocks access to the encrypted blob only after authentication.
-
-### 5.2 User-to-User Sharing
-- Each user possesses an X25519 keypair.
-- When User A shares with User B:
-  1. User A fetches User B's public key from `/api/v1/users/{email}/public-key`.
-  2. User A performs Diffie-Hellman key exchange ($X25519(sk_A, pk_B)$) to derive a shared secret.
-  3. User A wraps the `FileKey` using HKDF + AES-256-GCM with the shared secret.
-  4. User B uses their private key ($X25519(sk_B, pk_A)$) to unwrap the `FileKey`.
-
----
-
-## 6. What an Attacker with Full Database Access Can and Cannot Learn
+## 5. What an Attacker with Full Database Access Can and Cannot Learn
 
 | Data Element | Attacker Visibility |
 |---|---|
 | User email & subscription tier | **Visible** |
 | Password | **Protected** (Argon2id server-side hash) |
-| Master Key | **Unreadable** (Wrapped with client KEK) |
-| Recovery Key | **Unreadable** (Held offline by user) |
+| Master Key (password accounts) | **Unreadable** (wrapped with client KEK) |
+| Master Key (Google accounts) | **Derivable** with `VAULT_KEY_SECRET` (not stored in the database) |
 | File Contents | **Unreadable** (AES-256-GCM ciphertext) |
 | File & Folder Names | **Unreadable** (AES-256-GCM ciphertext) |
 | Number of files & folder structure | Visible (Node parent/child links) |
 | File sizes & timestamps | Visible |
-| Share link access counts | Visible |

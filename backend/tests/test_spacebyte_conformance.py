@@ -1,6 +1,5 @@
 """SpaceByte OpenAPI conformance + large-file/purge behaviour (mock client, no network)."""
 from datetime import timedelta
-from unittest import mock
 
 import pytest
 from django.utils import timezone
@@ -10,6 +9,7 @@ from apps.storage.models import FileVersion, Node, Upload
 from apps.storage.services import (
     complete_multipart_upload,
     init_multipart_upload,
+    relay_upload_part,
 )
 from apps.storage.spacebyte import SpaceByteClient
 
@@ -62,13 +62,13 @@ def test_create_file_entry_uses_basename_and_string_delete_payload(monkeypatch):
     assert captured["s3/entries"]["data"]["filename"] == "vault_x.bin"
     client.delete_entries([9, 10], delete_forever=True)
     assert captured["file-entries"]["method"] == "DELETE"
-    assert captured["file-entries"]["data"]["entryIds"] == ["9", "10"]
-    assert captured["file-entries"]["data"]["deleteForever"] == "true"
+    assert captured["file-entries"]["data"]["entryIds"] == [9, 10]
+    assert captured["file-entries"]["data"]["deleteForever"] is True
 
 
 @pytest.mark.django_db
 def test_init_upload_uses_20mb_parts_and_persists_part_size(subscribed_user, settings):
-    settings.SPACEBYTE_ACCESS_TOKEN = ""  # force local S3/mock path
+    settings.SPACEBYTE_ACCESS_TOKEN = ""  # offline development mock
     size = 25 * 1024 * 1024  # > 20 MiB → 2 parts
     info = init_multipart_upload(
         subscribed_user,
@@ -78,15 +78,18 @@ def test_init_upload_uses_20mb_parts_and_persists_part_size(subscribed_user, set
     )
     assert info["part_size"] == 20 * 1024 * 1024
     assert info["total_parts"] == 2
+    upload = Upload.objects.get(id=info["upload_session_id"])
+    relay_upload_part(upload, 1, b"\0" * (20 * 1024 * 1024 + 16))
+    relay_upload_part(upload, 2, b"\0" * (5 * 1024 * 1024 + 16))
     node = complete_multipart_upload(
         info["upload_session_id"],
         subscribed_user,
-        parts=[{"part_number": 1, "etag": '"e1"'}, {"part_number": 2, "etag": '"e2"'}],
         wrapped_file_key="wrapped",
         content_nonce="00112233445566778899aabb",
     )
     ver = FileVersion.objects.get(node=node)
     assert ver.part_size == 20 * 1024 * 1024
+    assert node.size_bytes == size
 
 
 @pytest.mark.django_db
@@ -101,6 +104,7 @@ def test_spacebyte_complete_prefers_get_uploaded_parts(subscribed_user, monkeypa
         name_nonce="n",
         expected_size_bytes=100,
         part_size=20 * 1024 * 1024,
+        received_parts={"1": {"etag": "", "size": 116}},
         status=Upload.STATUS_UPLOADING,
         expires_at=timezone.now() + timedelta(hours=1),
     )
@@ -126,7 +130,6 @@ def test_spacebyte_complete_prefers_get_uploaded_parts(subscribed_user, monkeypa
     node = complete_multipart_upload(
         str(upload.id),
         subscribed_user,
-        parts=[{"part_number": 1, "etag": ""}],  # empty client etag — must use listed
         wrapped_file_key="w",
         content_nonce="00",
     )

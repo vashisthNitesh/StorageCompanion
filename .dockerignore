@@ -4,5 +4,10 @@
 *.pyc
 .git
 .agents
+.env
+*.env
 frontend/dist
-.DS_Store
+backend/staticfiles
+**/*.sqlite3
+**/.DS_Store
+**/._*

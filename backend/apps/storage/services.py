@@ -1,32 +1,29 @@
 import logging
 import math
-import urllib.request
 import uuid
 from datetime import timedelta
-import boto3
-from botocore.config import Config
+
+import urllib3
 from django.conf import settings
 from django.db import models, transaction
 from django.utils import timezone
 
-from rest_framework.exceptions import PermissionDenied, NotFound
+from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 
 from apps.common.exceptions import QuotaExceededException, SubscriptionRequiredException, UpstreamStorageError
 from apps.storage.models import Node, FileVersion, Upload, StorageQuota
-from apps.storage.spacebyte import get_spacebyte_client
+from apps.storage.spacebyte import SpaceByteError, get_spacebyte_client
 from apps.audit.models import AuditLog
 
 logger = logging.getLogger(__name__)
 
+# AES-256-GCM appends a 16-byte authentication tag to every encrypted part.
+GCM_TAG_BYTES = 16
 
-def get_s3_client():
-    return boto3.client(
-        "s3",
-        endpoint_url=settings.S3_ENDPOINT_URL,
-        aws_access_key_id=settings.S3_ACCESS_KEY_ID,
-        aws_secret_access_key=settings.S3_SECRET_ACCESS_KEY,
-        region_name=settings.S3_REGION_NAME,
-        config=Config(signature_version="s3v4"),
+
+def upstream_error(message: str) -> UpstreamStorageError:
+    return UpstreamStorageError(
+        detail={"error": "upstream_storage_error", "message": message, "code": "UPSTREAM_STORAGE_ERROR"}
     )
 
 
@@ -41,12 +38,8 @@ def check_storage_pool_capacity(needed_bytes: int):
             bytes_needed=needed_bytes,
             bytes_remaining=stats["remaining_bytes"],
             detail={
-                "error": "spacebyte_pool_limit_exceeded",
-                "message": (
-                    f"System 1 TB testing storage pool capacity reached. "
-                    f"Pool capacity: {stats['total_pool_gb']} GB, Available: {stats['remaining_gb']} GB. "
-                    f"Cannot allocate additional storage on SpaceByte upstream."
-                ),
+                "error": "storage_pool_limit_exceeded",
+                "message": "The service is temporarily out of storage capacity. Please try again later.",
                 "code": "STORAGE_POOL_LIMIT_EXCEEDED",
             },
         )
@@ -55,18 +48,17 @@ def check_storage_pool_capacity(needed_bytes: int):
 def check_quota_available(user, needed_bytes: int):
     """
     Checks that the user has an active subscription, sufficient storage quota,
-    and that the global 1 TB SpaceByte testing pool capacity is not exceeded.
+    that the file fits the plan's maximum file size, and that the global
+    storage pool capacity is not exceeded.
     """
-    # 1. Check system-wide 1 TB SpaceByte pool capacity
     check_storage_pool_capacity(needed_bytes)
 
-    # 2. Check user subscription status
     subscription = getattr(user, "subscription", None)
     if not subscription or not subscription.is_valid:
         raise SubscriptionRequiredException(
             detail={
                 "error": "subscription_required",
-                "message": "An active subscription is required to upload files. Please choose a plan.",
+                "message": "Choose a plan to start uploading files.",
                 "code": "SUBSCRIPTION_REQUIRED",
             }
         )
@@ -75,9 +67,20 @@ def check_quota_available(user, needed_bytes: int):
         raise SubscriptionRequiredException(
             detail={
                 "error": "account_in_grace_period",
-                "message": "Your account is in a grace period. Uploads are disabled until your subscription is renewed.",
+                "message": "Your plan has expired. Renew it to upload new files; existing files can still be downloaded.",
                 "code": "ACCOUNT_IN_GRACE_PERIOD",
             }
+        )
+
+    max_file_size = subscription.plan.max_file_size
+    if max_file_size and needed_bytes > max_file_size:
+        raise QuotaExceededException(
+            bytes_needed=needed_bytes,
+            detail={
+                "error": "file_too_large",
+                "message": f"This file is larger than your plan's {max_file_size // (1024 ** 3)} GB per-file limit.",
+                "code": "FILE_TOO_LARGE",
+            },
         )
 
     quota, _ = StorageQuota.objects.get_or_create(
@@ -97,7 +100,6 @@ def check_quota_available(user, needed_bytes: int):
         )
 
     return quota
-
 
 
 def delete_spacebyte_entries_for_nodes(nodes, delete_forever: bool = False) -> int:
@@ -133,12 +135,17 @@ def restore_spacebyte_entries_for_nodes(nodes) -> int:
         return 0
 
 
+def get_owned_folder(user, folder_id) -> Node:
+    folder = Node.objects.filter(
+        id=folder_id, owner=user, type=Node.TYPE_FOLDER, deleted_at__isnull=True, trashed_at__isnull=True
+    ).first()
+    if not folder:
+        raise NotFound("Folder not found.")
+    return folder
+
+
 def create_folder(user, encrypted_name: str, name_nonce: str, parent_id: str | None = None) -> Node:
-    parent = None
-    if parent_id:
-        parent = Node.objects.filter(id=parent_id, owner=user, type=Node.TYPE_FOLDER, deleted_at__isnull=True).first()
-        if not parent:
-            raise NotFound("Parent folder not found.")
+    parent = get_owned_folder(user, parent_id) if parent_id else None
 
     node = Node.objects.create(
         owner=user,
@@ -159,6 +166,34 @@ def create_folder(user, encrypted_name: str, name_nonce: str, parent_id: str | N
     return node
 
 
+def move_node(node: Node, user, parent_id) -> Node:
+    """Moves a node into another folder, refusing moves into itself or its own subfolders."""
+    if not parent_id:
+        node.parent = None
+        return node
+    parent = get_owned_folder(user, parent_id)
+    if parent.id == node.id:
+        raise ValidationError("A folder cannot be moved into itself.")
+    if node.type == Node.TYPE_FOLDER:
+        descendant_ids = {n.id for n in get_node_descendants(node)}
+        if parent.id in descendant_ids:
+            raise ValidationError("A folder cannot be moved into one of its own subfolders.")
+    node.parent = parent
+    return node
+
+
+def part_count_for(size_bytes: int, part_size: int) -> int:
+    return max(1, math.ceil(size_bytes / part_size))
+
+
+def expected_encrypted_part_size(upload: Upload, part_number: int) -> int:
+    """Exact ciphertext length of a part implied by the declared plaintext file size."""
+    total_parts = part_count_for(upload.expected_size_bytes, upload.part_size)
+    if part_number < total_parts:
+        return upload.part_size + GCM_TAG_BYTES
+    return upload.expected_size_bytes - (total_parts - 1) * upload.part_size + GCM_TAG_BYTES
+
+
 def init_multipart_upload(
     user,
     encrypted_name: str,
@@ -168,97 +203,47 @@ def init_multipart_upload(
     node_id: str | None = None,
 ) -> dict:
     """
-    Initializes a direct-to-R2 multipart upload.
-    Checks quota first and returns presigned PUT URLs for all parts.
+    Opens a SpaceByte multipart upload. The browser sends every encrypted part through
+    the relay endpoint; presigned upstream URLs stay on the server so the stored bytes
+    always match the size that is charged against the quota.
     """
     check_quota_available(user, size_bytes)
 
-    parent = None
-    if parent_id:
-        parent = Node.objects.filter(id=parent_id, owner=user, type=Node.TYPE_FOLDER, deleted_at__isnull=True).first()
-        if not parent:
-            raise NotFound("Parent folder not found.")
+    parent = get_owned_folder(user, parent_id) if parent_id else None
+    if node_id and not Node.objects.filter(id=node_id, owner=user, type=Node.TYPE_FILE, deleted_at__isnull=True).exists():
+        raise NotFound("File not found.")
 
     # SpaceByte docs recommend 20 MB parts. Persist part_size on FileVersion for decrypt.
-    if size_bytes > 50 * 1024 * 1024 * 1024:
-        part_size = 32 * 1024 * 1024
-    else:
-        part_size = 20 * 1024 * 1024
-    num_parts = max(1, math.ceil(size_bytes / part_size))
+    part_size = 32 * 1024 * 1024 if size_bytes > 50 * 1024 * 1024 * 1024 else 20 * 1024 * 1024
+    num_parts = part_count_for(size_bytes, part_size)
 
     sb_client = get_spacebyte_client()
-    spacebyte_upload_id = ""
-    spacebyte_key = ""
-    presigned_urls = []
+    try:
+        sb_init = sb_client.init_multipart_upload(
+            filename=f"vault_{user.id}_{uuid.uuid4().hex[:8]}.bin",
+            mime="application/octet-stream",
+            size=size_bytes + num_parts * GCM_TAG_BYTES,
+            extension="bin",
+            part_count=num_parts,
+        )
+    except SpaceByteError as e:
+        logger.error("SpaceByte init multipart failed: %s", e)
+        raise upstream_error("Storage provider is unavailable. Please try again in a moment.") from e
+
+    presigned_urls = [
+        {"part_number": p.get("partNumber", p.get("part_number", 1)), "url": p["url"]}
+        for p in sb_init.get("presigned_urls", [])
+    ]
     expires_at = timezone.now() + timedelta(hours=24)
-
-    if sb_client.is_configured:
-        try:
-            sb_init = sb_client.init_multipart_upload(
-                filename=f"vault_{user.id}_{uuid.uuid4().hex[:8]}.bin",
-                mime="application/octet-stream",
-                size=size_bytes,
-                extension="bin",
-                part_count=num_parts,
-            )
-            s3_upload_id = sb_init["upload_id"]
-            object_key = sb_init["key"]
-            spacebyte_upload_id = s3_upload_id
-            spacebyte_key = object_key
-            presigned_urls = [
-                {"part_number": p.get("partNumber", p.get("part_number", 1)), "url": p["url"]}
-                for p in sb_init.get("presigned_urls", [])
-            ]
-        except Exception as e:
-            logger.warning("SpaceByte init multipart warning: %s; falling back to local S3 engine.", e)
-            sb_init = None
-    else:
-        sb_init = None
-
-    if not sb_init:
-        object_key = f"vault/{user.id}/{uuid.uuid4()}"
-        bucket = settings.S3_BUCKET_NAME
-
-        s3 = get_s3_client()
-        try:
-            response = s3.create_multipart_upload(
-                Bucket=bucket,
-                Key=object_key,
-                ContentType="application/octet-stream",
-            )
-            s3_upload_id = response["UploadId"]
-        except Exception:
-            s3_upload_id = f"mock-upload-{uuid.uuid4()}"
-
-        presigned_urls = []
-        for part_num in range(1, num_parts + 1):
-            try:
-                url = s3.generate_presigned_url(
-                    ClientMethod="upload_part",
-                    Params={
-                        "Bucket": bucket,
-                        "Key": object_key,
-                        "UploadId": s3_upload_id,
-                        "PartNumber": part_num,
-                    },
-                    ExpiresIn=settings.PRESIGNED_URL_TTL,
-                )
-            except Exception:
-                url = f"{settings.S3_ENDPOINT_URL}/{bucket}/{object_key}?uploadId={s3_upload_id}&partNumber={part_num}"
-
-            presigned_urls.append({
-                "part_number": part_num,
-                "url": url,
-            })
 
     upload = Upload.objects.create(
         user=user,
         parent_id=parent.id if parent else None,
         node_id=node_id,
-        upload_id=s3_upload_id,
-        object_key=object_key,
-        spacebyte_upload_id=spacebyte_upload_id,
-        spacebyte_key=spacebyte_key,
+        upload_id=sb_init["upload_id"],
+        object_key=sb_init["key"],
+        spacebyte_upload_id=sb_init["upload_id"],
+        spacebyte_key=sb_init["key"],
         encrypted_name=encrypted_name,
         name_nonce=name_nonce,
         expected_size_bytes=size_bytes,
@@ -270,121 +255,98 @@ def init_multipart_upload(
 
     return {
         "upload_session_id": str(upload.id),
-        "s3_upload_id": s3_upload_id,
-        "object_key": object_key,
         "part_size": part_size,
         "total_parts": num_parts,
-        "presigned_urls": presigned_urls,
         "expires_at": expires_at.isoformat(),
-        "provider": "spacebyte" if spacebyte_upload_id else "s3",
     }
+
+
+def _verified_parts(upload: Upload) -> list[dict]:
+    """Checks every part was relayed with its exact expected size; returns them in order."""
+    total_parts = part_count_for(upload.expected_size_bytes, upload.part_size)
+    received = upload.received_parts or {}
+    missing = [n for n in range(1, total_parts + 1) if str(n) not in received]
+    if missing:
+        raise ValidationError(f"Upload is incomplete: {len(missing)} part(s) were not received.")
+    parts = []
+    for n in range(1, total_parts + 1):
+        info = received[str(n)]
+        if int(info.get("size", -1)) != expected_encrypted_part_size(upload, n):
+            raise ValidationError(f"Part {n} has an unexpected size. Please retry the upload.")
+        parts.append({"PartNumber": n, "ETag": info.get("etag", "")})
+    return parts
 
 
 @transaction.atomic
 def complete_multipart_upload(
     upload_id: str,
     user,
-    parts: list[dict],
     wrapped_file_key: str,
     content_nonce: str,
     checksum: str = "",
-    thumbnail_object_key: str = "",
-    thumbnail_nonce: str = "",
 ) -> Node:
     """
     Commits multipart upload, creates/updates Node, creates FileVersion, and increments quota atomically.
+    The size recorded is the size of the parts actually received, not a client-reported value.
     """
     upload = Upload.objects.select_for_update().filter(id=upload_id, user=user).first()
     if not upload:
         raise NotFound("Upload session not found.")
     if upload.status == Upload.STATUS_COMPLETED:
         return upload.node
+    if upload.status != Upload.STATUS_UPLOADING:
+        raise ValidationError("Upload session is not active.")
 
-    # Quota check again on completion
-    check_quota_available(user, upload.expected_size_bytes)
+    relayed_parts = _verified_parts(upload)
+    stored_bytes = sum(expected_encrypted_part_size(upload, p["PartNumber"]) for p in relayed_parts)
+    file_size = stored_bytes - len(relayed_parts) * GCM_TAG_BYTES
 
-    # Complete multipart upload in SpaceByte / S3
+    # Quota check again on completion with the verified size
+    check_quota_available(user, file_size)
+
     sb_client = get_spacebyte_client()
-    spacebyte_entry = None
-    if upload.spacebyte_upload_id:
-        try:
-            # Prefer authoritative ETags from SpaceByte (browser CORS often hides ETag on direct PUT).
-            listed = sb_client.get_uploaded_parts(upload.spacebyte_upload_id, upload.spacebyte_key)
-            if listed:
-                sb_parts = sorted(listed, key=lambda x: x["PartNumber"])
-            else:
-                sb_parts = []
-                for p in sorted(parts, key=lambda x: x["part_number"]):
-                    etag = (p.get("etag") or "").strip()
-                    if not etag:
-                        raise UpstreamStorageError(
-                            detail={
-                                "error": "upstream_storage_error",
-                                "message": f"Missing ETag for part {p['part_number']}. Re-upload that part via relay.",
-                                "code": "UPSTREAM_STORAGE_ERROR",
-                            }
-                        )
-                    sb_parts.append({"PartNumber": p["part_number"], "ETag": etag})
-            sb_client.complete_multipart_upload(upload.spacebyte_upload_id, upload.spacebyte_key, sb_parts)
-            # Register FileEntry: client strips key to basename per OpenAPI examples.
-            entry_res = sb_client.create_file_entry(
-                filename=upload.spacebyte_key,
-                client_name=f"vault_{upload.id}.bin",
-                size=upload.expected_size_bytes,
-                client_mime="application/octet-stream",
-                client_extension="bin",
-            )
-            spacebyte_entry = entry_res.get("fileEntry", {})
-        except UpstreamStorageError:
-            raise
-        except Exception as e:
-            # Do NOT create a vault record pointing at data that was never finalized upstream
-            # (that produced files which download as SpaceByte 403).
-            logger.error("SpaceByte complete multipart/entry failed for upload %s: %s", upload.id, e)
-            raise UpstreamStorageError(
-                detail={
-                    "error": "upstream_storage_error",
-                    "message": "Storage provider could not finalize the upload. Please retry.",
-                    "code": "UPSTREAM_STORAGE_ERROR",
-                }
-            ) from e
-        if not spacebyte_entry or not spacebyte_entry.get("hash"):
-            raise UpstreamStorageError(
-                detail={
-                    "error": "upstream_storage_error",
-                    "message": "Storage provider did not register the uploaded file. Please retry.",
-                    "code": "UPSTREAM_STORAGE_ERROR",
-                }
-            )
-    else:
-        s3 = get_s3_client()
-        s3_parts = [{"PartNumber": p["part_number"], "ETag": p.get("etag", f'"{p["part_number"]}"')} for p in sorted(parts, key=lambda x: x["part_number"])]
-        try:
-            s3.complete_multipart_upload(
-                Bucket=settings.S3_BUCKET_NAME,
-                Key=upload.object_key,
-                UploadId=upload.upload_id,
-                MultipartUpload={"Parts": s3_parts},
-            )
-        except Exception:
-            pass  # In local test/mock environments, allow completion
+    try:
+        # Prefer authoritative ETags (and sizes, when reported) from SpaceByte.
+        listed = sb_client.get_uploaded_parts(upload.spacebyte_upload_id, upload.spacebyte_key)
+        if listed:
+            sb_parts = sorted(listed, key=lambda x: x["PartNumber"])
+            if len(sb_parts) != len(relayed_parts):
+                raise upstream_error("Storage provider is missing some parts of this file. Please retry the upload.")
+            for part in sb_parts:
+                if "Size" in part and part["Size"] != expected_encrypted_part_size(upload, part["PartNumber"]):
+                    raise upstream_error("Storage provider reported an unexpected part size. Please retry the upload.")
+        else:
+            sb_parts = relayed_parts
+            if any(not p["ETag"] for p in sb_parts):
+                raise upstream_error("Missing upload confirmation from the storage provider. Please retry the upload.")
+        sb_client.complete_multipart_upload(upload.spacebyte_upload_id, upload.spacebyte_key, sb_parts)
+        entry_res = sb_client.create_file_entry(
+            filename=upload.spacebyte_key,
+            client_name=f"vault_{upload.id}.bin",
+            size=stored_bytes,
+            client_mime="application/octet-stream",
+            client_extension="bin",
+        )
+        spacebyte_entry = entry_res.get("fileEntry", {})
+    except UpstreamStorageError:
+        raise
+    except Exception as e:
+        # Do NOT create a vault record pointing at data that was never finalized upstream.
+        logger.error("SpaceByte complete multipart/entry failed for upload %s: %s", upload.id, e)
+        raise upstream_error("Storage provider could not finalize the upload. Please retry.") from e
+    if not spacebyte_entry or not spacebyte_entry.get("hash"):
+        raise upstream_error("Storage provider did not register the uploaded file. Please retry.")
 
     parent = None
     if upload.parent_id:
-        parent = Node.objects.filter(id=upload.parent_id, owner=user).first()
+        parent = Node.objects.filter(id=upload.parent_id, owner=user, trashed_at__isnull=True).first()
 
-    # Create or update Node
     if upload.node:
+        # New version of an existing file: it keeps its name and location.
         node = upload.node
-        node.size_bytes = upload.expected_size_bytes
-        node.encrypted_name = upload.encrypted_name
-        node.name_nonce = upload.name_nonce
-        if spacebyte_entry:
-            node.spacebyte_entry_id = spacebyte_entry.get("id")
-            node.spacebyte_hash = spacebyte_entry.get("hash", "")
-        if thumbnail_object_key:
-            node.thumbnail_object_key = thumbnail_object_key
-            node.thumbnail_nonce = thumbnail_nonce
+        node.size_bytes = file_size
+        node.spacebyte_entry_id = spacebyte_entry.get("id")
+        node.spacebyte_hash = spacebyte_entry.get("hash", "")
         node.save()
     else:
         node = Node.objects.create(
@@ -393,45 +355,38 @@ def complete_multipart_upload(
             type=Node.TYPE_FILE,
             encrypted_name=upload.encrypted_name,
             name_nonce=upload.name_nonce,
-            size_bytes=upload.expected_size_bytes,
-            spacebyte_entry_id=spacebyte_entry.get("id") if spacebyte_entry else None,
-            spacebyte_hash=spacebyte_entry.get("hash", "") if spacebyte_entry else "",
-            thumbnail_object_key=thumbnail_object_key,
-            thumbnail_nonce=thumbnail_nonce,
+            size_bytes=file_size,
+            spacebyte_entry_id=spacebyte_entry.get("id"),
+            spacebyte_hash=spacebyte_entry.get("hash", ""),
         )
 
-    # Determine version number
     last_version = FileVersion.objects.filter(node=node).order_by("-version_no").first()
     version_no = (last_version.version_no + 1) if last_version else 1
 
-    file_version = FileVersion.objects.create(
+    FileVersion.objects.create(
         node=node,
         version_no=version_no,
         object_key=upload.object_key,
         spacebyte_file_name=upload.spacebyte_key,
-        size_bytes=upload.expected_size_bytes,
+        size_bytes=file_size,
         part_size=upload.part_size,
         wrapped_file_key=wrapped_file_key,
         content_nonce=content_nonce,
         checksum=checksum,
     )
 
-    # Update quota
-    quota, _ = StorageQuota.objects.select_for_update().get_or_create(user=user)
-    quota.bytes_used += upload.expected_size_bytes
-    quota.save(update_fields=["bytes_used"])
-
     upload.status = Upload.STATUS_COMPLETED
     upload.node = node
-    upload.parts = parts
-    upload.save(update_fields=["status", "node", "parts"])
+    upload.save(update_fields=["status", "node"])
+
+    recalculate_user_quota(user)
 
     AuditLog.objects.create(
         user=user,
         action="file.uploaded",
         target_type="node",
         target_id=str(node.id),
-        metadata={"version": version_no, "size_bytes": upload.expected_size_bytes, "upstream": "spacebyte" if upload.spacebyte_upload_id else "s3"},
+        metadata={"version": version_no, "size_bytes": file_size},
     )
 
     return node
@@ -443,164 +398,105 @@ def abort_multipart_upload(upload_id: str, user):
         raise NotFound("Upload session not found.")
 
     if upload.status == Upload.STATUS_UPLOADING:
-        if upload.spacebyte_upload_id:
-            try:
-                sb_client = get_spacebyte_client()
-                sb_client.abort_multipart_upload(upload.spacebyte_upload_id, upload.spacebyte_key)
-            except Exception:
-                pass
-        else:
-            s3 = get_s3_client()
-            try:
-                s3.abort_multipart_upload(
-                    Bucket=settings.S3_BUCKET_NAME,
-                    Key=upload.object_key,
-                    UploadId=upload.upload_id,
-                )
-            except Exception:
-                pass
+        try:
+            get_spacebyte_client().abort_multipart_upload(upload.spacebyte_upload_id, upload.spacebyte_key)
+        except Exception as e:
+            logger.warning("SpaceByte abort failed for upload %s: %s", upload.id, e)
         upload.status = Upload.STATUS_ABORTED
         upload.save(update_fields=["status"])
 
 
-import urllib3
-
 http_pool = urllib3.PoolManager(
     maxsize=10,
-    timeout=urllib3.Timeout(connect=5.0, read=60.0),
-    retries=urllib3.Retry(total=2, backoff_factor=0.5),
+    timeout=urllib3.Timeout(connect=10.0, read=120.0),
+    retries=urllib3.Retry(total=2, backoff_factor=0.5, allowed_methods=None),
 )
+
+
+def _presigned_part_url(upload: Upload, part_number: int) -> str | None:
+    for p in upload.parts if isinstance(upload.parts, list) else []:
+        if isinstance(p, dict) and p.get("part_number") == part_number:
+            return p.get("url")
+    try:
+        sign_res = get_spacebyte_client()._request(
+            "POST",
+            "s3/multipart/batch-sign-part-urls",
+            {"uploadId": upload.spacebyte_upload_id, "key": upload.spacebyte_key, "partNumbers": [part_number]},
+        )
+        urls = sign_res.get("urls", [])
+        if urls and isinstance(urls[0], dict):
+            return urls[0].get("url")
+    except Exception as e:
+        logger.warning("Failed to get SpaceByte presigned part URL: %s", e)
+    return None
 
 
 def relay_upload_part(upload: Upload, part_number: int, chunk_bytes: bytes) -> str:
     """
-    Relays an encrypted chunk directly to SpaceByte / S3 upstream when client direct-upload
-    fails or is blocked by CORS/network policies. Uses connection pooling for high throughput.
+    Validates an encrypted part against the declared file size, sends it to SpaceByte and
+    records its ETag and size on the upload session.
     """
-    presigned_url = None
-    if isinstance(upload.parts, list):
-        for p in upload.parts:
-            if isinstance(p, dict) and p.get("part_number") == part_number:
-                presigned_url = p.get("url")
-                break
+    total_parts = part_count_for(upload.expected_size_bytes, upload.part_size)
+    if part_number < 1 or part_number > total_parts:
+        raise ValidationError(f"Part number must be between 1 and {total_parts}.")
+    expected = expected_encrypted_part_size(upload, part_number)
+    if len(chunk_bytes) != expected:
+        raise ValidationError(f"Part {part_number} must be exactly {expected} bytes (got {len(chunk_bytes)}).")
 
+    presigned_url = _presigned_part_url(upload, part_number)
     if not presigned_url:
-        if upload.spacebyte_upload_id:
-            try:
-                sb_client = get_spacebyte_client()
-                sign_res = sb_client._request(
-                    "POST",
-                    "s3/multipart/batch-sign-part-urls",
-                    {
-                        "uploadId": upload.spacebyte_upload_id,
-                        "key": upload.spacebyte_key,
-                        "partNumbers": [part_number],
-                    },
-                )
-                urls = sign_res.get("urls", [])
-                if urls and isinstance(urls[0], dict):
-                    presigned_url = urls[0].get("url")
-            except Exception as e:
-                logger.warning("Failed to get SpaceByte presigned part URL: %s", e)
-        else:
-            s3 = get_s3_client()
-            try:
-                presigned_url = s3.generate_presigned_url(
-                    ClientMethod="upload_part",
-                    Params={
-                        "Bucket": settings.S3_BUCKET_NAME,
-                        "Key": upload.object_key,
-                        "UploadId": upload.upload_id,
-                        "PartNumber": part_number,
-                    },
-                    ExpiresIn=settings.PRESIGNED_URL_TTL,
-                )
-            except Exception:
-                presigned_url = f"{settings.S3_ENDPOINT_URL}/{settings.S3_BUCKET_NAME}/{upload.object_key}?uploadId={upload.upload_id}&partNumber={part_number}"
+        raise upstream_error(f"Could not prepare storage for part {part_number}. Please retry.")
 
-    if (
-        not presigned_url
-        or presigned_url.startswith("https://mock-s3.local")
-        or ("mock" in presigned_url and "spacebyte" not in presigned_url)
-        or ("localhost" in presigned_url and not settings.DEBUG)
-        or ("127.0.0.1" in presigned_url and not settings.DEBUG)
-    ):
-        return f'"{part_number}"'
-
-    try:
-        resp = http_pool.request(
-            "PUT",
-            presigned_url,
-            body=chunk_bytes,
-            headers={"Content-Type": "application/octet-stream"},
-        )
-        if resp.status in (200, 201, 204):
-            etag = resp.headers.get("ETag") or f'"{part_number}"'
-            return etag.strip()
-        logger.error("Upstream returned HTTP %s for part %s: %s", resp.status, part_number, resp.data[:200] if hasattr(resp, 'data') else '')
-        raise RuntimeError(f"Upstream returned HTTP {resp.status} for part {part_number}")
-    except Exception as e:
-        logger.warning("Failed to relay upload part %s via pool: %s; trying urllib fallback...", part_number, e)
-        # Fallback to standard urllib with 120s timeout
+    is_dev_mock = "mockSign=valid" in presigned_url and settings.DEBUG
+    if is_dev_mock:
+        etag = f'"{part_number}"'
+    else:
         try:
-            req = urllib.request.Request(
+            resp = http_pool.request(
+                "PUT",
                 presigned_url,
-                data=chunk_bytes,
+                body=chunk_bytes,
                 headers={"Content-Type": "application/octet-stream"},
-                method="PUT",
             )
-            with urllib.request.urlopen(req, timeout=120) as fallback_resp:
-                if fallback_resp.status in (200, 201, 204):
-                    etag = fallback_resp.headers.get("ETag") or f'"{part_number}"'
-                    return etag.strip()
-                raise RuntimeError(f"Fallback upstream returned HTTP {fallback_resp.status}")
-        except Exception as fallback_e:
-            logger.error("Relay upload failed for part %s: %s", part_number, fallback_e)
-            raise RuntimeError(f"Relay upload failed for part {part_number}: {fallback_e}")
+        except Exception as e:
+            logger.error("Relay upload failed for part %s: %s", part_number, e)
+            raise upstream_error(f"Could not send part {part_number} to storage. Please retry.") from e
+        if resp.status not in (200, 201, 204):
+            logger.error("Upstream returned HTTP %s for part %s: %s", resp.status, part_number, resp.data[:200])
+            raise upstream_error(f"Storage rejected part {part_number} (HTTP {resp.status}). Please retry.")
+        etag = (resp.headers.get("ETag") or "").strip()
+
+    with transaction.atomic():
+        locked = Upload.objects.select_for_update().get(id=upload.id)
+        received = dict(locked.received_parts or {})
+        received[str(part_number)] = {"etag": etag, "size": len(chunk_bytes)}
+        locked.received_parts = received
+        locked.save(update_fields=["received_parts"])
+    return etag
 
 
 def get_download_info(node: Node, user, version_no: int | None = None) -> dict:
     """
-    Generates a download URL from SpaceByte or presigned S3 URL along with the encrypted File Key, nonce, and part_size.
-    Always provides the authenticated content stream URL as the primary download_url to prevent 401 and CORS errors.
+    Returns the authenticated stream URL for a file together with its wrapped file key,
+    nonce and part size so the browser can decrypt it.
     """
-    if node.owner != user:
+    if node.owner_id != user.id:
         raise PermissionDenied("You do not have permission to access this file.")
     if node.type != Node.TYPE_FILE:
         raise NotFound("Folders cannot be downloaded directly.")
 
     versions = FileVersion.objects.filter(node=node)
-    if version_no:
-        version = versions.filter(version_no=version_no).first()
-    else:
-        version = versions.order_by("-version_no").first()
-
+    version = versions.filter(version_no=version_no).first() if version_no else versions.order_by("-version_no").first()
     if not version:
         raise NotFound("File version not found.")
 
-    if getattr(version, "part_size", None):
+    if version.part_size:
         part_size = version.part_size
     elif version.size_bytes > 5 * 1024 * 1024 * 1024:
         part_size = 16 * 1024 * 1024
     else:
         part_size = 8 * 1024 * 1024
 
-    # For SpaceByte upstream files, direct browser download requires secret Bearer token and is blocked by CORS.
-    # Therefore direct_url is None for SpaceByte, ensuring clean streaming via authenticated backend proxy.
-    if node.spacebyte_hash:
-        direct_download_url = None
-    else:
-        s3 = get_s3_client()
-        try:
-            direct_download_url = s3.generate_presigned_url(
-                ClientMethod="get_object",
-                Params={"Bucket": settings.S3_BUCKET_NAME, "Key": version.object_key},
-                ExpiresIn=settings.PRESIGNED_URL_TTL,
-            )
-        except Exception:
-            direct_download_url = f"{settings.S3_ENDPOINT_URL}/{settings.S3_BUCKET_NAME}/{version.object_key}"
-
-    # Primary download URL routes through authenticated backend streaming proxy
     stream_url = f"/api/v1/nodes/{node.id}/content" + (f"?v={version.version_no}" if version_no else "")
 
     return {
@@ -611,21 +507,23 @@ def get_download_info(node: Node, user, version_no: int | None = None) -> dict:
         "wrapped_file_key": version.wrapped_file_key,
         "content_nonce": version.content_nonce,
         "download_url": stream_url,
-        "direct_url": direct_download_url,
-        "expires_in": settings.PRESIGNED_URL_TTL,
-        "upstream": "spacebyte" if node.spacebyte_hash else "s3",
     }
 
 
 def get_node_descendants(node: Node) -> list[Node]:
     """Return all active descendant nodes (children, grandchildren, etc.)."""
     descendants = []
+    seen = {node.id}
     current_parents = [node.id]
     while current_parents:
-        children = list(Node.objects.filter(parent_id__in=current_parents, deleted_at__isnull=True))
+        children = [
+            c for c in Node.objects.filter(parent_id__in=current_parents, deleted_at__isnull=True)
+            if c.id not in seen
+        ]
         if not children:
             break
         descendants.extend(children)
+        seen.update(c.id for c in children)
         current_parents = [c.id for c in children]
     return descendants
 
@@ -654,4 +552,3 @@ def recalculate_user_quota(user) -> StorageQuota:
 
     quota.save(update_fields=["bytes_used", "bytes_limit"])
     return quota
-

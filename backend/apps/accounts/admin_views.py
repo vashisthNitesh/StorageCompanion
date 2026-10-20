@@ -1,18 +1,16 @@
-import uuid
 from decimal import Decimal
 from datetime import timedelta
 from django.utils import timezone
 from django.db import models
-from django.db.models import Count, Sum
-from django.db.models.functions import TruncHour, TruncDay, TruncMonth
+from django.db.models import Count
 from django.shortcuts import get_object_or_404
 from rest_framework import permissions, status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 
 from apps.accounts.models import User
-from apps.billing.models import Plan, Subscription, Invoice
-from apps.storage.models import StorageQuota, Node, FileVersion
+from apps.billing.models import Plan, Subscription
+from apps.storage.models import StorageQuota, Node
 from apps.audit.models import AuditLog
 
 
@@ -134,13 +132,13 @@ class AdminKPIsView(APIView):
                 slot_end = slot_start + timedelta(hours=1)
                 logins = AuditLog.objects.filter(action__icontains="login", created_at__gte=slot_start, created_at__lt=slot_end).count()
                 uploads = AuditLog.objects.filter(action__icontains="upload", created_at__gte=slot_start, created_at__lt=slot_end).count()
-                shares = AuditLog.objects.filter(action__icontains="share", created_at__gte=slot_start, created_at__lt=slot_end).count()
+                downloads = AuditLog.objects.filter(action="file.downloaded", created_at__gte=slot_start, created_at__lt=slot_end).count()
                 trend_points.append({
                     "label": slot_start.strftime("%H:00"),
                     "uploads": uploads,
                     "logins": logins,
-                    "shares": shares,
-                    "total": uploads + logins + shares,
+                    "downloads": downloads,
+                    "total": uploads + logins + downloads,
                 })
         elif period == "weekly":
             for d in range(7):
@@ -149,13 +147,13 @@ class AdminKPIsView(APIView):
                 slot_end = slot_start + timedelta(days=1)
                 logins = AuditLog.objects.filter(action__icontains="login", created_at__gte=slot_start, created_at__lt=slot_end).count()
                 uploads = AuditLog.objects.filter(action__icontains="upload", created_at__gte=slot_start, created_at__lt=slot_end).count()
-                shares = AuditLog.objects.filter(action__icontains="share", created_at__gte=slot_start, created_at__lt=slot_end).count()
+                downloads = AuditLog.objects.filter(action="file.downloaded", created_at__gte=slot_start, created_at__lt=slot_end).count()
                 trend_points.append({
                     "label": slot_start.strftime("%a"),
                     "uploads": uploads,
                     "logins": logins,
-                    "shares": shares,
-                    "total": uploads + logins + shares,
+                    "downloads": downloads,
+                    "total": uploads + logins + downloads,
                 })
         elif period == "monthly":
             for d in range(30):
@@ -164,13 +162,13 @@ class AdminKPIsView(APIView):
                 slot_end = slot_start + timedelta(days=1)
                 logins = AuditLog.objects.filter(action__icontains="login", created_at__gte=slot_start, created_at__lt=slot_end).count()
                 uploads = AuditLog.objects.filter(action__icontains="upload", created_at__gte=slot_start, created_at__lt=slot_end).count()
-                shares = AuditLog.objects.filter(action__icontains="share", created_at__gte=slot_start, created_at__lt=slot_end).count()
+                downloads = AuditLog.objects.filter(action="file.downloaded", created_at__gte=slot_start, created_at__lt=slot_end).count()
                 trend_points.append({
                     "label": slot_start.strftime("%d %b"),
                     "uploads": uploads,
                     "logins": logins,
-                    "shares": shares,
-                    "total": uploads + logins + shares,
+                    "downloads": downloads,
+                    "total": uploads + logins + downloads,
                 })
         elif period == "yearly":
             for m in range(12):
@@ -183,13 +181,13 @@ class AdminKPIsView(APIView):
                     slot_end = slot_start.replace(month=slot_start.month + 1)
                 logins = AuditLog.objects.filter(action__icontains="login", created_at__gte=slot_start, created_at__lt=slot_end).count()
                 uploads = AuditLog.objects.filter(action__icontains="upload", created_at__gte=slot_start, created_at__lt=slot_end).count()
-                shares = AuditLog.objects.filter(action__icontains="share", created_at__gte=slot_start, created_at__lt=slot_end).count()
+                downloads = AuditLog.objects.filter(action="file.downloaded", created_at__gte=slot_start, created_at__lt=slot_end).count()
                 trend_points.append({
                     "label": slot_start.strftime("%b %Y"),
                     "uploads": uploads,
                     "logins": logins,
-                    "shares": shares,
-                    "total": uploads + logins + shares,
+                    "downloads": downloads,
+                    "total": uploads + logins + downloads,
                 })
 
         # 6. Recent Audit Activity Stream
@@ -243,7 +241,10 @@ class AdminPoolStatusView(APIView):
         committed_percent = stats.get("committed_percent", 0.0)
 
         # Evaluate health based on both physical disk consumption and sold quota commitment
-        if percent >= 90 or committed_percent >= 100:
+        if not sb_client.is_configured:
+            pool_health = "critical"
+            health_message = "SpaceByte is not configured (SPACEBYTE_ACCESS_TOKEN is missing), so uploads and downloads will fail."
+        elif percent >= 90 or committed_percent >= 100:
             pool_health = "critical"
             if percent >= 90:
                 health_message = "Storage pool is over 90% physical capacity! Urgent upstream expansion required."
@@ -257,14 +258,7 @@ class AdminPoolStatusView(APIView):
                 health_message = f"Storage pool committed quota is at {committed_percent}%. Consider purchasing additional capacity."
         else:
             pool_health = "optimal"
-            health_message = "Upstream SpaceByte pool operating smoothly within safe testing parameters."
-
-        max_load = max(percent, committed_percent)
-        expansion_tiers = [
-            {"label": "+1 TB Upstream Expansion", "size_gb": 1000, "estimated_price": "₹4,490/yr", "recommended": max_load > 70},
-            {"label": "+5 TB Studio Cluster Expansion", "size_gb": 5000, "estimated_price": "₹19,990/yr", "recommended": max_load > 85},
-            {"label": "+10 TB Enterprise Scale Expansion", "size_gb": 10000, "estimated_price": "₹34,990/yr", "recommended": False},
-        ]
+            health_message = "Storage pool is healthy."
 
         return Response({
             **stats,
@@ -272,7 +266,6 @@ class AdminPoolStatusView(APIView):
             "base_url": sb_client.base_url,
             "pool_health": pool_health,
             "health_message": health_message,
-            "expansion_tiers": expansion_tiers,
         })
 
 
@@ -559,9 +552,14 @@ class AdminUserSubscriptionValidityView(APIView):
 
         # 3. Set exact expiry date
         elif action == "set_date" and expiry_date_str:
-            from dateutil.parser import parse as parse_date
+            from django.utils.dateparse import parse_date, parse_datetime
             try:
-                parsed_dt = parse_date(expiry_date_str)
+                parsed_dt = parse_datetime(expiry_date_str)
+                if parsed_dt is None:
+                    parsed_day = parse_date(expiry_date_str)
+                    if parsed_day is None:
+                        raise ValueError("expected YYYY-MM-DD or YYYY-MM-DDTHH:MM")
+                    parsed_dt = timezone.datetime.combine(parsed_day, timezone.datetime.max.time())
                 if timezone.is_naive(parsed_dt):
                     parsed_dt = timezone.make_aware(parsed_dt)
                 sub.current_period_end = parsed_dt
@@ -747,7 +745,7 @@ class AdminFilesListView(APIView):
                 "updated_at": n.updated_at.isoformat() if n.updated_at else None,
                 "trashed_at": n.trashed_at.isoformat() if n.trashed_at else None,
                 "is_trashed": bool(n.trashed_at),
-                "upstream": "SpaceByte" if n.spacebyte_hash else "S3 Storage",
+                "upstream": "SpaceByte" if n.spacebyte_hash else "Unavailable",
                 "spacebyte_hash": n.spacebyte_hash or None,
                 "versions_count": versions_count,
             })

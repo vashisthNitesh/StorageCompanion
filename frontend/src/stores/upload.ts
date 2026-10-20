@@ -5,480 +5,254 @@ import { useAuthStore } from "./auth";
 import { useFilesStore } from "./files";
 import { generateFileKey, generateRandomBytes, wrapKey } from "../lib/crypto/keys";
 import { encryptName } from "../lib/crypto/names";
-import {
-  deriveChunkNonce,
-  encryptChunk,
-  importFileKey,
-  encryptChunkWithKey,
-} from "../lib/crypto/content";
-import {
-  uint8ArrayToBase64,
-  uint8ArrayToHex,
-  hexToUint8Array,
-} from "../lib/crypto/kdf";
-import { saveUploadState, removeUploadState, type StoredUpload } from "../lib/db";
+import { importFileKey, encryptChunkWithKey } from "../lib/crypto/content";
+import { uint8ArrayToHex } from "../lib/crypto/kdf";
 
-function uploadPartWithProgress(
-  url: string,
-  data: Uint8Array,
-  method: "PUT" | "POST",
-  headers: Record<string, string>,
-  onProgress: (loaded: number, total: number) => void,
-  timeoutMs: number = 90000
-): Promise<{ ok: boolean; status: number; etag: string; responseJson?: any }> {
-  return new Promise((resolve) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open(method, url, true);
-    xhr.timeout = timeoutMs;
-    for (const [k, v] of Object.entries(headers)) {
-      xhr.setRequestHeader(k, v);
-    }
-    // Only send credentials (cookies) to same-origin backend endpoints, NEVER to Cloudflare R2 / S3 presigned URLs!
-    const isSameOrigin =
-      url.startsWith("/") ||
-      (typeof window !== "undefined" && url.startsWith(window.location.origin));
-    xhr.withCredentials = isSameOrigin;
+const MAX_PARALLEL_FILES = 2;
+const PARTS_PER_FILE = 3;
+const MAX_PART_ATTEMPTS = 6;
 
-    // Inactivity timer: only triggers if zero bytes are transferred for 60 seconds
-    let stallTimer: any = null;
-    function resetStallTimer() {
-      if (stallTimer) clearTimeout(stallTimer);
-      stallTimer = setTimeout(() => {
-        xhr.abort();
-        resolve({ ok: false, status: 408, etag: "" });
-      }, 60000); // 60s of complete inactivity before considering stalled
-    }
-    resetStallTimer();
-
-    xhr.upload.onprogress = (e) => {
-      resetStallTimer();
-      if (e.lengthComputable) {
-        onProgress(e.loaded, e.total);
-      }
-    };
-
-    // When client completes sending all bytes over the network, give the server up to 90s to commit chunk and respond
-    xhr.upload.onload = () => {
-      if (stallTimer) clearTimeout(stallTimer);
-      stallTimer = setTimeout(() => {
-        xhr.abort();
-        resolve({ ok: false, status: 408, etag: "" });
-      }, 90000);
-    };
-
-    xhr.onload = () => {
-      if (stallTimer) clearTimeout(stallTimer);
-      if (xhr.status >= 200 && xhr.status < 300) {
-        let responseJson: any = null;
-        try {
-          responseJson = JSON.parse(xhr.responseText);
-        } catch {
-          // not json
-        }
-        const etag = xhr.getResponseHeader("ETag") || responseJson?.etag || "";
-        resolve({ ok: true, status: xhr.status, etag, responseJson });
-      } else {
-        resolve({ ok: false, status: xhr.status, etag: "" });
-      }
-    };
-
-    xhr.onerror = () => {
-      if (stallTimer) clearTimeout(stallTimer);
-      resolve({ ok: false, status: 0, etag: "" });
-    };
-    xhr.ontimeout = () => {
-      if (stallTimer) clearTimeout(stallTimer);
-      resolve({ ok: false, status: 408, etag: "" });
-    };
-    xhr.onabort = () => {
-      if (stallTimer) clearTimeout(stallTimer);
-      resolve({ ok: false, status: 0, etag: "" });
-    };
-
-    xhr.send(data);
-  });
-}
+type UploadStatus = "queued" | "encrypting" | "uploading" | "completing" | "completed" | "error" | "paused";
 
 export interface ActiveUpload {
-  id: string; // client temporary ID
+  id: string;
   file: File;
   name: string;
   size: number;
-  progress: number; // 0 to 100
+  progress: number; // 0..100
   speedMBs: number;
-  status: "queued" | "encrypting" | "uploading" | "completing" | "completed" | "error" | "paused";
+  status: UploadStatus;
   errorMessage?: string;
-  uploadSessionId?: string;
-  completedBytes: number;
-  initData?: any;
+  parentId: string | null;
+  // Existing file this upload becomes a new version of
+  nodeId?: string;
+  // Resumable state for this browser session
+  session?: { id: string; partSize: number; totalParts: number };
   fileKey?: Uint8Array;
   baseNonce?: Uint8Array;
   wrappedFileKey?: string;
-  completedParts?: { part_number: number; etag: string }[];
-  parentId?: string | null;
+  doneParts: Set<number>;
 }
+
+interface PartResult {
+  ok: boolean;
+  status: number;
+  message?: string;
+}
+
+function sendPart(
+  url: string,
+  body: Uint8Array,
+  token: string | null,
+  onProgress: (loaded: number) => void,
+  abortSignal: { aborted: boolean; xhr?: XMLHttpRequest }
+): Promise<PartResult> {
+  return new Promise((resolve) => {
+    const xhr = new XMLHttpRequest();
+    abortSignal.xhr = xhr;
+    xhr.open("POST", url, true);
+    xhr.timeout = 180_000;
+    xhr.setRequestHeader("Content-Type", "application/octet-stream");
+    if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+    xhr.withCredentials = true;
+    xhr.upload.onprogress = (e) => onProgress(e.loaded);
+    xhr.onload = () => {
+      let message: string | undefined;
+      try {
+        const data = JSON.parse(xhr.responseText);
+        message = data.error || data.message;
+      } catch {
+        // not JSON
+      }
+      resolve({ ok: xhr.status >= 200 && xhr.status < 300, status: xhr.status, message });
+    };
+    xhr.onerror = () => resolve({ ok: false, status: 0 });
+    xhr.ontimeout = () => resolve({ ok: false, status: 408 });
+    xhr.onabort = () => resolve({ ok: false, status: -1 });
+    xhr.send(body);
+  });
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export const useUploadStore = defineStore("upload", () => {
   const authStore = useAuthStore();
   const filesStore = useFilesStore();
   const uploads = ref<ActiveUpload[]>([]);
-  const isTrayOpen = ref<boolean>(false);
+  const isTrayOpen = ref(false);
+  const aborters = new Map<string, { aborted: boolean; xhr?: XMLHttpRequest }[]>();
 
   const activeCount = computed(
-    () => uploads.value.filter((u) => u.status === "uploading" || u.status === "encrypting" || u.status === "completing").length
+    () => uploads.value.filter((u) => ["queued", "encrypting", "uploading", "completing"].includes(u.status)).length
   );
   const totalProgress = computed(() => {
-    if (uploads.value.length === 0) return 0;
-    const sum = uploads.value.reduce((acc, u) => acc + u.progress, 0);
-    return Math.round(sum / uploads.value.length);
+    const active = uploads.value.filter((u) => u.status !== "completed");
+    if (!active.length) return 100;
+    const total = active.reduce((acc, u) => acc + u.size, 0) || 1;
+    const done = active.reduce((acc, u) => acc + (u.size * u.progress) / 100, 0);
+    return Math.round((done / total) * 100);
   });
 
-  async function executeUpload(uploadItem: ActiveUpload) {
-    if (!authStore.masterKey) throw new Error("Vault must be unlocked to upload.");
-    const file = uploadItem.file;
+  function running() {
+    return uploads.value.filter((u) => ["encrypting", "uploading", "completing"].includes(u.status)).length;
+  }
 
-    if (!file || file.size <= 0) {
-      uploadItem.status = "error";
-      uploadItem.errorMessage = "Selected file is empty (0 bytes). If this video is currently downloading in another app or browser, please wait until the download finishes.";
-      return;
-    }
-
-    try {
-      let initData = uploadItem.initData;
-      let fileKey = uploadItem.fileKey;
-      let baseNonce = uploadItem.baseNonce;
-      let wrappedFileKey = uploadItem.wrappedFileKey;
-
-      if (!initData || !fileKey || !baseNonce || !wrappedFileKey) {
-        uploadItem.status = "encrypting";
-
-        // 1. Generate per-file AES-256-GCM key and 12-byte base nonce
-        fileKey = generateFileKey();
-        baseNonce = generateRandomBytes(12);
-
-        // 2. Wrap File Key with user's Master Key
-        wrappedFileKey = await wrapKey(authStore.masterKey, fileKey);
-
-        // 3. Encrypt filename with Master Key
-        const { ciphertextBase64, nonceHex } = await encryptName(
-          authStore.masterKey,
-          file.name
-        );
-
-        // 4. Request multipart upload from backend
-        initData = await apiRequest<{
-          upload_session_id: string;
-          s3_upload_id: string;
-          object_key: string;
-          part_size: number;
-          total_parts: number;
-          presigned_urls: { part_number: number; url: string }[];
-        }>("/api/v1/uploads", {
-          method: "POST",
-          body: JSON.stringify({
-            parent_id: uploadItem.parentId || null,
-            encrypted_name: ciphertextBase64,
-            name_nonce: nonceHex,
-            size_bytes: file.size,
-          }),
-        });
-
-        uploadItem.initData = initData;
-        uploadItem.fileKey = fileKey;
-        uploadItem.baseNonce = baseNonce;
-        uploadItem.wrappedFileKey = wrappedFileKey;
-        uploadItem.uploadSessionId = initData.upload_session_id;
-        uploadItem.completedParts = [];
-
-        // Save initial state to IndexedDB for resumability
-        const storedUpload: StoredUpload = {
-          uploadSessionId: initData.upload_session_id,
-          s3UploadId: initData.s3_upload_id,
-          fileKeyHex: uint8ArrayToHex(fileKey),
-          baseNonceHex: uint8ArrayToHex(baseNonce),
-          wrappedFileKey,
-          fileName: file.name,
-          fileSize: file.size,
-          partSize: initData.part_size,
-          totalParts: initData.total_parts,
-          completedParts: [],
-          status: "uploading",
-        };
-        await saveUploadState(storedUpload).catch(() => {});
-      }
-
-      uploadItem.status = "uploading";
-      uploadItem.errorMessage = undefined;
-
-      const partSize = initData.part_size;
-      const totalParts = initData.total_parts;
-      const completedParts = uploadItem.completedParts || [];
-      const alreadyCompleted = new Set(completedParts.map((p) => p.part_number));
-
-      // Calculate initial committed bytes from already completed chunks
-      let totalCommittedBytes = 0;
-      for (const p of completedParts) {
-        const isLast = p.part_number === totalParts;
-        const thisPartSize = isLast ? (file.size - (totalParts - 1) * partSize) : partSize;
-        totalCommittedBytes += thisPartSize;
-      }
-
-      // Concurrency: 2 for large files (> 500MB) to prevent uplink queue buildup; 3 for > 100MB; 4 for smaller files
-      const concurrency = file.size > 500 * 1024 * 1024 ? 2 : (file.size > 100 * 1024 * 1024 ? 3 : 4);
-      let nextPartIndex = 0;
-      const inFlightBytes = new Map<number, number>();
-      const speedSamples: { time: number; bytes: number }[] = [];
-      const startTime = Date.now();
-
-      // If upstream is SpaceByte, direct browser PUT is blocked by bucket CORS policy.
-      // Immediately route parts through high-performance server relay to prevent 1% stalls.
-      let directBlocked = initData.provider === "spacebyte";
-
-      // Heartbeat: refresh JWT access token every 4 minutes so long uploads never fail due to token expiry
-      const tokenHeartbeat = setInterval(async () => {
-        try {
-          await refreshAccessToken();
-        } catch {}
-      }, 4 * 60 * 1000);
-
-      // Pre-import CryptoKey once for the entire file to avoid repeated WebCrypto imports per chunk
-      const importedCryptoKey = await importFileKey(fileKey);
-
-      function updateProgress() {
-        let activeInFlight = 0;
-        for (const bytes of inFlightBytes.values()) {
-          activeInFlight += bytes;
-        }
-        const currentBytes = Math.min(file.size, totalCommittedBytes + activeInFlight);
-        uploadItem.completedBytes = currentBytes;
-        uploadItem.progress = Math.min(99, Math.round((currentBytes / file.size) * 100));
-
-        // Rolling speed calculation over the last 1.5-second sliding window
-        const now = Date.now();
-        speedSamples.push({ time: now, bytes: currentBytes });
-        while (speedSamples.length > 1 && now - speedSamples[0].time > 1500) {
-          speedSamples.shift();
-        }
-
-        if (speedSamples.length > 1) {
-          const dt = (now - speedSamples[0].time) / 1000;
-          const db = currentBytes - speedSamples[0].bytes;
-          if (dt >= 0.2) {
-            const rawSpeed = Number((db / (1024 * 1024) / dt).toFixed(1));
-            uploadItem.speedMBs = Math.max(0.1, rawSpeed);
-          }
-        } else {
-          const elapsedSec = (now - startTime) / 1000;
-          if (elapsedSec > 0.2) {
-            uploadItem.speedMBs = Number((currentBytes / (1024 * 1024) / elapsedSec).toFixed(1));
-          }
-        }
-      }
-
-      updateProgress();
-
-      try {
-        async function uploadNextPart(): Promise<void> {
-          while (nextPartIndex < totalParts) {
-            if ((uploadItem.status as string) === "paused") return;
-
-            const partIndex = nextPartIndex++;
-            const partNumber = partIndex + 1;
-
-            // Skip if already successfully uploaded in a prior attempt
-            if (alreadyCompleted.has(partNumber)) {
-              continue;
-            }
-
-            const start = partIndex * partSize;
-            const end = Math.min(file.size, start + partSize);
-            const chunkBlob = file.slice(start, end);
-            const chunkBuffer = await chunkBlob.arrayBuffer();
-            const chunkBytes = new Uint8Array(chunkBuffer);
-
-            // Encrypt chunk using AES-256-GCM with deterministic nonce: baseNonce ^ partNumber
-            const encryptedChunk = await encryptChunkWithKey(
-              importedCryptoKey,
-              chunkBytes,
-              baseNonce!,
-              partNumber
-            );
-
-            // Find presigned URL if available (filter out localhost if client is remote)
-            let presignedUrl = initData.presigned_urls
-              ? initData.presigned_urls.find((p: { part_number: number; url: string }) => p.part_number === partNumber)?.url
-              : null;
-
-            if (presignedUrl && (presignedUrl.includes("localhost") || presignedUrl.includes("127.0.0.1"))) {
-              const isLocalClient = typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
-              if (!isLocalClient) {
-                presignedUrl = null;
-              }
-            }
-
-            let retries = 50; // Resilient retry loop that never gives up on network drops
-            let etag = "";
-            let uploaded = false;
-            let attempt = 0;
-
-            while (retries > 0 && !uploaded) {
-              attempt++;
-              if ((uploadItem.status as string) === "paused") return;
-
-              // Handle browser offline state
-              if (typeof navigator !== "undefined" && !navigator.onLine) {
-                uploadItem.errorMessage = `Network offline. Waiting for connection...`;
-                await new Promise<void>((resolve) => {
-                  const onOnline = () => {
-                    window.removeEventListener("online", onOnline);
-                    resolve();
-                  };
-                  window.addEventListener("online", onOnline);
-                  setTimeout(resolve, 5000);
-                });
-              }
-
-              if (attempt > 1) {
-                uploadItem.errorMessage = `Reconnecting chunk ${partNumber} (attempt ${attempt})...`;
-              }
-
-              // 1. Try direct presigned upload to R2/S3 if not blocked by CORS
-              if (!directBlocked && presignedUrl) {
-                const directRes = await uploadPartWithProgress(
-                  presignedUrl,
-                  encryptedChunk,
-                  "PUT",
-                  { "Content-Type": "application/octet-stream" },
-                  (loaded) => {
-                    inFlightBytes.set(partNumber, Math.min(chunkBytes.length, Math.round(loaded * (chunkBytes.length / encryptedChunk.length))));
-                    updateProgress();
-                  },
-                  30000 // 30s timeout for direct attempt
-                );
-
-                if (directRes.ok) {
-                  etag = directRes.etag || `"${partNumber}"`;
-                  uploaded = true;
-                  uploadItem.errorMessage = undefined;
-                  break;
-                } else if (directRes.status === 0 || directRes.status === 403) {
-                  // Direct upload blocked by bucket CORS or origin policy; route all parts through server relay
-                  directBlocked = true;
-                }
-              }
-
-              // 2. Fallback: relay through backend API endpoint
-              let token = getAccessToken();
-              const relayHeaders: Record<string, string> = {
-                "Content-Type": "application/octet-stream",
-              };
-              if (token) {
-                relayHeaders["Authorization"] = `Bearer ${token}`;
-              }
-
-              const relayRes = await uploadPartWithProgress(
-                `/api/v1/uploads/${initData.upload_session_id}/parts/${partNumber}`,
-                encryptedChunk,
-                "POST",
-                relayHeaders,
-                (loaded) => {
-                  inFlightBytes.set(partNumber, Math.min(chunkBytes.length, Math.round(loaded * (chunkBytes.length / encryptedChunk.length))));
-                  updateProgress();
-                },
-                180000 // 180s timeout for robust large chunk processing
-              );
-
-              if (relayRes.ok) {
-                etag = relayRes.etag || relayRes.responseJson?.etag || `"${partNumber}"`;
-                uploaded = true;
-                uploadItem.errorMessage = undefined;
-                break;
-              } else {
-                retries--;
-                if (relayRes.status === 401) {
-                  // Access token expired mid-upload: automatically refresh it!
-                  const refreshed = await refreshAccessToken().catch(() => null);
-                  token = refreshed?.access_token || getAccessToken();
-                }
-                if (retries === 0) {
-                  throw new Error(`Failed to upload part ${partNumber}. Check network and click Retry.`);
-                }
-                // Exponential backoff capped at 10s
-                const backoff = Math.min(10000, 1000 * Math.pow(1.5, Math.min(attempt - 1, 8)));
-                await new Promise((r) => setTimeout(r, backoff));
-              }
-            }
-
-            inFlightBytes.delete(partNumber);
-            totalCommittedBytes += chunkBytes.length;
-            updateProgress();
-            completedParts.push({ part_number: partNumber, etag });
-            uploadItem.completedParts = completedParts;
-            alreadyCompleted.add(partNumber);
-
-            // Persist progress to IndexedDB
-            const storedUpload: StoredUpload = {
-              uploadSessionId: initData.upload_session_id,
-              s3UploadId: initData.s3_upload_id,
-              fileKeyHex: uint8ArrayToHex(fileKey!),
-              baseNonceHex: uint8ArrayToHex(baseNonce!),
-              wrappedFileKey: wrappedFileKey!,
-              fileName: file.name,
-              fileSize: file.size,
-              partSize,
-              totalParts,
-              completedParts,
-              status: "uploading",
-            };
-            await saveUploadState(storedUpload).catch(() => {});
-          }
-        }
-
-        const workers = Array.from({ length: concurrency }, () => uploadNextPart());
-        await Promise.all(workers);
-
-        if ((uploadItem.status as string) === "paused") return;
-
-        // 6. Complete multipart upload on backend
-        uploadItem.status = "completing";
-        await apiRequest(`/api/v1/uploads/${initData.upload_session_id}/complete`, {
-          method: "POST",
-          body: JSON.stringify({
-            parts: completedParts,
-            wrapped_file_key: wrappedFileKey,
-            content_nonce: uint8ArrayToHex(baseNonce),
-          }),
-        });
-
-        uploadItem.status = "completed";
-        uploadItem.progress = 100;
-        await removeUploadState(initData.upload_session_id).catch(() => {});
-
-        // Refresh file list & updated quota in authStore immediately
-        await filesStore.fetchNodes();
-        await authStore.fetchProfile();
-
-        // Automatically remove completed item after 2 seconds so dialog closes automatically
-        setTimeout(() => {
-          const idx = uploads.value.findIndex((u) => u.id === uploadItem.id);
-          if (idx !== -1 && uploads.value[idx].status === "completed") {
-            uploads.value.splice(idx, 1);
-          }
-        }, 2000);
-      } finally {
-        clearInterval(tokenHeartbeat);
-      }
-    } catch (err: any) {
-      uploadItem.status = "error";
-      uploadItem.errorMessage = err.message || "Upload failed";
-      console.error("Upload error:", err);
+  function pump() {
+    while (running() < MAX_PARALLEL_FILES) {
+      const next = [...uploads.value].reverse().find((u) => u.status === "queued");
+      if (!next) return;
+      void execute(next);
     }
   }
 
-  async function uploadFile(file: File, parentId: string | null = null) {
-    if (!authStore.masterKey) throw new Error("Vault must be unlocked to upload.");
+  async function startSession(item: ActiveUpload) {
+    if (!authStore.masterKey) throw new Error("Unlock your vault to upload.");
+    item.status = "encrypting";
+    item.fileKey = generateFileKey();
+    item.baseNonce = generateRandomBytes(12);
+    item.wrappedFileKey = await wrapKey(authStore.masterKey, item.fileKey);
+    const { ciphertextBase64, nonceHex } = await encryptName(authStore.masterKey, item.file.name);
+    const init = await apiRequest<{ upload_session_id: string; part_size: number; total_parts: number }>(
+      "/api/v1/uploads",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          parent_id: item.parentId,
+          node_id: item.nodeId,
+          encrypted_name: ciphertextBase64,
+          name_nonce: nonceHex,
+          size_bytes: item.file.size,
+        }),
+      }
+    );
+    item.session = { id: init.upload_session_id, partSize: init.part_size, totalParts: init.total_parts };
+    item.doneParts = new Set();
+  }
 
-    const uploadItem = reactive<ActiveUpload>({
+  async function execute(item: ActiveUpload) {
+    if (item.file.size <= 0) {
+      item.status = "error";
+      item.errorMessage = "This file is empty (0 bytes). If it is still downloading, wait for it to finish.";
+      return;
+    }
+    const controllers: { aborted: boolean; xhr?: XMLHttpRequest }[] = [];
+    aborters.set(item.id, controllers);
+
+    try {
+      if (!item.session || !item.fileKey || !item.baseNonce) await startSession(item);
+      const { id: sessionId, partSize, totalParts } = item.session!;
+      const cryptoKey = await importFileKey(item.fileKey!);
+      item.status = "uploading";
+      item.errorMessage = undefined;
+
+      const inFlight = new Map<number, number>();
+      let committed = 0;
+      for (const n of item.doneParts) committed += Math.min(partSize, item.file.size - (n - 1) * partSize);
+      const started = Date.now();
+      const startBytes = committed;
+
+      const updateProgress = () => {
+        let flying = 0;
+        for (const v of inFlight.values()) flying += v;
+        const bytes = Math.min(item.file.size, committed + flying);
+        item.progress = Math.min(99, Math.round((bytes / item.file.size) * 100));
+        const secs = (Date.now() - started) / 1000;
+        if (secs > 0.5) item.speedMBs = Math.max(0, Number(((bytes - startBytes) / 1048576 / secs).toFixed(1)));
+      };
+
+      const queue = Array.from({ length: totalParts }, (_, i) => i + 1).filter((n) => !item.doneParts.has(n));
+
+      const worker = async () => {
+        while (queue.length) {
+          if (item.status !== "uploading") return;
+          const partNumber = queue.shift()!;
+          const start = (partNumber - 1) * partSize;
+          const plain = new Uint8Array(await item.file.slice(start, Math.min(item.file.size, start + partSize)).arrayBuffer());
+          const encrypted = await encryptChunkWithKey(cryptoKey, plain, item.baseNonce!, partNumber);
+
+          for (let attempt = 1; ; attempt++) {
+            if (item.status !== "uploading") return;
+            const signal: { aborted: boolean; xhr?: XMLHttpRequest } = { aborted: false };
+            controllers.push(signal);
+            const res = await sendPart(
+              `/api/v1/uploads/${sessionId}/parts/${partNumber}`,
+              encrypted,
+              getAccessToken(),
+              (loaded) => {
+                inFlight.set(partNumber, Math.round((loaded / encrypted.length) * plain.length));
+                updateProgress();
+              },
+              signal
+            );
+            inFlight.delete(partNumber);
+            if (res.ok) break;
+            if (res.status === -1) return; // paused or cancelled
+            if (res.status === 401) {
+              const refreshed = await refreshAccessToken();
+              if (!refreshed) throw new Error("Your session expired. Sign in again to continue uploading.");
+              continue;
+            }
+            if (res.status === 400 || res.status === 402 || res.status === 404 || res.status === 413) {
+              throw new Error(res.message || "The server rejected this upload.");
+            }
+            if (attempt >= MAX_PART_ATTEMPTS) {
+              throw new Error(res.message || "Upload keeps failing. Check your connection and press Retry.");
+            }
+            item.errorMessage = navigator.onLine ? `Retrying… (attempt ${attempt + 1})` : "You're offline. Waiting for connection…";
+            await sleep(Math.min(15_000, 1000 * 2 ** (attempt - 1)));
+            item.errorMessage = undefined;
+          }
+
+          item.doneParts.add(partNumber);
+          committed += plain.length;
+          updateProgress();
+        }
+      };
+
+      await Promise.all(Array.from({ length: Math.min(PARTS_PER_FILE, totalParts) }, worker));
+      if (item.status !== "uploading") return;
+
+      item.status = "completing";
+      // Completing is idempotent on the server, so transient failures are retried.
+      let node: { quota?: any } | undefined;
+      for (let attempt = 1; ; attempt++) {
+        try {
+          node = await apiRequest<{ quota?: any }>(`/api/v1/uploads/${sessionId}/complete`, {
+            method: "POST",
+            body: JSON.stringify({ wrapped_file_key: item.wrappedFileKey, content_nonce: uint8ArrayToHex(item.baseNonce!) }),
+            timeoutMs: 120_000,
+          });
+          break;
+        } catch (err: any) {
+          const transient = !err?.status || err.status >= 500;
+          if (!transient || attempt >= 4) throw err;
+          await sleep(1500 * attempt);
+        }
+      }
+      item.status = "completed";
+      item.progress = 100;
+      item.fileKey = undefined;
+      if (node?.quota && authStore.user) authStore.user.quota = node.quota;
+      filesStore.invalidateIndex();
+      if (item.parentId === filesStore.currentParentId && !filesStore.isSearchActive) {
+        void filesStore.fetchNodes(filesStore.currentParentId);
+      }
+      setTimeout(() => {
+        uploads.value = uploads.value.filter((u) => u.id !== item.id || u.status !== "completed");
+      }, 4000);
+    } catch (err: any) {
+      if (item.status !== "paused") {
+        item.status = "error";
+        item.errorMessage = err?.message || "Upload failed.";
+      }
+    } finally {
+      aborters.delete(item.id);
+      pump();
+    }
+  }
+
+  function enqueue(file: File, parentId: string | null, nodeId?: string) {
+    const item = reactive<ActiveUpload>({
       id: crypto.randomUUID(),
       file,
       name: file.name,
@@ -486,49 +260,82 @@ export const useUploadStore = defineStore("upload", () => {
       progress: 0,
       speedMBs: 0,
       status: "queued",
-      completedBytes: 0,
       parentId,
+      nodeId,
+      doneParts: new Set(),
     });
-
-    uploads.value.unshift(uploadItem);
+    uploads.value.unshift(item);
     isTrayOpen.value = true;
-
-    await executeUpload(uploadItem);
   }
 
-  async function retryUpload(id: string) {
+  /** Uploads files, recreating the folder structure of a dropped/selected directory. */
+  async function uploadFiles(fileList: FileList | File[], rootParentId: string | null) {
+    const files = Array.from(fileList as ArrayLike<File>);
+    const folderIds = new Map<string, string | null>();
+
+    async function ensureFolder(relDir: string): Promise<string | null> {
+      if (!relDir) return rootParentId;
+      if (folderIds.has(relDir)) return folderIds.get(relDir)!;
+      const parts = relDir.split("/");
+      const parent = await ensureFolder(parts.slice(0, -1).join("/"));
+      const created = await filesStore.createFolder(parts[parts.length - 1], parent);
+      folderIds.set(relDir, created.id);
+      return created.id;
+    }
+
+    for (const file of files) {
+      const rel = (file as File & { webkitRelativePath?: string }).webkitRelativePath || "";
+      const dir = rel.includes("/") ? rel.split("/").slice(0, -1).join("/") : "";
+      enqueue(file, await ensureFolder(dir));
+    }
+    pump();
+  }
+
+  /** Uploads `file` as a new version of an existing file. */
+  function uploadNewVersion(file: File, node: { id: string; parent: string | null }) {
+    enqueue(file, node.parent, node.id);
+    pump();
+  }
+
+  function retryUpload(id: string) {
     const item = uploads.value.find((u) => u.id === id);
-    if (!item) return;
+    if (!item || (item.status !== "error" && item.status !== "paused")) return;
     item.status = "queued";
     item.errorMessage = undefined;
-    await executeUpload(item);
+    pump();
+  }
+
+  function stopTransfers(id: string) {
+    for (const c of aborters.get(id) || []) {
+      c.aborted = true;
+      c.xhr?.abort();
+    }
   }
 
   function pauseUpload(id: string) {
     const item = uploads.value.find((u) => u.id === id);
-    if (item && item.status === "uploading") {
+    if (item && (item.status === "uploading" || item.status === "queued")) {
       item.status = "paused";
+      stopTransfers(id);
+      pump();
     }
   }
 
   function cancelUpload(id: string) {
-    const itemIdx = uploads.value.findIndex((u) => u.id === id);
-    if (itemIdx !== -1) {
-      const item = uploads.value[itemIdx];
-      if (item.uploadSessionId) {
-        apiRequest(`/api/v1/uploads/${item.uploadSessionId}`, { method: "DELETE" }).catch(() => {});
-        removeUploadState(item.uploadSessionId).catch(() => {});
-      }
-      uploads.value.splice(itemIdx, 1);
+    const item = uploads.value.find((u) => u.id === id);
+    if (!item) return;
+    const wasActive = item.status !== "completed";
+    item.status = "paused";
+    stopTransfers(id);
+    if (wasActive && item.session) {
+      apiRequest(`/api/v1/uploads/${item.session.id}`, { method: "DELETE" }).catch(() => {});
     }
+    uploads.value = uploads.value.filter((u) => u.id !== id);
+    pump();
   }
 
-  function clearCompleted() {
-    uploads.value = uploads.value.filter((u) => u.status !== "completed");
-  }
-
-  function toggleTray() {
-    isTrayOpen.value = !isTrayOpen.value;
+  function clearFinished() {
+    uploads.value = uploads.value.filter((u) => u.status !== "completed" && u.status !== "error");
   }
 
   return {
@@ -536,11 +343,11 @@ export const useUploadStore = defineStore("upload", () => {
     isTrayOpen,
     activeCount,
     totalProgress,
-    uploadFile,
+    uploadFiles,
+    uploadNewVersion,
     retryUpload,
     pauseUpload,
     cancelUpload,
-    clearCompleted,
-    toggleTray,
+    clearFinished,
   };
 });

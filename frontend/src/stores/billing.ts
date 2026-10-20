@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
-import { apiRequest } from "../lib/api";
+import { apiFetch, apiRequest, errorFromResponse } from "../lib/api";
 import { useAuthStore } from "./auth";
 
 export interface Plan {
@@ -9,8 +9,8 @@ export interface Plan {
   name: string;
   description: string;
   storage_bytes: number;
-  price_monthly: number;
-  price_yearly: number;
+  price_monthly: string;
+  price_yearly: string;
   currency: string;
   max_file_size: number;
   version_retention_days: number;
@@ -37,36 +37,56 @@ export interface Subscription {
 export interface Invoice {
   id: string;
   provider_invoice_id: string;
-  amount: number;
+  provider_payment_id: string;
+  amount: string;
   currency: string;
   status: string;
+  plan_name: string;
+  billing_interval: string;
   issued_at: string;
+}
+
+let razorpayLoader: Promise<void> | null = null;
+
+/** Loads Razorpay Checkout only when the user actually starts a payment. */
+function loadRazorpay(): Promise<void> {
+  if (typeof (window as any).Razorpay === "function") return Promise.resolve();
+  if (razorpayLoader) return razorpayLoader;
+  razorpayLoader = new Promise<void>((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "https://checkout.razorpay.com/v1/checkout.js";
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => {
+      razorpayLoader = null;
+      reject(new Error("The payment window couldn't load. Disable ad blockers for this site and try again."));
+    };
+    document.head.appendChild(script);
+  });
+  return razorpayLoader;
 }
 
 export const useBillingStore = defineStore("billing", () => {
   const authStore = useAuthStore();
   const plans = ref<Plan[]>([]);
+  const plansError = ref("");
   const currentSubscription = ref<Subscription | null>(null);
   const invoices = ref<Invoice[]>([]);
-  const isLoading = ref<boolean>(false);
-  const selectedInterval = ref<"monthly" | "yearly">("monthly");
+  const isCheckingOut = ref(false);
 
   async function fetchPlans() {
+    plansError.value = "";
     try {
-      const data = await apiRequest<Plan[] | { results: Plan[] }>("/api/v1/plans");
-      plans.value = Array.isArray(data) ? data : data.results || [];
-    } catch (err) {
-      console.error("Failed to load plans", err);
+      plans.value = await apiRequest<Plan[]>("/api/v1/plans");
+    } catch (err: any) {
+      plansError.value = err.message || "Couldn't load plans.";
     }
   }
 
   async function fetchSubscription() {
     try {
-      const data = await apiRequest<Subscription>("/api/v1/subscription");
-      currentSubscription.value = data.is_valid ? data : null;
-      if (data.is_valid && !authStore.hasActiveSubscription) {
-        await authStore.fetchProfile();
-      }
+      const data = await apiRequest<Subscription & { status: string }>("/api/v1/subscription");
+      currentSubscription.value = data.id ? data : null;
     } catch {
       currentSubscription.value = null;
     }
@@ -74,40 +94,16 @@ export const useBillingStore = defineStore("billing", () => {
 
   async function fetchInvoices() {
     try {
-      const data = await apiRequest<Invoice[] | { results: Invoice[] }>("/api/v1/invoices");
-      invoices.value = Array.isArray(data) ? data : data.results || [];
-    } catch (err) {
-      console.error("Failed to fetch invoices", err);
+      invoices.value = await apiRequest<Invoice[]>("/api/v1/invoices");
+    } catch {
+      invoices.value = [];
     }
   }
 
-  // Helper to guarantee checkout.js is loaded without adblock failure
-  async function loadRazorpaySDK(): Promise<boolean> {
-    if (typeof (window as any).Razorpay === "function") {
-      return true;
-    }
-    return new Promise((resolve) => {
-      const existing = document.querySelector('script[src*="checkout.razorpay.com"]');
-      if (existing) {
-        existing.addEventListener("load", () => resolve(true));
-        existing.addEventListener("error", () => resolve(false));
-        setTimeout(() => resolve(typeof (window as any).Razorpay === "function"), 1500);
-        return;
-      }
-      const script = document.createElement("script");
-      script.src = "https://checkout.razorpay.com/v1/checkout.js";
-      script.async = true;
-      script.onload = () => resolve(true);
-      script.onerror = () => resolve(false);
-      document.head.appendChild(script);
-    });
-  }
-
-  async function checkout(planCode: string, interval: "monthly" | "yearly" = selectedInterval.value): Promise<void> {
-    isLoading.value = true;
+  async function checkout(planCode: string, interval: "monthly" | "yearly", billingState: string): Promise<void> {
+    isCheckingOut.value = true;
     try {
       const order = await apiRequest<{
-        provider: string;
         key_id: string;
         order_id: string;
         amount: number;
@@ -116,53 +112,33 @@ export const useBillingStore = defineStore("billing", () => {
         prefill: { name: string; email: string };
       }>("/api/v1/subscription/checkout", {
         method: "POST",
-        body: JSON.stringify({ plan_code: planCode, billing_interval: interval }),
+        body: JSON.stringify({ plan_code: planCode, billing_interval: interval, billing_state: billingState }),
       });
 
-      // Ensure Razorpay SDK script is loaded
-      const isLoaded = await loadRazorpaySDK();
-      if (!isLoaded || typeof (window as any).Razorpay !== "function") {
-        // Only if offline with mock order and placeholder keys allow mock demo simulation
-        if (order.order_id.startsWith("order_mock_") && (!order.key_id || order.key_id === "rzp_test_sample")) {
-          await verifyPayment({
-            plan_code: planCode,
-            razorpay_payment_id: `pay_sim_${Date.now()}`,
-            razorpay_order_id: order.order_id,
-            razorpay_signature: "mock_signature_approved",
-            billing_interval: interval,
-          });
-          return;
-        }
+      await loadRazorpay();
 
-        throw new Error(
-          "Razorpay checkout failed to load. Please disable any ad-blockers or shields for this page and try again."
-        );
-      }
-
-      return new Promise((resolve, reject) => {
-        let isSettled = false;
-
-        const options = {
+      await new Promise<void>((resolve, reject) => {
+        let settled = false;
+        const rzp = new (window as any).Razorpay({
           key: order.key_id,
           amount: order.amount,
           currency: order.currency,
-          name: "SpeedCloud Vault",
-          description: `${order.plan_name} (${interval === "yearly" ? "Annual" : "Monthly"})`,
+          name: "SmartSpace",
+          description: `${order.plan_name} · ${interval === "yearly" ? "Yearly" : "Monthly"}`,
           image: "/logo.svg",
           order_id: order.order_id,
           prefill: order.prefill,
-          theme: {
-            color: "#2563eb",
-          },
+          theme: { color: "#2563eb" },
           handler: async (response: any) => {
-            isSettled = true;
+            settled = true;
             try {
-              await verifyPayment({
-                plan_code: planCode,
-                razorpay_payment_id: response.razorpay_payment_id,
-                razorpay_order_id: response.razorpay_order_id || order.order_id,
-                razorpay_signature: response.razorpay_signature,
-                billing_interval: interval,
+              await apiRequest("/api/v1/subscription/verify", {
+                method: "POST",
+                body: JSON.stringify({
+                  razorpay_payment_id: response.razorpay_payment_id,
+                  razorpay_order_id: response.razorpay_order_id,
+                  razorpay_signature: response.razorpay_signature,
+                }),
               });
               resolve();
             } catch (e) {
@@ -171,67 +147,54 @@ export const useBillingStore = defineStore("billing", () => {
           },
           modal: {
             ondismiss: () => {
-              isLoading.value = false;
-              if (!isSettled) {
-                reject(new Error("Payment was cancelled. An active subscription is required to unlock your vault."));
-              }
+              if (!settled) reject(new Error("Payment cancelled. You haven't been charged."));
             },
           },
-        };
-
-        try {
-          const rzp = new (window as any).Razorpay(options);
-          rzp.on("payment.failed", (response: any) => {
-            isSettled = true;
-            isLoading.value = false;
-            const detail = response?.error?.description || response?.error?.reason || "Payment was declined by bank or gateway.";
-            reject(new Error(`Razorpay Error: ${detail}`));
-          });
-          rzp.open();
-        } catch (err: any) {
-          isLoading.value = false;
-          reject(new Error(`Could not initialize Razorpay checkout: ${err.message}`));
-        }
+        });
+        rzp.on("payment.failed", (response: any) => {
+          settled = true;
+          reject(new Error(response?.error?.description || "The payment was declined. Please try another method."));
+        });
+        rzp.open();
       });
+
+      await Promise.all([authStore.fetchProfile(), fetchSubscription(), fetchInvoices()]);
     } finally {
-      isLoading.value = false;
+      isCheckingOut.value = false;
     }
   }
 
-  async function verifyPayment(payload: {
-    plan_code: string;
-    razorpay_payment_id: string;
-    razorpay_order_id: string;
-    razorpay_signature: string;
-    billing_interval: string;
-  }) {
-    const res = await apiRequest<{ success: boolean; subscription: Subscription }>(
-      "/api/v1/subscription/verify",
-      {
-        method: "POST",
-        body: JSON.stringify(payload),
-      }
-    );
-    currentSubscription.value = res.subscription;
-    await authStore.fetchProfile();
-    await fetchInvoices();
+  async function cancel() {
+    const res = await apiRequest<{ message: string }>("/api/v1/subscription/cancel", { method: "POST" });
+    await fetchSubscription();
+    return res.message;
   }
 
-  async function cancel() {
-    await apiRequest("/api/v1/subscription/cancel", { method: "POST" });
-    await fetchSubscription();
+  async function downloadInvoice(invoice: Invoice) {
+    const res = await apiFetch(`/api/v1/invoices/${invoice.id}/download`);
+    if (!res.ok) throw await errorFromResponse(res);
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `SmartSpace-Invoice-${invoice.id.slice(0, 8).toUpperCase()}.html`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
   }
 
   return {
     plans,
+    plansError,
     currentSubscription,
     invoices,
-    isLoading,
-    selectedInterval,
+    isCheckingOut,
     fetchPlans,
     fetchSubscription,
     fetchInvoices,
     checkout,
     cancel,
+    downloadInvoice,
   };
 });

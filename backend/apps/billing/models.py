@@ -141,6 +141,44 @@ class Subscription(BaseModel):
         return f"{self.user.email} - {self.plan.name} ({self.status})"
 
 
+class PaymentOrder(BaseModel):
+    """
+    A Razorpay order created by the server. The plan, interval and amount a payment
+    buys always come from this record, never from the browser, and each order can
+    activate a subscription only once.
+    """
+    STATUS_CREATED = "created"
+    STATUS_PAID = "paid"
+    STATUS_FAILED = "failed"
+    STATUS_CHOICES = [
+        (STATUS_CREATED, "Created"),
+        (STATUS_PAID, "Paid"),
+        (STATUS_FAILED, "Failed"),
+    ]
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="payment_orders",
+    )
+    plan = models.ForeignKey(Plan, on_delete=models.PROTECT, related_name="payment_orders")
+    billing_interval = models.CharField(max_length=20, default="monthly")
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    currency = models.CharField(max_length=10, default="INR")
+    # Two-digit GST state code of the customer, used to pick IGST vs CGST+SGST.
+    billing_state = models.CharField(max_length=2, blank=True, default="")
+    provider_order_id = models.CharField(max_length=255, unique=True)
+    provider_payment_id = models.CharField(max_length=255, null=True, blank=True, unique=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_CREATED)
+    paid_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"Order {self.provider_order_id} - {self.user.email} ({self.status})"
+
+
 class Invoice(BaseModel):
     subscription = models.ForeignKey(
         Subscription,
@@ -154,6 +192,10 @@ class Invoice(BaseModel):
     status = models.CharField(max_length=50, default="paid")  # paid, pending, failed
     pdf_url = models.URLField(blank=True, default="")
     issued_at = models.DateTimeField(default=timezone.now)
+    plan_name = models.CharField(max_length=100, blank=True, default="")
+    billing_interval = models.CharField(max_length=20, blank=True, default="")
+    # Customer's GST state code at purchase time ("" when unknown)
+    place_of_supply = models.CharField(max_length=2, blank=True, default="")
 
     class Meta:
         ordering = ["-issued_at"]

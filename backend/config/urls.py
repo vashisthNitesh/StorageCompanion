@@ -2,15 +2,17 @@ from django.contrib import admin
 from django.urls import path, include, re_path
 from django.views.generic import TemplateView
 
+from apps.common.views import health
+
 urlpatterns = [
     # Non-default admin path as specified in single-server architecture
     path("django-admin/", admin.site.urls),
-    
+
     # API v1 routes
+    path("api/v1/health", health, name="health"),
     path("api/v1/auth/", include("apps.accounts.urls")),
     path("api/v1/admin/", include("apps.accounts.admin_urls")),
     path("api/v1/", include("apps.storage.urls")),
-    path("api/v1/", include("apps.sharing.urls")),
     path("api/v1/", include("apps.billing.urls")),
     path("api/v1/audit-logs/", include("apps.audit.urls")),
 

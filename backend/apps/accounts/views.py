@@ -1,10 +1,13 @@
+import pyotp
 from django.conf import settings
-from django.utils import timezone
+from django.contrib.auth import authenticate
 from rest_framework import status, permissions, generics
+from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.response import Response
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
-from rest_framework_simplejwt.exceptions import TokenError, InvalidToken
+from rest_framework_simplejwt.exceptions import TokenError
 
 from apps.accounts.models import User, Session
 from apps.accounts.serializers import (
@@ -13,19 +16,26 @@ from apps.accounts.serializers import (
     LoginSerializer,
     SessionSerializer,
     ChangePasswordSerializer,
-    RecoverySerializer,
     GoogleAuthSerializer,
+    VaultSetupSerializer,
 )
 from apps.accounts.services import (
     register_user,
-    create_user_session,
+    issue_session_tokens,
+    rotate_refresh_token,
+    revoke_session,
+    revoke_other_sessions,
     setup_totp_mfa,
+    check_mfa_for_login,
     verify_totp_code,
+    ensure_not_locked_out,
+    record_failed_auth,
+    clear_failed_auth,
     verify_google_credential,
-    get_or_create_google_user,
+    resolve_google_user,
+    google_vault_key_for,
 )
 from apps.audit.models import AuditLog
-
 
 
 def set_refresh_cookie(response: Response, refresh_token: str) -> None:
@@ -50,7 +60,26 @@ def clear_refresh_cookie(response: Response) -> None:
     )
 
 
-class RegisterView(APIView):
+def current_session_id(request) -> str | None:
+    token = getattr(request, "auth", None)
+    return token.get("sid") if token is not None else None
+
+
+def resolve_login_email(identifier: str) -> str:
+    """Accepts a full email or the part before "@" (e.g. an admin username)."""
+    identifier = identifier.strip()
+    if "@" in identifier:
+        return identifier.lower()
+    matched = User.objects.filter(email__istartswith=f"{identifier}@").values_list("email", flat=True).first()
+    return matched or identifier.lower()
+
+
+class AuthThrottleMixin:
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "auth"
+
+
+class RegisterView(AuthThrottleMixin, APIView):
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
@@ -84,33 +113,33 @@ class RegisterView(APIView):
         return response
 
 
-class LoginView(APIView):
+class LoginView(AuthThrottleMixin, APIView):
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
         serializer = LoginSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        user = serializer.validated_data["user"]
+        email = resolve_login_email(serializer.validated_data["email"])
+        password = serializer.validated_data["password"]
         totp_code = serializer.validated_data.get("totp_code")
 
-        # Check MFA
-        if user.mfa_enabled:
-            if not totp_code:
+        ensure_not_locked_out(email)
+        user = authenticate(request, username=email, password=password)
+        if user is None:
+            record_failed_auth(email)
+            return Response({"error": "Invalid email or password."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            if not check_mfa_for_login(user, totp_code):
                 return Response(
-                    {
-                        "success": False,
-                        "mfa_required": True,
-                        "message": "MFA verification code required.",
-                    },
+                    {"success": False, "mfa_required": True, "message": "Enter the code from your authenticator app."},
                     status=status.HTTP_200_OK,
                 )
-            if not verify_totp_code(user, totp_code):
-                return Response(
-                    {"error": "Invalid MFA verification code."},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
+        except AuthenticationFailed as e:
+            return Response({"error": str(e.detail)}, status=status.HTTP_400_BAD_REQUEST)
 
-        refresh, session = create_user_session(user, request)
+        clear_failed_auth(email)
+        refresh, _ = issue_session_tokens(user, request)
         response = Response(
             {
                 "success": True,
@@ -123,12 +152,14 @@ class LoginView(APIView):
         return response
 
 
-class RefreshTokenView(APIView):
+class RefreshTokenView(AuthThrottleMixin, APIView):
     permission_classes = [permissions.AllowAny]
+    authentication_classes = []
+    throttle_scope = "refresh"
 
     def post(self, request):
         cookie_name = settings.SIMPLE_JWT["AUTH_COOKIE"]
-        refresh_token = request.COOKIES.get(cookie_name) or request.data.get("refresh")
+        refresh_token = request.COOKIES.get(cookie_name)
 
         if not refresh_token:
             return Response(
@@ -137,48 +168,33 @@ class RefreshTokenView(APIView):
             )
 
         try:
-            token = RefreshToken(refresh_token)
-            new_access_token = str(token.access_token)
-            user_id = token.payload.get(settings.SIMPLE_JWT["USER_ID_CLAIM"])
-            user = User.objects.get(id=user_id)
-            user_data = UserSerializer(user).data
-            
-            # Rotate refresh token if configured
-            if settings.SIMPLE_JWT.get("ROTATE_REFRESH_TOKENS", True):
-                token.blacklist()
-                new_refresh = RefreshToken.for_user(user)
-                response = Response({
-                    "access_token": new_access_token,
-                    "user": user_data,
-                })
-                set_refresh_cookie(response, str(new_refresh))
-                return response
-
-            return Response({
-                "access_token": new_access_token,
-                "user": user_data,
-            })
-        except (TokenError, User.DoesNotExist) as e:
-            response = Response({"error": str(e)}, status=status.HTTP_401_UNAUTHORIZED)
+            user, new_refresh = rotate_refresh_token(refresh_token)
+        except AuthenticationFailed as e:
+            response = Response({"error": str(e.detail)}, status=status.HTTP_401_UNAUTHORIZED)
             clear_refresh_cookie(response)
             return response
+
+        response = Response({
+            "access_token": str(new_refresh.access_token),
+            "user": UserSerializer(user).data,
+        })
+        set_refresh_cookie(response, str(new_refresh))
+        return response
 
 
 class LogoutView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
-        cookie_name = settings.SIMPLE_JWT["AUTH_COOKIE"]
-        refresh_token = request.COOKIES.get(cookie_name) or request.data.get("refresh")
+        session = Session.objects.filter(id=current_session_id(request), user=request.user).first()
+        if session:
+            revoke_session(session)
 
+        cookie_name = settings.SIMPLE_JWT["AUTH_COOKIE"]
+        refresh_token = request.COOKIES.get(cookie_name)
         if refresh_token:
             try:
-                token = RefreshToken(refresh_token)
-                token.blacklist()
-                # Deactivate session
-                Session.objects.filter(token_jti=token.payload.get("jti")).update(
-                    revoked_at=timezone.now()
-                )
+                RefreshToken(refresh_token).blacklist()
             except TokenError:
                 pass
 
@@ -202,7 +218,7 @@ class MeView(APIView):
         return Response(serializer.data)
 
 
-class ChangePasswordView(APIView):
+class ChangePasswordView(AuthThrottleMixin, APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
@@ -227,14 +243,58 @@ class ChangePasswordView(APIView):
             user.kdf_params = data["new_kdf_params"]
         user.save()
 
+        # Sign out every other device that knew the old password.
+        revoked = revoke_other_sessions(user, keep_session_id=current_session_id(request))
+
         AuditLog.objects.create(
             user=user,
             action="user.password_changed",
             target_type="user",
             target_id=str(user.id),
+            metadata={"sessions_revoked": revoked},
         )
 
-        return Response({"success": True, "message": "Password updated successfully."})
+        return Response({"success": True, "message": "Password updated. Other devices have been signed out."})
+
+
+class VaultSetupView(AuthThrottleMixin, APIView):
+    """
+    One-time vault creation for password accounts that do not have one yet (for example
+    accounts created by an administrator). The browser generates and wraps the keys.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        user = request.user
+        if user.wrapped_master_key:
+            return Response({"error": "This account already has a vault."}, status=status.HTTP_400_BAD_REQUEST)
+        if not user.has_usable_password() or not user.check_password(request.data.get("password") or ""):
+            return Response({"error": "Invalid password."}, status=status.HTTP_400_BAD_REQUEST)
+
+        serializer = VaultSetupSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        for field, value in serializer.validated_data.items():
+            setattr(user, field, value)
+        user.save(update_fields=list(serializer.validated_data.keys()))
+        AuditLog.objects.create(user=user, action="vault.created", target_type="user", target_id=str(user.id))
+        return Response({"success": True, "user": UserSerializer(user).data})
+
+
+class GoogleVaultKeyView(APIView):
+    """
+    Returns the server-derived vault key of an account created with Google sign-in, so a
+    new browser tab of an authenticated session can open the vault. Accounts with a
+    password-protected vault never get a key from the server.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        key = google_vault_key_for(request.user)
+        if not key:
+            return Response({"error": "This account's vault is unlocked with its password."}, status=status.HTTP_404_NOT_FOUND)
+        response = Response({"oauth_vault_hex": key})
+        response["Cache-Control"] = "no-store"
+        return response
 
 
 class MFAEnrollView(APIView):
@@ -245,11 +305,11 @@ class MFAEnrollView(APIView):
         return Response(device_data)
 
 
-class MFAVerifyView(APIView):
+class MFAVerifyView(AuthThrottleMixin, APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
-        code = request.data.get("code")
+        code = (request.data.get("code") or "").replace(" ", "")
         if not code:
             return Response({"error": "Verification code is required."}, status=400)
 
@@ -257,7 +317,6 @@ class MFAVerifyView(APIView):
         if not device:
             return Response({"error": "No pending MFA setup found."}, status=400)
 
-        import pyotp
         totp = pyotp.TOTP(device.secret)
         if totp.verify(code, valid_window=1):
             device.confirmed = True
@@ -276,13 +335,18 @@ class MFAVerifyView(APIView):
         return Response({"error": "Invalid verification code."}, status=400)
 
 
-class MFADisableView(APIView):
+class MFADisableView(AuthThrottleMixin, APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
-        password = request.data.get("password")
-        if not password or not request.user.check_password(password):
-            return Response({"error": "Invalid password."}, status=400)
+        user = request.user
+        if user.has_usable_password():
+            password = request.data.get("password")
+            if not password or not user.check_password(password):
+                return Response({"error": "Invalid password."}, status=400)
+        elif not verify_totp_code(user, request.data.get("code") or ""):
+            # Google-only accounts have no password; they confirm with a current 2FA code.
+            return Response({"error": "Invalid verification code."}, status=400)
 
         request.user.mfa_enabled = False
         request.user.save(update_fields=["mfa_enabled"])
@@ -300,9 +364,17 @@ class MFADisableView(APIView):
 class SessionListView(generics.ListAPIView):
     serializer_class = SessionSerializer
     permission_classes = [permissions.IsAuthenticated]
+    pagination_class = None
 
     def get_queryset(self):
-        return Session.objects.filter(user=self.request.user)
+        return Session.objects.filter(user=self.request.user, revoked_at__isnull=True)
+
+    def list(self, request, *args, **kwargs):
+        response = super().list(request, *args, **kwargs)
+        current = current_session_id(request)
+        for item in response.data:
+            item["is_current"] = str(item["id"]) == str(current)
+        return response
 
 
 class SessionRevokeView(APIView):
@@ -313,8 +385,7 @@ class SessionRevokeView(APIView):
         if not session:
             return Response({"error": "Session not found."}, status=404)
 
-        session.revoked_at = timezone.now()
-        session.save(update_fields=["revoked_at"])
+        revoke_session(session)
 
         AuditLog.objects.create(
             user=request.user,
@@ -325,23 +396,39 @@ class SessionRevokeView(APIView):
         return Response({"success": True, "message": "Session revoked."})
 
 
-class GoogleAuthView(APIView):
+class GoogleAuthView(AuthThrottleMixin, APIView):
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
         serializer = GoogleAuthSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         credential = serializer.validated_data["credential"]
+        totp_code = serializer.validated_data.get("totp_code")
 
         payload = verify_google_credential(credential)
-        user, refresh, oauth_vault_hex = get_or_create_google_user(payload, request=request)
+        ensure_not_locked_out(payload["email"])
+        user, is_new = resolve_google_user(payload)
+
+        try:
+            if not check_mfa_for_login(user, totp_code):
+                return Response(
+                    {"success": False, "mfa_required": True, "message": "Enter the code from your authenticator app."},
+                    status=status.HTTP_200_OK,
+                )
+        except AuthenticationFailed as e:
+            return Response({"error": str(e.detail)}, status=status.HTTP_400_BAD_REQUEST)
+
+        clear_failed_auth(user.email)
+        refresh, _ = issue_session_tokens(
+            user, request, audit_action="user.registered_google" if is_new else "auth.google_login"
+        )
 
         response = Response(
             {
                 "success": True,
                 "user": UserSerializer(user).data,
                 "access_token": str(refresh.access_token),
-                "oauth_vault_hex": oauth_vault_hex,
+                "oauth_vault_hex": google_vault_key_for(user),
             },
             status=status.HTTP_200_OK,
         )
@@ -351,10 +438,10 @@ class GoogleAuthView(APIView):
 
 class AuthConfigView(APIView):
     permission_classes = [permissions.AllowAny]
+    authentication_classes = []
 
     def get(self, request):
         return Response({
             "google_client_id": getattr(settings, "GOOGLE_CLIENT_ID", ""),
-            "payment_provider": getattr(settings, "PAYMENT_PROVIDER", "razorpay"),
+            "payments_enabled": bool(settings.RAZORPAY_KEY_ID and settings.RAZORPAY_KEY_SECRET),
         })
-

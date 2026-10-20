@@ -9,10 +9,11 @@ from datetime import timedelta
 from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
-from rest_framework.exceptions import NotFound, ValidationError
+from rest_framework.exceptions import APIException, NotFound, ValidationError
 
 from apps.accounts.models import User
-from apps.billing.models import Plan, Subscription, Invoice, PaymentEvent
+from apps.billing.gst import GST_STATES
+from apps.billing.models import Plan, Subscription, Invoice, PaymentEvent, PaymentOrder
 from apps.storage.models import StorageQuota
 from apps.audit.models import AuditLog
 
@@ -23,78 +24,89 @@ def get_active_plans():
     return Plan.objects.filter(is_active=True).order_by("sort_order")
 
 
-def create_razorpay_order(user: User, plan_code: str, billing_interval: str = "monthly") -> dict:
+class PaymentsNotConfigured(APIException):
+    status_code = 503
+    default_detail = "Online payments are not available right now. Please try again later."
+    default_code = "payments_not_configured"
+
+
+def razorpay_configured() -> bool:
+    return bool(settings.RAZORPAY_KEY_ID and settings.RAZORPAY_KEY_SECRET)
+
+
+def create_razorpay_order(
+    user: User,
+    plan_code: str,
+    billing_interval: str = "monthly",
+    billing_state: str = "",
+) -> dict:
     """
-    Creates an authentic order with Razorpay API (or structured mock when in local demo).
+    Creates an order with the Razorpay Orders API and records it locally, so that the
+    plan and amount a payment buys are fixed on the server.
     """
+    if not razorpay_configured():
+        raise PaymentsNotConfigured()
+
     plan = Plan.objects.filter(code=plan_code, is_active=True).first()
     if not plan:
         raise NotFound(f"Plan '{plan_code}' not found.")
+    if billing_state and billing_state not in GST_STATES:
+        raise ValidationError("Unknown billing state.")
 
     amount = plan.price_yearly if billing_interval == "yearly" else plan.price_monthly
     amount_in_paise = int(amount * 100)
 
-    key_id = getattr(settings, "RAZORPAY_KEY_ID", "")
-    key_secret = getattr(settings, "RAZORPAY_KEY_SECRET", "")
+    key_id = settings.RAZORPAY_KEY_ID
+    auth_str = f"{key_id}:{settings.RAZORPAY_KEY_SECRET}"
+    b64_auth = base64.b64encode(auth_str.encode("utf-8")).decode("ascii")
+    receipt_id = f"rcpt_{str(user.id).replace('-', '')[:10]}_{int(timezone.now().timestamp())}"
 
-    # Check if real Razorpay credentials are provided (live or valid rzp_test keys)
-    is_real_credentials = (
-        key_id
-        and key_secret
-        and key_id != "rzp_test_sample"
-        and key_secret != "sample_secret_key"
+    payload = {
+        "amount": amount_in_paise,
+        "currency": plan.currency,
+        "receipt": receipt_id,
+        "notes": {
+            "user_id": str(user.id),
+            "plan_code": plan.code,
+            "billing_interval": billing_interval,
+        },
+    }
+
+    req = urllib.request.Request(
+        "https://api.razorpay.com/v1/orders",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Basic {b64_auth}",
+            "User-Agent": "SmartSpace-Billing/1.0",
+        },
+        method="POST",
     )
 
-    if is_real_credentials:
-        # Call Razorpay Orders API: https://api.razorpay.com/v1/orders
-        auth_str = f"{key_id}:{key_secret}"
-        b64_auth = base64.b64encode(auth_str.encode("utf-8")).decode("ascii")
-        receipt_id = f"rcpt_{str(user.id).replace('-', '')[:10]}_{int(timezone.now().timestamp())}"
+    try:
+        with urllib.request.urlopen(req, timeout=12) as response:
+            resp_body = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        err_content = e.read().decode("utf-8", errors="ignore")
+        logger.error("Razorpay order creation failed: %s, %s", e.code, err_content[:300])
+        raise ValidationError("Could not start the payment. Please try again.")
+    except Exception as e:
+        logger.error("Razorpay connection error: %s", e)
+        raise ValidationError("Could not reach the payment provider. Please try again.")
 
-        payload = {
-            "amount": amount_in_paise,
-            "currency": plan.currency,
-            "receipt": receipt_id,
-            "notes": {
-                "user_id": str(user.id),
-                "user_email": user.email,
-                "plan_code": plan.code,
-                "billing_interval": billing_interval,
-            },
-        }
+    order_id = resp_body.get("id")
+    if not order_id:
+        raise ValidationError("Could not start the payment. Please try again.")
 
-        req = urllib.request.Request(
-            "https://api.razorpay.com/v1/orders",
-            data=json.dumps(payload).encode("utf-8"),
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Basic {b64_auth}",
-                "User-Agent": "SmartSpaceData-Subscription/1.0",
-            },
-            method="POST",
-        )
-
-        try:
-            with urllib.request.urlopen(req, timeout=12) as response:
-                resp_body = json.loads(response.read().decode("utf-8"))
-                order_id = resp_body.get("id")
-                if not order_id:
-                    raise ValidationError("Failed to retrieve order_id from Razorpay.")
-        except urllib.error.HTTPError as e:
-            err_content = e.read().decode("utf-8")
-            logger.error("Razorpay API HTTPError: %s, %s", e.code, err_content)
-            try:
-                err_json = json.loads(err_content)
-                desc = err_json.get("error", {}).get("description") or err_content
-            except Exception:
-                desc = err_content
-            raise ValidationError(f"Razorpay Order Error ({e.code}): {desc}")
-        except Exception as e:
-            logger.error("Razorpay connection error: %s", str(e))
-            raise ValidationError(f"Razorpay connectivity failure: {str(e)}")
-    else:
-        # Structured demo order when running in local development mode without keys
-        order_id = f"order_mock_{plan.code}_{int(timezone.now().timestamp())}"
+    PaymentOrder.objects.create(
+        user=user,
+        plan=plan,
+        billing_interval=billing_interval,
+        amount=amount,
+        currency=plan.currency,
+        billing_state=billing_state,
+        provider_order_id=order_id,
+    )
 
     return {
         "provider": "razorpay",
@@ -117,14 +129,9 @@ def verify_razorpay_signature(payment_id: str, order_id: str, signature: str) ->
     Verifies Razorpay payment signature according to Razorpay specification:
     HMAC SHA256 of (order_id + '|' + payment_id) with key_secret.
     """
-    key_secret = getattr(settings, "RAZORPAY_KEY_SECRET", "")
-
-    # In local testing or mock order mode:
-    if order_id.startswith("order_mock_") and signature == "mock_signature_approved":
-        return True
-
-    if not key_secret or key_secret == "sample_secret_key":
-        return True
+    key_secret = settings.RAZORPAY_KEY_SECRET
+    if not key_secret or not signature:
+        return False
 
     generated_signature = hmac.new(
         key_secret.encode("utf-8"),
@@ -137,8 +144,8 @@ def verify_razorpay_signature(payment_id: str, order_id: str, signature: str) ->
 
 def verify_webhook_signature(body_bytes: bytes, signature: str) -> bool:
     secret = settings.RAZORPAY_WEBHOOK_SECRET
-    if not secret or secret == "sample_webhook_secret":
-        return True
+    if not secret or not signature:
+        return False
 
     expected = hmac.new(
         secret.encode("utf-8"),
@@ -150,54 +157,82 @@ def verify_webhook_signature(body_bytes: bytes, signature: str) -> bool:
 
 
 @transaction.atomic
-def activate_subscription(
-    user: User,
-    plan_code: str,
-    provider_payment_id: str,
-    provider_order_id: str,
-    billing_interval: str = "monthly",
-) -> Subscription:
+def fulfil_payment_order(order_id: str, payment_id: str, user: User | None = None) -> Subscription:
     """
-    Activates or updates a user's subscription and synchronizes their storage quota limit.
+    Marks a server-side order as paid and activates the plan recorded on it.
+    Each order (and each payment id) can only be used once.
     """
-    plan = Plan.objects.filter(code=plan_code, is_active=True).first()
-    if not plan:
-        raise NotFound("Plan not found.")
+    orders = PaymentOrder.objects.select_for_update().select_related("plan", "user")
+    order = orders.filter(provider_order_id=order_id).first()
+    if order is None or (user is not None and order.user_id != user.id):
+        raise ValidationError("Payment order not found.")
+    if order.status == PaymentOrder.STATUS_PAID:
+        if order.provider_payment_id == payment_id:
+            return order.user.subscription
+        raise ValidationError("This order has already been paid.")
+    if PaymentOrder.objects.filter(provider_payment_id=payment_id).exclude(id=order.id).exists():
+        raise ValidationError("This payment has already been used.")
 
-    duration_days = 365 if billing_interval == "yearly" else 30
-    period_start = timezone.now()
+    order.status = PaymentOrder.STATUS_PAID
+    order.provider_payment_id = payment_id
+    order.paid_at = timezone.now()
+    order.save(update_fields=["status", "provider_payment_id", "paid_at"])
+
+    return activate_subscription(order)
+
+
+def activate_subscription(order: PaymentOrder) -> Subscription:
+    """
+    Activates or renews a user's subscription for a paid order and synchronizes their
+    storage quota limit. Renewing the same plan before it ends extends the current period.
+    """
+    user = order.user
+    plan = order.plan
+    duration_days = 365 if order.billing_interval == "yearly" else 30
+    now = timezone.now()
+
+    existing = Subscription.objects.select_for_update().filter(user=user).first()
+    period_start = now
+    if (
+        existing
+        and existing.plan_id == plan.id
+        and existing.status in ("active", "extended", "trialing")
+        and existing.current_period_end
+        and existing.current_period_end > now
+    ):
+        period_start = existing.current_period_end
     period_end = period_start + timedelta(days=duration_days)
 
-    subscription, created = Subscription.objects.update_or_create(
+    subscription, _ = Subscription.objects.update_or_create(
         user=user,
         defaults={
             "plan": plan,
             "provider": "razorpay",
-            "provider_subscription_id": provider_order_id,
+            "provider_subscription_id": order.provider_order_id,
             "status": "active",
-            "billing_interval": billing_interval,
-            "current_period_start": period_start,
+            "billing_interval": order.billing_interval,
+            "current_period_start": now if period_start == now else existing.current_period_start,
             "current_period_end": period_end,
             "cancel_at_period_end": False,
             "grace_period_ends_at": None,
         },
     )
 
-    # Sync Storage Quota limit
     quota, _ = StorageQuota.objects.select_for_update().get_or_create(user=user)
     quota.bytes_limit = plan.storage_bytes
     quota.save(update_fields=["bytes_limit"])
 
-    # Record Invoice
-    amount = plan.price_yearly if billing_interval == "yearly" else plan.price_monthly
     Invoice.objects.create(
         subscription=subscription,
-        provider_invoice_id=provider_order_id,
-        provider_payment_id=provider_payment_id,
-        amount=amount,
-        currency=plan.currency,
+        provider_invoice_id=order.provider_order_id,
+        provider_payment_id=order.provider_payment_id or "",
+        amount=order.amount,
+        currency=order.currency,
         status="paid",
-        issued_at=period_start,
+        issued_at=now,
+        plan_name=plan.name,
+        billing_interval=order.billing_interval,
+        place_of_supply=order.billing_state,
     )
 
     AuditLog.objects.create(
@@ -205,7 +240,7 @@ def activate_subscription(
         action="subscription.activated",
         target_type="subscription",
         target_id=str(subscription.id),
-        metadata={"plan": plan.code, "amount": str(amount), "currency": plan.currency},
+        metadata={"plan": plan.code, "amount": str(order.amount), "currency": order.currency, "order_id": order.provider_order_id},
     )
 
     return subscription
@@ -214,12 +249,15 @@ def activate_subscription(
 @transaction.atomic
 def process_webhook_event(payload: dict, event_id: str) -> bool:
     """
-    Idempotent webhook processor. If event_id has already been processed, returns True immediately.
+    Idempotent webhook processor for signed Razorpay events. A captured payment for a
+    known order activates the subscription even if the browser never called /verify.
     """
+    if not event_id:
+        event_id = hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
     if PaymentEvent.objects.filter(provider_event_id=event_id).exists():
         return True  # Already processed idempotently
 
-    event_type = payload.get("event", "payment.captured")
+    event_type = payload.get("event", "")
 
     PaymentEvent.objects.create(
         provider="razorpay",
@@ -229,17 +267,20 @@ def process_webhook_event(payload: dict, event_id: str) -> bool:
         status="processed",
     )
 
-    # Handle specific events if needed
-    entity = payload.get("payload", {}).get("payment", {}).get("entity", {})
-    email = entity.get("email")
-    if email:
-        user = User.objects.filter(email=email.lower().strip()).first()
-        if user and event_type in ["payment.failed", "subscription.cancelled"]:
-            sub = getattr(user, "subscription", None)
-            if sub and sub.status == "active":
-                sub.status = "grace_period"
-                sub.grace_period_ends_at = timezone.now() + timedelta(days=15)
-                sub.save(update_fields=["status", "grace_period_ends_at"])
+    entity = payload.get("payload", {}).get("payment", {}).get("entity", {}) or {}
+    order_id = entity.get("order_id")
+    payment_id = entity.get("id")
+    if not order_id or not payment_id:
+        return True
+
+    if event_type in ("payment.captured", "order.paid"):
+        order = PaymentOrder.objects.filter(provider_order_id=order_id).first()
+        if order and order.status != PaymentOrder.STATUS_PAID and int(entity.get("amount", 0)) == int(order.amount * 100):
+            fulfil_payment_order(order_id, payment_id)
+    elif event_type == "payment.failed":
+        PaymentOrder.objects.filter(provider_order_id=order_id, status=PaymentOrder.STATUS_CREATED).update(
+            status=PaymentOrder.STATUS_FAILED
+        )
 
     return True
 

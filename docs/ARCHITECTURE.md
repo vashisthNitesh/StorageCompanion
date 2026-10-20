@@ -1,35 +1,39 @@
-# SpeedCloud System Architecture
+# SmartSpace Architecture
 
-## 1. Single-Server VPS Deployment Topology
+## Deployment (Render, single Docker container)
 
 ```
-                                  Client Browser
-                                        │
-                         ┌──────────────┴──────────────┐
-                         ▼                             ▼
-             Vite Built Assets & API           Direct Binary Streams
-             https://vault.speedcloud.app      https://*.r2.cloudflarestorage.com
-                         │
-                         ▼
-             Nginx (Port 80 / 443)
-             ├── /             ──► Serves static /var/www/app (dist/)
-             ├── /assets/      ──► 1-year immutable cache
-             ├── /api/         ──► Reverse-proxy to Gunicorn (127.0.0.1:8000)
-             └── /django-admin/──► Reverse-proxy to Gunicorn
-                         │
-                         ▼
-             Gunicorn + Uvicorn Workers (Port 8000)
-             Django 5.x + Django REST Framework
-                         │
-             ┌───────────┼───────────┐
-             ▼           ▼           ▼
-        PostgreSQL 16  Redis 7    Celery Worker & Beat
-        (Metadata)     (Sessions) (Nightly Reconciliation)
+Browser ──HTTPS──▶ Render edge ──▶ nginx :$PORT
+                                    ├─ /            Vue SPA (static, built at image build time)
+                                    ├─ /assets/     hashed static assets (1 year cache)
+                                    └─ /api/, /django-admin/, /static/ ─▶ Gunicorn :8000
+                                                                           (Django + DRF, gthread workers)
+Gunicorn ──▶ PostgreSQL (Neon, DATABASE_URL)
+         ──▶ SpaceByte API (encrypted parts, downloads)
+         ──▶ Razorpay API (orders)  ◀── Razorpay webhooks
 ```
 
-## 2. Zero-Knowledge Guarantees
+- One deployment path: `Dockerfile` + `render.yaml` + `render-entrypoint.sh` + `infra/nginx/render.conf.template`.
+- Gunicorn runs threaded WSGI workers (`WEB_CONCURRENCY` × `GUNICORN_THREADS`, default 1 × 8), so slow
+  storage transfers don't block other requests.
+- On every start the entrypoint runs migrations, `seed_plans` and `create_master_admin`
+  (from `MASTER_ADMIN_EMAIL` / `MASTER_ADMIN_PASSWORD`).
+- There is no background worker: plan expiry runs from the admin console ("Run expiry check")
+  or `manage.py process_expired_subscriptions` on a schedule.
 
-1. **Client-Side Key Derivation**: KEK is derived via WebAssembly Argon2id in the browser.
-2. **Deterministic Nonces**: Each chunk $i$ is encrypted with $Nonce_{base} \oplus i$ preventing nonce reuse.
-3. **Fragment-Based Links**: Decryption keys for public links reside in `https://domain/s/token#key=...`. Per RFC 3986, fragments are never transmitted to HTTP servers.
-4. **Offline Recovery Phrase**: 24-word BIP-39 mnemonic phrase wraps a secondary copy of the Master Key.
+## Storage
+SpaceByte is the only storage backend. Without `SPACEBYTE_ACCESS_TOKEN` the client returns mock
+responses in `DEBUG` (local development and tests) and fails loudly in production.
+
+## Privacy model
+Files and names are encrypted in the browser (see `CRYPTO.md`). The server stores ciphertext,
+wrapped keys, folder structure, sizes and timestamps.
+
+## Local development
+```
+cd backend && uv sync --extra dev   # or: python -m venv .venv && pip install -e ".[dev]"
+make migrate seed dev-backend       # Django on :8000 (SQLite by default)
+make dev-frontend                   # Vite on :5173, proxies /api
+make test                           # backend tests always use in-memory SQLite
+```
+Set `API_PROXY_TARGET` if the backend runs on another port.

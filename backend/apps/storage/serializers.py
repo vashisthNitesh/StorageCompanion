@@ -27,8 +27,6 @@ class NodeSerializer(serializers.ModelSerializer):
             "encrypted_name",
             "name_nonce",
             "size_bytes",
-            "thumbnail_object_key",
-            "thumbnail_nonce",
             "created_at",
             "updated_at",
             "trashed_at",
@@ -61,18 +59,10 @@ class InitUploadSerializer(serializers.Serializer):
     )
 
 
-class PartSerializer(serializers.Serializer):
-    part_number = serializers.IntegerField(min_value=1)
-    etag = serializers.CharField(required=False, default="")
-
-
 class CompleteUploadSerializer(serializers.Serializer):
-    parts = serializers.ListField(child=serializers.DictField())
     wrapped_file_key = serializers.CharField()
     content_nonce = serializers.CharField(max_length=64)
     checksum = serializers.CharField(required=False, allow_blank=True, default="")
-    thumbnail_object_key = serializers.CharField(required=False, allow_blank=True, default="")
-    thumbnail_nonce = serializers.CharField(required=False, allow_blank=True, default="")
 
 
 class StorageQuotaSerializer(serializers.ModelSerializer):

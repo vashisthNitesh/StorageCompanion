@@ -1,228 +1,138 @@
 import { ref } from "vue";
 import { useAuthStore } from "../../stores/auth";
-import { apiRequest, apiFetch } from "../../lib/api";
+import { useToastStore } from "../../stores/toast";
+import { apiRequest, apiFetch, errorFromResponse } from "../../lib/api";
 import { unwrapKey } from "../../lib/crypto/keys";
-import { decryptChunk } from "../../lib/crypto/content";
+import { importFileKey, deriveChunkNonce } from "../../lib/crypto/content";
 import { hexToUint8Array } from "../../lib/crypto/kdf";
 import type { FileNode } from "../../stores/files";
 
-const downloadingIds = ref<Set<string>>(new Set());
-const downloadProgress = ref<Record<string, number>>({});
-const downloadStatusText = ref<Record<string, string>>({});
+// Shared across components so every view shows the same progress.
+const progress = ref<Record<string, number>>({});
+
+interface DownloadInfo {
+  download_url: string;
+  wrapped_file_key: string;
+  content_nonce: string;
+  size_bytes: number;
+  part_size: number;
+}
+
+const GCM_TAG = 16;
+// Files at least this big are streamed straight to disk when the browser supports it.
+const STREAM_TO_DISK_BYTES = 400 * 1024 * 1024;
 
 export function useFileDownload() {
   const authStore = useAuthStore();
+  const toast = useToastStore();
 
-  function isDownloading(nodeId: string): boolean {
-    return downloadingIds.value.has(nodeId);
-  }
+  const keyFor = (node: FileNode, version?: number) => (version ? `${node.id}:v${version}` : node.id);
+  const isDownloading = (node: FileNode, version?: number) => keyFor(node, version) in progress.value;
+  const progressOf = (node: FileNode, version?: number) => progress.value[keyFor(node, version)] ?? 0;
 
-  function getProgress(nodeId: string): number {
-    return downloadProgress.value[nodeId] || 0;
-  }
-
-  function getStatusText(nodeId: string): string {
-    return downloadStatusText.value[nodeId] || "";
-  }
-
-  async function downloadFile(node: FileNode, versionNo?: number): Promise<void> {
-    if (node.type === "folder") return;
-
+  async function downloadFile(node: FileNode, version?: number): Promise<void> {
+    if (node.type !== "file") return;
     if (!authStore.masterKey) {
-      alert("Please unlock your vault before downloading files.");
+      toast.error("Unlock your vault before downloading.");
       return;
     }
-
-    const downloadKey = versionNo ? `${node.id}-v${versionNo}` : node.id;
-    downloadingIds.value.add(downloadKey);
-    downloadProgress.value[downloadKey] = 0;
-    downloadStatusText.value[downloadKey] = "Connecting...";
-
-    let writableStream: any = null;
+    const key = keyFor(node, version);
+    if (key in progress.value) return;
+    progress.value = { ...progress.value, [key]: 0 };
+    const fileName = version ? `v${version} - ${node.name}` : node.name;
+    let writable: any = null;
 
     try {
-      // 1. Fetch download metadata (presigned/proxy URL & wrapped key)
-      const vQuery = versionNo ? `?v=${versionNo}` : "";
-      const downloadData = await apiRequest<{
-        download_url: string;
-        wrapped_file_key: string;
-        content_nonce: string;
-        size_bytes: number;
-        part_size?: number;
-        direct_url?: string;
-        upstream?: string;
-      }>(`/api/v1/nodes/${node.id}/download${vQuery}`);
+      const info = await apiRequest<DownloadInfo>(`/api/v1/nodes/${node.id}/download${version ? `?v=${version}` : ""}`);
+      const total = info.size_bytes || node.size_bytes || 0;
 
-      const totalSize = downloadData.size_bytes || node.size_bytes || 0;
-      const isLargeFile = totalSize >= 400 * 1024 * 1024; // >= 400 MB
-
-      // For large files (> 400 MB), try File System Access API for zero-RAM direct-to-disk streaming
-      if (isLargeFile && typeof window !== "undefined" && "showSaveFilePicker" in window) {
+      if (total >= STREAM_TO_DISK_BYTES && "showSaveFilePicker" in window) {
         try {
-          downloadStatusText.value[downloadKey] = "Choose save location...";
-          const fileHandle = await (window as any).showSaveFilePicker({
-            suggestedName: versionNo ? `v${versionNo}_${node.name}` : node.name,
-          });
-          writableStream = await fileHandle.createWritable();
-        } catch (pickerErr: any) {
-          if (pickerErr.name === "AbortError") {
-            // User cancelled the file picker dialog
-            return;
-          }
-          // Fall back to in-memory chunked blob assembly
-          writableStream = null;
+          const handle = await (window as any).showSaveFilePicker({ suggestedName: fileName });
+          writable = await handle.createWritable();
+        } catch (err: any) {
+          if (err?.name === "AbortError") return;
+          writable = null;
         }
       }
 
-      downloadStatusText.value[downloadKey] = "Downloading...";
+      const res = await apiFetch(info.download_url, { timeoutMs: 60_000 });
+      if (!res.ok) throw await errorFromResponse(res);
+      if (!res.body) throw new Error("Your browser couldn't read the download.");
 
-      // 2. Fetch encrypted bytes: try direct storage edge download first, falling back to authenticated backend proxy
-      // 2. Fetch encrypted bytes: stream through authenticated backend proxy for SpaceByte, or try fast direct edge for S3
-      let res: Response | null = null;
-      if (downloadData.direct_url && downloadData.upstream !== "spacebyte") {
-        try {
-          const directController = new AbortController();
-          const directTimeout = setTimeout(() => directController.abort(), 5000);
-          const directRes = await fetch(downloadData.direct_url, { method: "GET", signal: directController.signal });
-          clearTimeout(directTimeout);
-          if (directRes.ok && directRes.body) {
-            res = directRes;
-          }
-        } catch {
-          res = null;
-        }
-      }
-
-      if (!res) {
-        res = await apiFetch(downloadData.download_url);
-      }
-
-      if (!res.ok) {
-        let errMessage = `Failed to fetch file from storage (${res.status})`;
-        try {
-          const errJson = await res.json();
-          if (errJson.error) {
-            errMessage = errJson.error;
-          }
-        } catch {}
-        throw new Error(errMessage);
-      }
-
-      // 3. Unwrap File Key with user's Master Key
-      const fileKey = await unwrapKey(authStore.masterKey, downloadData.wrapped_file_key);
-      const baseNonce = hexToUint8Array(downloadData.content_nonce);
-      const partSize = downloadData.part_size || (8 * 1024 * 1024);
-      const encPartSize = partSize + 16;
-
-      // 4. Stream and decrypt chunk-by-chunk without loading multi-gigabytes into a single ArrayBuffer
-      if (!res.body) {
-        throw new Error("Download stream response body is unavailable.");
-      }
+      const fileKey = await importFileKey(await unwrapKey(authStore.masterKey, info.wrapped_file_key));
+      const baseNonce = hexToUint8Array(info.content_nonce);
+      const encPart = (info.part_size || 8 * 1024 * 1024) + GCM_TAG;
+      const decryptPart = async (bytes: Uint8Array, n: number) =>
+        new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: deriveChunkNonce(baseNonce, n) }, fileKey, bytes));
 
       const reader = res.body.getReader();
-      const decryptedParts: Uint8Array[] = [];
-
-      let accumulated = new Uint8Array(encPartSize * 2);
-      let accumulatedLen = 0;
+      const parts: Uint8Array[] = [];
+      let buffer = new Uint8Array(encPart * 2);
+      let buffered = 0;
       let partNumber = 1;
-      let receivedBytes = 0;
+      let received = 0;
 
-      while (true) {
+      const emit = async (plain: Uint8Array) => {
+        if (writable) await writable.write(plain);
+        else parts.push(plain);
+      };
+
+      for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
+        if (!value?.length) continue;
+        received += value.length;
+        if (total) progress.value = { ...progress.value, [key]: Math.min(99, Math.round((received / (total + GCM_TAG)) * 100)) };
 
-        if (value && value.length > 0) {
-          receivedBytes += value.length;
-          if (totalSize > 0) {
-            const pct = Math.min(99, Math.round((receivedBytes / totalSize) * 100));
-            downloadProgress.value[node.id] = pct;
-            const mbTransferred = (receivedBytes / (1024 * 1024)).toFixed(0);
-            const mbTotal = (totalSize / (1024 * 1024)).toFixed(0);
-            downloadStatusText.value[node.id] = `${pct}% (${mbTransferred}/${mbTotal} MB)`;
-          }
+        if (buffered + value.length > buffer.length) {
+          const grown = new Uint8Array(Math.max(buffer.length * 2, buffered + value.length));
+          grown.set(buffer.subarray(0, buffered));
+          buffer = grown;
+        }
+        buffer.set(value, buffered);
+        buffered += value.length;
 
-          // Expand buffer if needed
-          if (accumulatedLen + value.length > accumulated.length) {
-            const nextCapacity = Math.max(accumulated.length * 2, accumulatedLen + value.length + encPartSize);
-            const newBuf = new Uint8Array(nextCapacity);
-            newBuf.set(accumulated.subarray(0, accumulatedLen), 0);
-            accumulated = newBuf;
-          }
-          accumulated.set(value, accumulatedLen);
-          accumulatedLen += value.length;
-
-          // Decrypt completed parts
-          while (accumulatedLen >= encPartSize) {
-            const encryptedChunk = accumulated.slice(0, encPartSize);
-            const decryptedChunk = await decryptChunk(fileKey, encryptedChunk, baseNonce, partNumber);
-            partNumber++;
-
-            if (writableStream) {
-              await writableStream.write(decryptedChunk);
-            } else {
-              decryptedParts.push(decryptedChunk);
-            }
-
-            // Shift remaining bytes to front
-            const remaining = accumulatedLen - encPartSize;
-            accumulated.copyWithin(0, encPartSize, accumulatedLen);
-            accumulatedLen = remaining;
-          }
+        while (buffered >= encPart) {
+          await emit(await decryptPart(buffer.slice(0, encPart), partNumber++));
+          buffer.copyWithin(0, encPart, buffered);
+          buffered -= encPart;
         }
       }
+      if (buffered > 0) await emit(await decryptPart(buffer.slice(0, buffered), partNumber));
 
-      // Decrypt any final remaining chunk
-      if (accumulatedLen > 0) {
-        const finalChunk = accumulated.slice(0, accumulatedLen);
-        const decryptedChunk = await decryptChunk(fileKey, finalChunk, baseNonce, partNumber);
-        if (writableStream) {
-          await writableStream.write(decryptedChunk);
-        } else {
-          decryptedParts.push(decryptedChunk);
-        }
-      }
-
-      downloadProgress.value[downloadKey] = 100;
-      downloadStatusText.value[downloadKey] = "Finishing...";
-
-      // 5. Finalize file write or trigger standard browser download
-      if (writableStream) {
-        await writableStream.close();
-        writableStream = null;
+      if (writable) {
+        await writable.close();
+        writable = null;
       } else {
-        // Build Blob from chunk array (never requires a single 2GB contiguous ArrayBuffer in V8)
-        const blob = new Blob(decryptedParts, { type: "application/octet-stream" });
-        const url = URL.createObjectURL(blob);
+        const url = URL.createObjectURL(new Blob(parts as BlobPart[], { type: "application/octet-stream" }));
         const a = document.createElement("a");
         a.href = url;
-        a.download = versionNo ? `v${versionNo}_${node.name}` : node.name;
+        a.download = fileName;
         document.body.appendChild(a);
         a.click();
-        document.body.removeChild(a);
-        setTimeout(() => URL.revokeObjectURL(url), 15000);
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 30_000);
       }
     } catch (err: any) {
-      if (writableStream) {
+      if (writable) {
         try {
-          await writableStream.abort();
-        } catch {}
+          await writable.abort();
+        } catch {
+          // ignore
+        }
       }
-      console.error("Download failed:", err);
-      alert(err.message || "Failed to download and decrypt file.");
+      const message =
+        err?.name === "OperationError"
+          ? "This file couldn't be decrypted. It may be damaged."
+          : err?.message || "Download failed. Please try again.";
+      toast.error(`${node.name}: ${message}`);
     } finally {
-      downloadingIds.value.delete(downloadKey);
-      delete downloadProgress.value[downloadKey];
-      delete downloadStatusText.value[downloadKey];
+      const next = { ...progress.value };
+      delete next[key];
+      progress.value = next;
     }
   }
 
-  return {
-    downloadingIds,
-    downloadProgress,
-    downloadStatusText,
-    isDownloading,
-    getProgress,
-    getStatusText,
-    downloadFile,
-  };
+  return { isDownloading, progressOf, downloadFile };
 }

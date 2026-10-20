@@ -57,7 +57,8 @@ class InvoiceSerializer(serializers.ModelSerializer):
             "amount",
             "currency",
             "status",
-            "pdf_url",
+            "plan_name",
+            "billing_interval",
             "issued_at",
         ]
         read_only_fields = fields
@@ -66,11 +67,10 @@ class InvoiceSerializer(serializers.ModelSerializer):
 class CheckoutInitSerializer(serializers.Serializer):
     plan_code = serializers.CharField()
     billing_interval = serializers.ChoiceField(choices=["monthly", "yearly"], default="monthly")
+    billing_state = serializers.CharField(required=False, allow_blank=True, max_length=2, default="")
 
 
 class PaymentVerifySerializer(serializers.Serializer):
-    plan_code = serializers.CharField()
     razorpay_payment_id = serializers.CharField()
     razorpay_order_id = serializers.CharField()
     razorpay_signature = serializers.CharField()
-    billing_interval = serializers.ChoiceField(choices=["monthly", "yearly"], default="monthly")

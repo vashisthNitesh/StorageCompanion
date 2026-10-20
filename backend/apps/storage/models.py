@@ -1,7 +1,5 @@
-import uuid
 from django.conf import settings
 from django.db import models
-from django.utils import timezone
 from apps.common.models import BaseModel, TimeStampedModel
 
 
@@ -184,7 +182,10 @@ class Upload(BaseModel):
     name_nonce = models.CharField(max_length=64)
     expected_size_bytes = models.BigIntegerField()
     part_size = models.IntegerField(default=20 * 1024 * 1024)  # SpaceByte-recommended 20 MB plaintext chunk
+    # Upstream presigned part URLs (server-side only; never sent to the browser)
     parts = models.JSONField(default=list, blank=True)
+    # Parts actually relayed upstream: {"<part_number>": {"etag": str, "size": int}}
+    received_parts = models.JSONField(default=dict, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_INITIATED)
     expires_at = models.DateTimeField()
 
@@ -192,4 +193,4 @@ class Upload(BaseModel):
         ordering = ["-created_at"]
 
     def __str__(self):
-        return f"Upload({self.id}, s3_upload_id={self.upload_id}, status={self.status})"
+        return f"Upload({self.id}, upload_id={self.upload_id}, status={self.status})"

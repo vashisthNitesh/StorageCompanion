@@ -5,6 +5,14 @@ from apps.billing.models import Plan, Subscription
 from apps.storage.models import StorageQuota
 
 
+@pytest.fixture(autouse=True)
+def _clear_cache():
+    from django.core.cache import cache
+    cache.clear()
+    yield
+    cache.clear()
+
+
 @pytest.fixture
 def api_client():
     return APIClient()
@@ -55,9 +63,34 @@ def subscribed_user(db, sample_plan):
     return user
 
 
+
+
 @pytest.fixture
 def auth_client(api_client, subscribed_user):
-    from rest_framework_simplejwt.tokens import RefreshToken
-    refresh = RefreshToken.for_user(subscribed_user)
+    from apps.accounts.services import issue_session_tokens
+    refresh, _ = issue_session_tokens(subscribed_user, audit_action=None)
     api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
     return api_client
+
+
+def bearer_client_for(user):
+    """APIClient authenticated with a real session-bound access token for `user`."""
+    from apps.accounts.services import issue_session_tokens
+    client = APIClient()
+    refresh, _ = issue_session_tokens(user, audit_action=None)
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+    return client
+
+
+def relay_all_parts(client, upload_id: str, size_bytes: int, part_size: int):
+    """Relays correctly sized dummy ciphertext parts for an upload session."""
+    import math
+    total = max(1, math.ceil(size_bytes / part_size))
+    for n in range(1, total + 1):
+        plain = part_size if n < total else size_bytes - (total - 1) * part_size
+        res = client.post(
+            f"/api/v1/uploads/{upload_id}/parts/{n}",
+            data=b"\0" * (plain + 16),
+            content_type="application/octet-stream",
+        )
+        assert res.status_code == 200, res.content

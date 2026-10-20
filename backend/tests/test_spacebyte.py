@@ -1,10 +1,6 @@
 import pytest
-from django.conf import settings
 from rest_framework.test import APIClient
-from apps.accounts.models import User
-from apps.billing.models import Plan, Subscription
-from apps.storage.models import StorageQuota
-from apps.storage.spacebyte import SpaceByteClient, get_spacebyte_client
+from apps.storage.spacebyte import SpaceByteClient
 from apps.storage.services import check_storage_pool_capacity, QuotaExceededException
 
 

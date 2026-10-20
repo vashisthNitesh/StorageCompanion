@@ -1,70 +1,62 @@
 <script setup lang="ts">
-import { ArrowLeft, Lock, ShieldCheck } from "lucide-vue-next";
+import SiteHeader from "./components/SiteHeader.vue";
+import SiteFooter from "./components/SiteFooter.vue";
+
+const sections = [
+  {
+    title: "1. The service",
+    body: [
+      "SmartSpace (smartspacedata.com) provides encrypted cloud storage. You get the amount of storage included in your plan for the period you pay for.",
+    ],
+  },
+  {
+    title: "2. Your privacy",
+    body: [
+      "Files and file names are encrypted in your browser before upload. For accounts created with email and password, we cannot decrypt them. For accounts created with Google sign-in, the vault key is derived on our servers so that you don't need a separate password.",
+      "We store your email address, name, encrypted keys, file sizes and dates, payment records, and a log of account activity (such as sign-ins and uploads with IP address) to run and secure the service. We don't sell your data or use it for advertising.",
+      "We process personal data in line with India's Digital Personal Data Protection Act, 2023. To ask about, correct or delete your data, contact us from your registered email address.",
+    ],
+  },
+  {
+    title: "3. When a plan ends",
+    body: [
+      "When your plan ends, uploads pause and your files stay available to download for 90 days. If you don't renew within those 90 days, your files are permanently deleted and cannot be recovered.",
+    ],
+  },
+  {
+    title: "4. Payments and invoices",
+    body: [
+      "Plans are priced in Indian Rupees and include GST. Payments are processed by Razorpay. Plans don't renew automatically. Each payment comes with a downloadable invoice showing the tax for your state.",
+    ],
+  },
+  {
+    title: "5. Acceptable use",
+    body: [
+      "Don't use SmartSpace to store or distribute content that is illegal or infringes others' rights. We may suspend accounts that break these terms or the law.",
+    ],
+  },
+  {
+    title: "6. Your responsibility",
+    body: [
+      "Keep your password safe. Because we can't reset it, losing the password of an email account means losing access to its files. We recommend keeping your own backup of anything irreplaceable.",
+    ],
+  },
+];
 </script>
 
 <template>
-  <div class="min-h-screen bg-[#F8FAFC] text-slate-800 flex flex-col selection:bg-brand-600 selection:text-white">
-    <header class="border-b border-slate-200 bg-white/90 sticky top-0 z-30 backdrop-blur-md shadow-xs">
-      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-        <router-link to="/" class="flex items-center space-x-2 text-slate-600 hover:text-slate-900 text-xs font-semibold transition-colors">
-          <ArrowLeft class="w-4 h-4" />
-          <span>Back to smartspacedata.com</span>
-        </router-link>
-        <div class="flex items-center space-x-2">
-          <div class="w-7 h-7 rounded-xl bg-brand-600 flex items-center justify-center text-white">
-            <Lock class="w-3.5 h-3.5" />
-          </div>
-          <span class="font-bold text-slate-900 text-sm tracking-tight">SmartSpace Data Legal & Compliance</span>
-        </div>
-        <div class="w-10"></div>
+  <div class="min-h-screen bg-white">
+    <SiteHeader />
+    <main class="mx-auto max-w-3xl px-4 py-16 sm:px-6 sm:py-20">
+      <h1 class="text-4xl font-semibold tracking-tight text-slate-900">Terms & privacy</h1>
+      <p class="mt-3 text-sm text-slate-500">Last updated October 2026</p>
+      <div class="mt-10 space-y-10">
+        <section v-for="s in sections" :key="s.title">
+          <h2 class="text-lg font-semibold text-slate-900">{{ s.title }}</h2>
+          <p v-for="(p, i) in s.body" :key="i" class="mt-3 leading-relaxed text-slate-600">{{ p }}</p>
+        </section>
       </div>
-    </header>
-
-    <main class="flex-1 max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-16 w-full space-y-12">
-      <div class="space-y-3">
-        <div class="inline-flex items-center space-x-1.5 px-3.5 py-1.5 rounded-full bg-emerald-50 border border-emerald-200 text-xs font-mono font-semibold text-emerald-700">
-          <ShieldCheck class="w-3.5 h-3.5" />
-          <span>DPDP ACT COMPLIANT • SAC CODE 998315</span>
-        </div>
-        <h1 class="text-3xl font-extrabold text-slate-900 tracking-tight">Privacy Policy & Terms of Service</h1>
-        <p class="text-xs text-slate-500">Effective: September 2026 • smartspacedata.com</p>
-      </div>
-
-      <section class="space-y-6 text-xs sm:text-sm text-slate-700 leading-relaxed">
-        <div class="p-6 rounded-2xl bg-white border border-slate-200 shadow-xs space-y-3">
-          <h2 class="text-base font-bold text-slate-900">1. DPDP Privacy Act & Zero-Knowledge Architecture</h2>
-          <p>
-            SmartSpace Data (smartspacedata.com) operates under a mathematical zero-knowledge privacy model fully compliant with India's Digital Personal Data Protection (DPDP) Act. All user files, folder structures, and filenames are encrypted in your local browser using client-derived Argon2id keys and AES-256-GCM before transmission. SmartSpace Data operators possess no master decryption keys and cannot read or profile your data.
-          </p>
-        </div>
-
-        <div class="p-6 rounded-2xl bg-white border border-slate-200 shadow-xs space-y-3">
-          <h2 class="text-base font-bold text-slate-900">2. 15-Day Inactivity & Data Clean-Up Protocol</h2>
-          <p>
-            To deliver an asset-light "Paisa Vasool" service with uncompressed RAW storage at the lowest possible cost (starting at ₹39/month), users agree to our strict data lifecycle policy:
-          </p>
-          <div class="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 font-medium">
-            "If a subscription is not renewed within 15 days of expiration, user data will be automatically purged from the secure cloud layer to prevent unnecessary infrastructure overhead."
-          </div>
-          <p>
-            Automated alerts will be sent to your registered email address before any purge sequence initiates.
-          </p>
-        </div>
-
-        <div class="p-6 rounded-2xl bg-white border border-slate-200 shadow-xs space-y-3">
-          <h2 class="text-base font-bold text-slate-900">3. Zero Egress Bandwidth Policy</h2>
-          <p>
-            SmartSpace Data does not bill or throttle download bandwidth. Vault owners and authorized share-link recipients are entitled to unmetered, high-speed downloads without hidden fees or per-gigabyte bandwidth surcharges.
-          </p>
-        </div>
-
-        <div class="p-6 rounded-2xl bg-white border border-slate-200 shadow-xs space-y-3">
-          <h2 class="text-base font-bold text-slate-900">4. Billing & SAC Code 998315 Classification</h2>
-          <p>
-            All plans are processed in Indian Rupees (INR) via Razorpay. Services are invoiced under Services Accounting Code (SAC) 998315 (Hosting & IT Infrastructure provisioning services). Business customers with registered GSTINs can claim full Input Tax Credit (ITC) on all recurring subscription charges.
-          </p>
-        </div>
-      </section>
     </main>
+    <SiteFooter />
   </div>
 </template>

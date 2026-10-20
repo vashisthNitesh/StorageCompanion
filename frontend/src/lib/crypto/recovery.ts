@@ -49,6 +49,7 @@ export async function deriveRecoveryKey(phrase: string[] | string): Promise<Uint
   const phraseString = Array.isArray(phrase) ? phrase.join(" ").trim().toLowerCase() : phrase.trim().toLowerCase();
   const encoder = new TextEncoder();
   const passphraseBytes = encoder.encode(phraseString);
+  // Fixed salt: changing it would invalidate every existing recovery-wrapped key.
   const saltBytes = encoder.encode("speedcloud-mnemonic-salt");
 
   const importedKey = await crypto.subtle.importKey(

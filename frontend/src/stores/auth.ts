@@ -1,26 +1,22 @@
 import { defineStore } from "pinia";
 import { ref, computed } from "vue";
-import { apiRequest, setAccessToken, getAccessToken, refreshAccessToken } from "../lib/api";
+import {
+  apiRequest,
+  setAccessToken,
+  getAccessToken,
+  refreshAccessToken,
+  setSessionExpiredHandler,
+} from "../lib/api";
 import {
   generateRandomSalt,
   deriveKEK,
   DEFAULT_KDF_PARAMS,
-  uint8ArrayToHex,
   uint8ArrayToBase64,
   base64ToUint8Array,
   hexToUint8Array,
 } from "../lib/crypto/kdf";
-
-import {
-  generateMasterKey,
-  generateUserKeypair,
-  wrapKey,
-  unwrapKey,
-} from "../lib/crypto/keys";
-import {
-  generateRecoveryPhrase,
-  deriveRecoveryKey,
-} from "../lib/crypto/recovery";
+import { generateMasterKey, generateUserKeypair, wrapKey, unwrapKey } from "../lib/crypto/keys";
+import { generateRecoveryPhrase, deriveRecoveryKey } from "../lib/crypto/recovery";
 
 export interface UserProfile {
   id: string;
@@ -35,6 +31,8 @@ export interface UserProfile {
   wrapped_private_key: string;
   recovery_wrapped_master_key: string;
   mfa_enabled: boolean;
+  has_google?: boolean;
+  created_at?: string;
   subscription?: {
     has_active_subscription: boolean;
     status: string;
@@ -54,15 +52,14 @@ export interface UserProfile {
   };
 }
 
+export type LoginResult = { success: true } | { mfaRequired: true };
+
 const VAULT_KEY_STORAGE_KEY = "sc_vault_mk";
 
 function saveMasterKeyToSession(key: Uint8Array | null) {
   if (typeof window === "undefined" || !window.sessionStorage) return;
-  if (key) {
-    sessionStorage.setItem(VAULT_KEY_STORAGE_KEY, uint8ArrayToBase64(key));
-  } else {
-    sessionStorage.removeItem(VAULT_KEY_STORAGE_KEY);
-  }
+  if (key) sessionStorage.setItem(VAULT_KEY_STORAGE_KEY, uint8ArrayToBase64(key));
+  else sessionStorage.removeItem(VAULT_KEY_STORAGE_KEY);
 }
 
 function loadMasterKeyFromSession(): Uint8Array | null {
@@ -77,250 +74,230 @@ function loadMasterKeyFromSession(): Uint8Array | null {
   }
 }
 
+/** Generates a fresh vault (master key, sharing keypair, recovery wrap) protected by `password`. */
+async function createVaultMaterial(password: string) {
+  const recoveryKey = await deriveRecoveryKey(generateRecoveryPhrase());
+  const kdfSalt = generateRandomSalt(16);
+  const kek = await deriveKEK(password, kdfSalt, DEFAULT_KDF_PARAMS);
+  const masterKey = generateMasterKey();
+  const keypair = await generateUserKeypair();
+  return {
+    masterKey,
+    payload: {
+      wrapped_master_key: await wrapKey(kek, masterKey),
+      kdf_salt: kdfSalt,
+      kdf_params: DEFAULT_KDF_PARAMS,
+      public_key: keypair.publicKeyBase64,
+      wrapped_private_key: await wrapKey(masterKey, keypair.privateKeyBytes),
+      recovery_wrapped_master_key: await wrapKey(recoveryKey, masterKey),
+    },
+  };
+}
+
 export const useAuthStore = defineStore("auth", () => {
   const user = ref<UserProfile | null>(null);
   const masterKey = ref<Uint8Array | null>(null);
-  const isLoading = ref<boolean>(false);
-  const isInitialized = ref<boolean>(false);
-  const pendingRecoveryPhrase = ref<string[] | null>(null);
+  const isLoading = ref(false);
+  const isInitialized = ref(false);
+  const googleClientId = ref("");
+  const paymentsEnabled = ref(false);
+  const authConfigLoaded = ref(false);
 
   const isAuthenticated = computed(() => !!user.value && !!getAccessToken());
   const isVaultUnlocked = computed(() => !!masterKey.value);
-  const isMasterAdmin = computed(
-    () => !!user.value?.is_staff || !!user.value?.is_superuser
-  );
+  const isMasterAdmin = computed(() => !!user.value?.is_staff || !!user.value?.is_superuser);
   const hasActiveSubscription = computed(
     () => isMasterAdmin.value || !!user.value?.subscription?.has_active_subscription
   );
+  const canUpload = computed(() => !isMasterAdmin.value && !!user.value?.subscription?.can_upload);
+  /** Password-protected vault (unlocked with the account password) vs. Google-derived vault key. */
+  const hasPasswordVault = computed(() => !!user.value?.wrapped_master_key);
+  const needsVaultSetup = computed(
+    () => !!user.value && !isMasterAdmin.value && !user.value.wrapped_master_key && !user.value.has_google
+  );
 
-  async function register(email: string, password: string, fullName: string = "") {
+  function clearSession() {
+    user.value = null;
+    masterKey.value = null;
+    setAccessToken(null);
+    saveMasterKeyToSession(null);
+  }
+
+  setSessionExpiredHandler(() => {
+    if (user.value) {
+      clearSession();
+      if (typeof window !== "undefined" && window.location.pathname.startsWith("/app")) {
+        window.location.assign(`/login?expired=1&redirect=${encodeURIComponent(window.location.pathname)}`);
+      }
+    }
+  });
+
+  function setMasterKey(key: Uint8Array | null) {
+    masterKey.value = key;
+    saveMasterKeyToSession(key);
+  }
+
+  async function register(email: string, password: string, fullName = "") {
     isLoading.value = true;
     try {
-      // 1. Generate 24-word recovery phrase and derive recovery key
-      const recoveryWords = generateRecoveryPhrase();
-      const recoveryKey = await deriveRecoveryKey(recoveryWords);
-
-      // 2. Generate random KDF salt and derive KEK
-      const kdfSalt = generateRandomSalt(16);
-      const kek = await deriveKEK(password, kdfSalt, DEFAULT_KDF_PARAMS);
-
-      // 3. Generate random 256-bit Master Key
-      const newMasterKey = generateMasterKey();
-
-      // 4. Generate user asymmetric keypair for file sharing
-      const keypair = await generateUserKeypair();
-
-      // 5. Wrap Master Key with KEK & with Recovery Key
-      const wrappedMasterKey = await wrapKey(kek, newMasterKey);
-      const recoveryWrappedMasterKey = await wrapKey(recoveryKey, newMasterKey);
-
-      // 6. Wrap user's private key with Master Key
-      const wrappedPrivateKey = await wrapKey(newMasterKey, keypair.privateKeyBytes);
-
-      // 7. Send registration payload to backend
-      const response = await apiRequest<{
-        user: UserProfile;
-        access_token: string;
-      }>("/api/v1/auth/register", {
+      const { masterKey: newMasterKey, payload } = await createVaultMaterial(password);
+      const response = await apiRequest<{ user: UserProfile; access_token: string }>("/api/v1/auth/register", {
         method: "POST",
-        body: JSON.stringify({
-          email,
-          password,
-          full_name: fullName,
-          wrapped_master_key: wrappedMasterKey,
-          kdf_salt: kdfSalt,
-          kdf_params: DEFAULT_KDF_PARAMS,
-          public_key: keypair.publicKeyBase64,
-          wrapped_private_key: wrappedPrivateKey,
-          recovery_wrapped_master_key: recoveryWrappedMasterKey,
-        }),
+        body: JSON.stringify({ email, password, full_name: fullName, ...payload }),
       });
-
       setAccessToken(response.access_token);
       user.value = response.user;
-      masterKey.value = newMasterKey;
-      saveMasterKeyToSession(newMasterKey);
-      pendingRecoveryPhrase.value = recoveryWords;
-
-      return { user: response.user, recoveryWords };
+      setMasterKey(newMasterKey);
+      return { user: response.user };
     } finally {
       isLoading.value = false;
     }
   }
 
-  async function login(email: string, password: string, totpCode?: string) {
+  async function unlockWithPassword(profile: UserProfile, password: string) {
+    const kek = await deriveKEK(password, profile.kdf_salt, profile.kdf_params || DEFAULT_KDF_PARAMS);
+    setMasterKey(await unwrapKey(kek, profile.wrapped_master_key));
+  }
+
+  async function login(email: string, password: string, totpCode?: string): Promise<LoginResult> {
     isLoading.value = true;
     try {
-      const response = await apiRequest<{
-        user: UserProfile;
-        access_token: string;
-        mfa_required?: boolean;
-      }>("/api/v1/auth/login", {
-        method: "POST",
-        body: JSON.stringify({ email, password, totp_code: totpCode }),
-      });
-
-      if (response.mfa_required) {
-        return { mfaRequired: true };
-      }
+      const response = await apiRequest<{ user: UserProfile; access_token: string; mfa_required?: boolean }>(
+        "/api/v1/auth/login",
+        { method: "POST", body: JSON.stringify({ email, password, totp_code: totpCode || undefined }) }
+      );
+      if (response.mfa_required) return { mfaRequired: true };
 
       setAccessToken(response.access_token);
       user.value = response.user;
-      if (!response.user.subscription) {
-        await fetchProfile();
-      }
 
-      // Derive KEK and unwrap Master Key
-      if (response.user.wrapped_master_key && response.user.kdf_salt) {
+      const profile = response.user;
+      const isAdmin = profile.is_staff || profile.is_superuser;
+      if (profile.wrapped_master_key && profile.kdf_salt) {
         try {
-          const kek = await deriveKEK(
-            password,
-            response.user.kdf_salt,
-            response.user.kdf_params || DEFAULT_KDF_PARAMS
-          );
-          masterKey.value = await unwrapKey(kek, response.user.wrapped_master_key);
-          saveMasterKeyToSession(masterKey.value);
+          await unlockWithPassword(profile, password);
         } catch (err) {
-          console.warn("Could not unwrap master key:", err);
-          // For staff/admin accounts, allow portal access even if key derivation fails
-          if (!response.user.is_staff && !response.user.is_superuser) {
-            throw err;
+          // Admin accounts do not use a vault; customers must be able to decrypt.
+          if (!isAdmin) {
+            clearSession();
+            throw new Error("Your password was accepted but the vault could not be decrypted. Please contact support.");
           }
         }
+      } else if (!isAdmin && !profile.has_google) {
+        // Account created without a vault (e.g. by an administrator): create it now.
+        await setupVault(password);
       }
-
       return { success: true };
     } finally {
       isLoading.value = false;
     }
   }
 
-  const googleClientId = ref<string>("");
+  async function setupVault(password: string) {
+    const { masterKey: newMasterKey, payload } = await createVaultMaterial(password);
+    const res = await apiRequest<{ user: UserProfile }>("/api/v1/auth/vault", {
+      method: "POST",
+      body: JSON.stringify({ password, ...payload }),
+    });
+    user.value = res.user;
+    setMasterKey(newMasterKey);
+  }
 
   async function fetchAuthConfig() {
+    if (authConfigLoaded.value) return;
     try {
-      const config = await apiRequest<{ google_client_id: string; payment_provider: string }>("/api/v1/auth/config");
-      if (config.google_client_id) {
-        googleClientId.value = config.google_client_id;
-      }
+      const config = await apiRequest<{ google_client_id: string; payments_enabled: boolean }>("/api/v1/auth/config");
+      googleClientId.value = config.google_client_id || "";
+      paymentsEnabled.value = !!config.payments_enabled;
+      authConfigLoaded.value = true;
     } catch {
-      // ignore network errors
+      // Leave defaults; the UI shows Google sign-in as unavailable.
     }
   }
 
-  async function loginWithGoogle(credential: string) {
+  async function loginWithGoogle(credential: string, totpCode?: string): Promise<LoginResult> {
     isLoading.value = true;
     try {
       const response = await apiRequest<{
-        success: boolean;
         user: UserProfile;
         access_token: string;
-        oauth_vault_hex?: string;
+        oauth_vault_hex?: string | null;
+        mfa_required?: boolean;
       }>("/api/v1/auth/google", {
         method: "POST",
-        body: JSON.stringify({ credential }),
+        body: JSON.stringify({ credential, totp_code: totpCode || undefined }),
       });
+      if (response.mfa_required) return { mfaRequired: true };
 
       setAccessToken(response.access_token);
       user.value = response.user;
-      if (!response.user.subscription) {
-        await fetchProfile();
-      }
-
-      // Automatic seamless vault unlock
-      if (response.oauth_vault_hex) {
-        masterKey.value = hexToUint8Array(response.oauth_vault_hex);
-        saveMasterKeyToSession(masterKey.value);
-      }
-
+      // Google-created accounts get their vault key from the server. Accounts with a
+      // password vault stay locked until the password is entered.
+      setMasterKey(response.oauth_vault_hex ? hexToUint8Array(response.oauth_vault_hex) : null);
       return { success: true };
     } finally {
       isLoading.value = false;
     }
   }
 
+  /** Re-opens the vault of a Google-created account (e.g. in a new browser tab). */
+  async function restoreGoogleVault(): Promise<boolean> {
+    if (masterKey.value || !user.value?.has_google || user.value.wrapped_master_key) return !!masterKey.value;
+    try {
+      const res = await apiRequest<{ oauth_vault_hex: string }>("/api/v1/auth/vault/google-key");
+      setMasterKey(hexToUint8Array(res.oauth_vault_hex));
+      return true;
+    } catch {
+      return false;
+    }
+  }
 
   async function unlockVault(password: string) {
-    if (!user.value || !user.value.wrapped_master_key) {
-      throw new Error("No user profile found to unlock.");
+    if (!user.value?.wrapped_master_key) throw new Error("This account has no password-protected vault.");
+    try {
+      await unlockWithPassword(user.value, password);
+    } catch {
+      throw new Error("That password didn't unlock your vault. Please try again.");
     }
-    const kek = await deriveKEK(
-      password,
-      user.value.kdf_salt,
-      user.value.kdf_params || DEFAULT_KDF_PARAMS
-    );
-    masterKey.value = await unwrapKey(kek, user.value.wrapped_master_key);
-    saveMasterKeyToSession(masterKey.value);
   }
 
   async function fetchProfile() {
     try {
-      const profile = await apiRequest<UserProfile>("/api/v1/auth/me");
-      user.value = profile;
-    } catch {
-      user.value = null;
-      masterKey.value = null;
-      setAccessToken(null);
-      saveMasterKeyToSession(null);
+      user.value = await apiRequest<UserProfile>("/api/v1/auth/me");
+    } catch (err: any) {
+      if (err?.status === 401) clearSession();
     }
   }
 
   let initPromise: Promise<boolean> | null = null;
 
   async function initAuth(): Promise<boolean> {
-    if (isInitialized.value) {
-      return isAuthenticated.value;
-    }
-    if (initPromise) {
-      return initPromise;
-    }
+    if (isInitialized.value) return isAuthenticated.value;
+    if (initPromise) return initPromise;
 
     initPromise = (async () => {
       try {
-        // 1. Restore masterKey from sessionStorage if present
-        if (!masterKey.value) {
-          const restoredKey = loadMasterKeyFromSession();
-          if (restoredKey) {
-            masterKey.value = restoredKey;
-          }
-        }
+        if (!masterKey.value) masterKey.value = loadMasterKeyFromSession();
 
-        // 2. If we already have an access token, verify and fetch profile
-        const existingToken = getAccessToken();
-        if (existingToken) {
+        if (getAccessToken()) {
           try {
-            const profile = await apiRequest<UserProfile>("/api/v1/auth/me");
-            user.value = profile;
+            user.value = await apiRequest<UserProfile>("/api/v1/auth/me");
             return true;
           } catch {
-            // Access token might be invalid or expired; try refresh next
+            // Access token expired; fall through to the refresh cookie.
           }
         }
 
-        // 3. Attempt silent refresh using the HTTP-only cookie
         const refreshData = await refreshAccessToken();
         if (refreshData?.access_token) {
-          if (refreshData.user) {
-            user.value = refreshData.user;
-          } else {
-            const profile = await apiRequest<UserProfile>("/api/v1/auth/me");
-            user.value = profile;
-          }
+          user.value = refreshData.user || (await apiRequest<UserProfile>("/api/v1/auth/me"));
           return true;
         }
 
-        // Neither access token nor refresh token worked
-        user.value = null;
-        masterKey.value = null;
-        setAccessToken(null);
-        saveMasterKeyToSession(null);
+        clearSession();
         return false;
-      } catch (err) {
-        console.warn("Auth initialization failed:", err);
-        user.value = null;
-        masterKey.value = null;
-        setAccessToken(null);
-        saveMasterKeyToSession(null);
+      } catch {
+        clearSession();
         return false;
       } finally {
         isInitialized.value = true;
@@ -333,19 +310,12 @@ export const useAuthStore = defineStore("auth", () => {
 
   async function logout() {
     try {
-      await apiRequest("/api/v1/auth/logout", { method: "POST" });
+      await apiRequest("/api/v1/auth/logout", { method: "POST", timeoutMs: 8000 });
     } catch {
       // Ignore network failures on logout
     } finally {
-      user.value = null;
-      masterKey.value = null;
-      setAccessToken(null);
-      saveMasterKeyToSession(null);
+      clearSession();
     }
-  }
-
-  function clearRecoveryPhrase() {
-    pendingRecoveryPhrase.value = null;
   }
 
   return {
@@ -353,21 +323,24 @@ export const useAuthStore = defineStore("auth", () => {
     masterKey,
     isLoading,
     isInitialized,
-    pendingRecoveryPhrase,
+    googleClientId,
+    paymentsEnabled,
     isAuthenticated,
     isVaultUnlocked,
     isMasterAdmin,
     hasActiveSubscription,
+    canUpload,
+    hasPasswordVault,
+    needsVaultSetup,
     register,
     login,
     loginWithGoogle,
-    googleClientId,
     fetchAuthConfig,
     unlockVault,
+    restoreGoogleVault,
+    setupVault,
     fetchProfile,
     initAuth,
     logout,
-    clearRecoveryPhrase,
   };
 });
-

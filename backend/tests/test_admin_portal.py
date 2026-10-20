@@ -2,8 +2,17 @@ import pytest
 from rest_framework.test import APIClient
 from django.core.management import call_command
 from apps.accounts.models import User
-from apps.billing.models import Plan, Subscription
+from apps.billing.models import Subscription
 from apps.storage.models import StorageQuota
+
+ADMIN_EMAIL = "admin-test@smartspacedata.com"
+ADMIN_PASSWORD = "Admin-Test-Password-2026"
+
+
+@pytest.fixture(autouse=True)
+def master_admin_env(monkeypatch):
+    monkeypatch.setenv("MASTER_ADMIN_EMAIL", ADMIN_EMAIL)
+    monkeypatch.setenv("MASTER_ADMIN_PASSWORD", ADMIN_PASSWORD)
 
 
 @pytest.mark.django_db
@@ -12,10 +21,10 @@ def test_superuser_creation_and_login():
 
     client = APIClient()
 
-    # 1. Login with username 'nitesh-vashisth'
+    # 1. Login with the part of the email before "@"
     res_user = client.post(
         "/api/v1/auth/login",
-        {"email": "nitesh-vashisth", "password": "vashisth@0000"},
+        {"email": "admin-test", "password": ADMIN_PASSWORD},
         format="json",
     )
     assert res_user.status_code == 200
@@ -23,10 +32,10 @@ def test_superuser_creation_and_login():
     assert res_user.data["user"]["is_superuser"] is True
     assert "access_token" in res_user.data
 
-    # 2. Login with email 'nitesh-vashisth@smartspacedata.com'
+    # 2. Login with the full email
     res_email = client.post(
         "/api/v1/auth/login",
-        {"email": "nitesh-vashisth@smartspacedata.com", "password": "vashisth@0000"},
+        {"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD},
         format="json",
     )
     assert res_email.status_code == 200
@@ -48,7 +57,7 @@ def test_regular_user_blocked_from_admin_endpoints(subscribed_user):
 @pytest.mark.django_db
 def test_admin_kpis_and_periods(subscribed_user):
     call_command("create_master_admin")
-    admin_user = User.objects.get(email="nitesh-vashisth@smartspacedata.com")
+    admin_user = User.objects.get(email=ADMIN_EMAIL)
 
     client = APIClient()
     client.force_authenticate(user=admin_user)
@@ -71,7 +80,7 @@ def test_admin_kpis_and_periods(subscribed_user):
 @pytest.mark.django_db
 def test_admin_pool_status():
     call_command("create_master_admin")
-    admin_user = User.objects.get(email="nitesh-vashisth@smartspacedata.com")
+    admin_user = User.objects.get(email=ADMIN_EMAIL)
 
     client = APIClient()
     client.force_authenticate(user=admin_user)
@@ -81,15 +90,14 @@ def test_admin_pool_status():
     data = res.json()
     assert "total_pool_bytes" in data
     assert "pool_health" in data
-    assert "expansion_tiers" in data
-    assert len(data["expansion_tiers"]) >= 3
+    assert "health_message" in data
 
 
 @pytest.mark.django_db
 def test_admin_user_management_and_upgrade(subscribed_user):
-    call_command("seed_demo")
+    call_command("seed_plans")
     call_command("create_master_admin")
-    admin_user = User.objects.get(email="nitesh-vashisth@smartspacedata.com")
+    admin_user = User.objects.get(email=ADMIN_EMAIL)
 
     client = APIClient()
     client.force_authenticate(user=admin_user)
@@ -141,7 +149,7 @@ def test_admin_user_management_and_upgrade(subscribed_user):
 @pytest.mark.django_db
 def test_super_admin_has_no_pack():
     call_command("create_master_admin")
-    admin_user = User.objects.get(email="nitesh-vashisth@smartspacedata.com")
+    admin_user = User.objects.get(email=ADMIN_EMAIL)
 
     # Super admin does not have a customer subscription
     assert not Subscription.objects.filter(user=admin_user).exists()
@@ -168,7 +176,7 @@ def test_super_admin_has_no_pack():
 @pytest.mark.django_db
 def test_admin_validity_adjustments_and_retention(subscribed_user):
     call_command("create_master_admin")
-    admin_user = User.objects.get(email="nitesh-vashisth@smartspacedata.com")
+    admin_user = User.objects.get(email=ADMIN_EMAIL)
 
     client = APIClient()
     client.force_authenticate(user=admin_user)
@@ -223,3 +231,25 @@ def test_admin_validity_adjustments_and_retention(subscribed_user):
     assert res_filter_purged.status_code == 200
     assert any(u["id"] == str(subscribed_user.id) for u in res_filter_purged.json()["results"])
 
+
+@pytest.mark.django_db
+def test_master_admin_skipped_without_env(monkeypatch):
+    monkeypatch.delenv("MASTER_ADMIN_EMAIL")
+    monkeypatch.delenv("MASTER_ADMIN_PASSWORD")
+    call_command("create_master_admin")
+    assert not User.objects.filter(is_superuser=True).exists()
+
+
+@pytest.mark.django_db
+def test_admin_can_set_exact_expiry_date(subscribed_user):
+    call_command("create_master_admin")
+    client = APIClient()
+    client.force_authenticate(user=User.objects.get(email=ADMIN_EMAIL))
+    res = client.post(
+        f"/api/v1/admin/users/{subscribed_user.id}/validity/",
+        {"action": "set_date", "expiry_date": "2099-01-31T10:30"},
+        format="json",
+    )
+    assert res.status_code == 200, res.content
+    subscribed_user.subscription.refresh_from_db()
+    assert subscribed_user.subscription.current_period_end.year == 2099

@@ -1,68 +1,65 @@
-# SpeedCloud REST API Specification (`/api/v1/`)
+# SmartSpace REST API (`/api/v1/`)
 
-All requests accept and return `application/json` (except presigned binary streams directly to R2).
-Access tokens are passed in `Authorization: Bearer <token>`, with rotating refresh tokens managed in `httpOnly` `SameSite=Strict` cookies.
+All endpoints return JSON. Authenticated endpoints need `Authorization: Bearer <access_token>`;
+tokens in the URL are not accepted. Access tokens last 30 minutes and are bound to a session
+(`sid` claim); revoking the session invalidates them immediately. Errors look like
+`{"success": false, "error": "<message>", "details": {...}, "status_code": 400}`.
 
----
-
-## Authentication (`/api/v1/auth/`)
-
-| Method | Endpoint | Description |
+## Health
+| Method | Path | Notes |
 |---|---|---|
-| `POST` | `/api/v1/auth/register` | Creates account, saves KEK salt, params, public key, and wrapped Master Key. |
-| `POST` | `/api/v1/auth/login` | Validates credentials & TOTP; returns access token and wrapped keys; sets refresh cookie. |
-| `POST` | `/api/v1/auth/refresh` | Rotates refresh token from cookie and returns fresh access token. |
-| `POST` | `/api/v1/auth/logout` | Blacklists refresh token and clears cookie. |
-| `GET` | `/api/v1/auth/me` | Current user profile, active subscription status, and storage quota. |
-| `POST` | `/api/v1/auth/password` | Re-wraps Master Key with new KEK and updates password. |
-| `POST` | `/api/v1/auth/mfa/enroll` | Generates TOTP secret and QR code base64. |
-| `POST` | `/api/v1/auth/mfa/verify` | Confirms code and activates 2FA. |
-| `POST` | `/api/v1/auth/mfa/disable` | Disables 2FA with password check. |
-| `GET` | `/api/v1/auth/sessions` | Lists active sessions. |
-| `DELETE` | `/api/v1/auth/sessions/{id}` | Revokes session. |
+| GET | `/health` | Liveness probe (no auth, no throttling) |
 
----
-
-## Storage & Nodes (`/api/v1/`)
-
-| Method | Endpoint | Description |
+## Authentication (`/auth/`)
+| Method | Path | Notes |
 |---|---|---|
-| `GET` | `/api/v1/nodes?parent={uuid}` | Cursor-paginated listing of files and folders in directory. |
-| `POST` | `/api/v1/nodes` | Creates a new folder with encrypted name and nonce. |
-| `GET` | `/api/v1/nodes/{id}` | Returns node metadata. |
-| `PATCH` | `/api/v1/nodes/{id}` | Renames or moves a node. |
-| `DELETE` | `/api/v1/nodes/{id}` | Moves node to trash. |
-| `POST` | `/api/v1/nodes/{id}/restore` | Restores node from trash. |
-| `GET` | `/api/v1/nodes/{id}/versions` | Lists historical file versions. |
-| `GET` | `/api/v1/nodes/{id}/download` | Issues presigned GET URL (TTL ≤ 15 min) + wrapped File Key. |
-| `POST` | `/api/v1/uploads` | Initializes direct-to-R2 multipart upload; returns presigned PUT URLs per chunk. |
-| `POST` | `/api/v1/uploads/{id}/complete` | Commits multipart upload, records FileVersion, and increments quota atomically. |
-| `DELETE` | `/api/v1/uploads/{id}` | Aborts upload session. |
-| `GET` | `/api/v1/quota` | Current storage consumption, limit, and percent used. |
+| GET | `/auth/config` | `{google_client_id, payments_enabled}` |
+| POST | `/auth/register` | Email, password and client-generated wrapped keys. Sets the refresh cookie. |
+| POST | `/auth/login` | `{email, password, totp_code?}`. Returns `{mfa_required: true}` when a 2FA code is needed. 8 failed attempts lock the account for 15 minutes. |
+| POST | `/auth/google` | `{credential, totp_code?}` – Google ID token. Requires `GOOGLE_CLIENT_ID`, a verified Google email, and refuses to take over unverified password accounts. Returns `oauth_vault_hex` only for Google-created accounts. |
+| POST | `/auth/refresh` | Uses the HTTP-only refresh cookie; rotates it. |
+| POST | `/auth/logout` | Revokes the current session. |
+| GET | `/auth/me` | Current user, plan and quota. |
+| POST | `/auth/password` | Change password (and re-wrapped master key). Signs out other sessions. |
+| POST | `/auth/vault` | One-time vault creation for password accounts without one. |
+| GET | `/auth/vault/google-key` | Vault key for Google-created accounts (new browser tabs). |
+| POST | `/auth/mfa/enroll` · `/auth/mfa/verify` · `/auth/mfa/disable` | TOTP two-step verification. |
+| GET | `/auth/sessions` | Active sessions with `is_current`. |
+| DELETE | `/auth/sessions/{id}` | Sign a device out immediately. |
 
----
+Login, Google sign-in, registration, MFA and password changes share a 10/minute per-client limit.
 
-## Sharing (`/api/v1/`)
-
-| Method | Endpoint | Description |
+## Files (`/nodes`, `/uploads`)
+| Method | Path | Notes |
 |---|---|---|
-| `POST` | `/api/v1/shares` | Creates public link or user-to-user share. |
-| `GET` | `/api/v1/shares` | Lists created and received shares. |
-| `DELETE` | `/api/v1/shares/{id}` | Revokes a share. |
-| `GET` | `/api/v1/public/shares/{token}` | Unauthenticated metadata for public share link. |
-| `POST` | `/api/v1/public/shares/{token}/auth` | Verifies link password (rate limited 10/hr). |
-| `GET` | `/api/v1/public/shares/{token}/download` | Generates presigned GET download URL for public recipient. |
+| GET | `/nodes?parent=<id>` | Folder contents (root when omitted). Not paginated. |
+| GET | `/nodes?all=true` | Every non-trashed item (used for client-side search). |
+| GET | `/nodes?trashed=true` | Top-level trashed items. |
+| POST | `/nodes` | Create folder `{parent, encrypted_name, name_nonce}`. |
+| PATCH | `/nodes/{id}` | Rename and/or move (moves into own subfolders are refused). |
+| DELETE | `/nodes/{id}` | Move to trash; `?permanent=true` (or already trashed) deletes forever. |
+| POST | `/nodes/{id}/restore` | Restore from trash. |
+| GET | `/nodes/{id}/versions` | Version list. |
+| GET | `/nodes/{id}/download[?v=n]` | Wrapped file key, nonce, part size and stream URL. |
+| GET | `/nodes/{id}/content[?v=n]` | Encrypted byte stream (owner only, Range supported). |
+| POST | `/uploads` | Start upload `{parent_id?, node_id?, encrypted_name, name_nonce, size_bytes}` → `{upload_session_id, part_size, total_parts}`. `node_id` uploads a new version. |
+| POST | `/uploads/{id}/parts/{n}` | Raw encrypted part (`application/octet-stream`), exactly `part_size + 16` bytes except the last. |
+| POST | `/uploads/{id}/complete` | `{wrapped_file_key, content_nonce}`. Idempotent. |
+| DELETE | `/uploads/{id}` | Abort. |
+| GET | `/quota` | Storage usage and upload eligibility. |
 
----
-
-## Billing (`/api/v1/`)
-
-| Method | Endpoint | Description |
+## Billing
+| Method | Path | Notes |
 |---|---|---|
-| `GET` | `/api/v1/plans` | Lists available subscription plans (No Free Tier). |
-| `GET` | `/api/v1/subscription` | Current user's subscription details. |
-| `POST` | `/api/v1/subscription/checkout` | Creates a Razorpay order / subscription session. |
-| `POST` | `/api/v1/subscription/verify` | Verifies Razorpay payment signature & activates plan. |
-| `POST` | `/api/v1/subscription/cancel` | Flags subscription for cancellation at period end. |
-| `GET` | `/api/v1/invoices` | Past payment invoice history. |
-| `POST` | `/api/v1/webhooks/razorpay` | Idempotent webhook handler with HMAC-SHA256 signature verification. |
+| GET | `/plans` | Public plan list. |
+| GET | `/subscription` | Current subscription. |
+| POST | `/subscription/checkout` | `{plan_code, billing_interval, billing_state}` → Razorpay order. 503 if payments aren't configured. |
+| POST | `/subscription/verify` | `{razorpay_order_id, razorpay_payment_id, razorpay_signature}`. The plan comes from the server-side order; each order/payment can be used once. |
+| POST | `/subscription/cancel` | Don't renew at period end. |
+| GET | `/invoices` | Invoice list. |
+| GET | `/invoices/{id}/download` | Printable HTML invoice (IGST or CGST+SGST by state). |
+| POST | `/webhooks/razorpay` | Signed with `RAZORPAY_WEBHOOK_SECRET`; unsigned or unconfigured → rejected. `payment.captured` fulfils known orders. |
+
+## Admin (`/admin/`, staff only)
+`kpis/`, `pool/`, `users/`, `users/create/`, `users/{id}/upgrade-plan/`, `users/{id}/toggle-status/`,
+`users/{id}/validity/`, `users/{id}/purge-data/`, `files/`, `process-lifecycle/`.

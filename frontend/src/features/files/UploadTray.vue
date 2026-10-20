@@ -1,170 +1,94 @@
 <script setup lang="ts">
-import { watch } from "vue";
+import { ref, computed } from "vue";
+import { ChevronDown, ChevronUp, X, Pause, Play, RotateCw, CheckCircle2, AlertCircle, Loader2 } from "lucide-vue-next";
 import { useUploadStore } from "../../stores/upload";
-import {
-  UploadCloud,
-  ChevronDown,
-  ChevronUp,
-  X,
-  CheckCircle2,
-  AlertCircle,
-  Loader2,
-  RotateCw,
-} from "lucide-vue-next";
+import { formatBytes } from "../../lib/format";
 
 const uploadStore = useUploadStore();
+const collapsed = ref(false);
 
-function formatBytes(bytes: number): string {
-  if (!bytes || bytes === 0) return "0 B";
-  const k = 1024;
-  const sizes = ["B", "KB", "MB", "GB", "TB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
-}
+const visible = computed(() => uploadStore.uploads.length > 0);
+const heading = computed(() => {
+  const active = uploadStore.activeCount;
+  const failed = uploadStore.uploads.filter((u) => u.status === "error").length;
+  if (active) return `Uploading ${active} ${active === 1 ? "file" : "files"} · ${uploadStore.totalProgress}%`;
+  if (failed) return `${failed} upload${failed === 1 ? "" : "s"} need attention`;
+  return "Uploads complete";
+});
 
-// Automatically close the dialog after 2 seconds once all active uploads complete
-let autoCloseTimer: any = null;
-
-watch(
-  [() => uploadStore.activeCount, () => uploadStore.uploads.length],
-  ([activeCount, totalCount]) => {
-    if (autoCloseTimer) {
-      clearTimeout(autoCloseTimer);
-      autoCloseTimer = null;
-    }
-
-    // If there are uploads in tray but 0 are active, and remaining are completed
-    if (totalCount > 0 && activeCount === 0) {
-      const allCompleted = uploadStore.uploads.every(
-        (u) => u.status === "completed"
-      );
-      if (allCompleted) {
-        autoCloseTimer = setTimeout(() => {
-          uploadStore.clearCompleted();
-        }, 2000);
-      }
-    }
-  },
-  { immediate: true }
-);
+const statusText: Record<string, string> = {
+  queued: "Waiting…",
+  encrypting: "Encrypting…",
+  completing: "Finishing…",
+  completed: "Uploaded",
+  paused: "Paused",
+};
 </script>
 
 <template>
   <div
-    v-if="uploadStore.uploads.length > 0"
-    class="fixed bottom-6 right-6 w-96 max-w-[calc(100vw-3rem)] z-50 transition-all duration-300"
+    v-if="visible"
+    class="fixed bottom-0 right-0 z-40 w-full sm:bottom-4 sm:right-4 sm:w-96"
+    role="region"
+    aria-label="Uploads"
   >
-    <div class="rounded-2xl shadow-2xl overflow-hidden border border-slate-200 bg-white">
-      <!-- Header -->
-      <div
-        class="flex items-center justify-between px-4 py-3 bg-slate-50 cursor-pointer border-b border-slate-200 select-none hover:bg-slate-100/70 transition-colors"
-        @click="uploadStore.toggleTray"
-      >
-        <div class="flex items-center space-x-2.5">
-          <UploadCloud class="w-4 h-4 text-brand-600" />
-          <span class="text-xs font-semibold text-slate-900">
-            Encrypted Uploads ({{ uploadStore.activeCount }} active)
-          </span>
-        </div>
-        <div class="flex items-center space-x-2 text-slate-500">
-          <span v-if="uploadStore.activeCount > 0" class="text-xs font-mono font-bold text-brand-600">
-            {{ uploadStore.totalProgress }}%
-          </span>
-          <button
-            v-if="uploadStore.activeCount === 0"
-            @click.stop="uploadStore.clearCompleted"
-            class="p-1 hover:bg-slate-200 rounded-lg text-slate-400 hover:text-slate-700 transition-colors"
-            title="Dismiss completed uploads"
-          >
-            <X class="w-3.5 h-3.5" />
-          </button>
-          <component
-            :is="uploadStore.isTrayOpen ? ChevronDown : ChevronUp"
-            class="w-4 h-4 hover:text-slate-900 transition-colors"
-          />
-        </div>
-      </div>
-
-      <!-- Upload Items List -->
-      <div v-if="uploadStore.isTrayOpen" class="max-h-80 overflow-y-auto divide-y divide-slate-100 p-2 space-y-1 bg-white">
-        <div
-          v-for="item in uploadStore.uploads"
-          :key="item.id"
-          class="p-2.5 hover:bg-slate-50 rounded-xl transition-colors space-y-1.5"
+    <div class="overflow-hidden border border-slate-200 bg-white shadow-pop sm:rounded-xl">
+      <div class="flex items-center gap-2 bg-slate-900 px-4 py-3 text-white">
+        <Loader2 v-if="uploadStore.activeCount" class="h-4 w-4 animate-spin" />
+        <p class="flex-1 text-sm font-medium">{{ heading }}</p>
+        <button class="rounded p-1 hover:bg-white/10" :aria-label="collapsed ? 'Expand uploads' : 'Collapse uploads'" @click="collapsed = !collapsed">
+          <ChevronUp v-if="collapsed" class="h-4 w-4" />
+          <ChevronDown v-else class="h-4 w-4" />
+        </button>
+        <button
+          v-if="!uploadStore.activeCount"
+          class="rounded p-1 hover:bg-white/10"
+          aria-label="Close uploads"
+          @click="uploadStore.clearFinished()"
         >
-          <div class="flex items-center justify-between text-xs gap-2">
-            <span class="font-medium text-slate-800 truncate min-w-0" :title="item.name">
-              {{ item.name }}
-            </span>
-            <div class="flex items-center space-x-2 shrink-0">
-              <span
-                v-if="item.status === 'uploading' && item.speedMBs > 0"
-                class="text-brand-600 font-mono text-[10px] font-semibold whitespace-nowrap"
-                :title="`${(item.speedMBs * 8).toFixed(1)} Megabits/s (Mbps)`"
-              >
-                {{ item.speedMBs }} MB/s <span class="text-slate-400 font-normal">({{ (item.speedMBs * 8).toFixed(1) }} Mbps)</span>
-              </span>
-              <button
-                v-if="item.status === 'error'"
-                class="px-2 py-0.5 bg-brand-50 hover:bg-brand-100 text-brand-700 rounded-md text-[10px] font-semibold transition-colors flex items-center space-x-1"
-                @click="uploadStore.retryUpload(item.id)"
-                title="Resume upload without restarting from zero"
-              >
-                <RotateCw class="w-2.5 h-2.5" />
-                <span>Retry</span>
-              </button>
-              <button
-                class="p-1 hover:bg-slate-200 rounded-lg text-slate-400 hover:text-slate-700 transition-colors"
-                @click="uploadStore.cancelUpload(item.id)"
-                title="Cancel upload"
-              >
-                <X class="w-3.5 h-3.5" />
-              </button>
+          <X class="h-4 w-4" />
+        </button>
+      </div>
+      <ul v-if="!collapsed" class="max-h-80 divide-y divide-slate-100 overflow-y-auto">
+        <li v-for="u in uploadStore.uploads" :key="u.id" class="px-4 py-3">
+          <div class="flex items-start gap-3">
+            <div class="min-w-0 flex-1">
+              <p class="truncate text-sm font-medium text-slate-900" :title="u.name">{{ u.name }}</p>
+              <p class="mt-0.5 text-xs" :class="u.status === 'error' ? 'text-rose-600' : 'text-slate-500'">
+                <template v-if="u.status === 'error'">{{ u.errorMessage }}</template>
+                <template v-else-if="u.status === 'uploading'">
+                  {{ u.progress }}% of {{ formatBytes(u.size) }}<template v-if="u.speedMBs"> · {{ u.speedMBs }} MB/s</template>
+                  <template v-if="u.errorMessage"> · {{ u.errorMessage }}</template>
+                </template>
+                <template v-else>{{ statusText[u.status] }} · {{ formatBytes(u.size) }}</template>
+              </p>
             </div>
+            <CheckCircle2 v-if="u.status === 'completed'" class="h-5 w-5 shrink-0 text-emerald-500" />
+            <template v-else>
+              <AlertCircle v-if="u.status === 'error'" class="h-5 w-5 shrink-0 text-rose-500" />
+              <button v-if="u.status === 'uploading' || u.status === 'queued'" class="icon-btn h-7 w-7" title="Pause" @click="uploadStore.pauseUpload(u.id)">
+                <Pause class="h-4 w-4" />
+              </button>
+              <button v-if="u.status === 'paused'" class="icon-btn h-7 w-7" title="Resume" @click="uploadStore.retryUpload(u.id)">
+                <Play class="h-4 w-4" />
+              </button>
+              <button v-if="u.status === 'error'" class="icon-btn h-7 w-7" title="Retry" @click="uploadStore.retryUpload(u.id)">
+                <RotateCw class="h-4 w-4" />
+              </button>
+              <button class="icon-btn h-7 w-7" title="Cancel upload" @click="uploadStore.cancelUpload(u.id)">
+                <X class="h-4 w-4" />
+              </button>
+            </template>
           </div>
-
-          <!-- Progress Bar -->
-          <div class="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+          <div v-if="u.status !== 'completed'" class="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100">
             <div
-              class="h-full rounded-full transition-all duration-150"
-              :class="{
-                'bg-gradient-to-r from-blue-600 to-indigo-600': item.status === 'uploading' || item.status === 'completing',
-                'bg-amber-500 animate-pulse': item.status === 'encrypting',
-                'bg-emerald-500': item.status === 'completed',
-                'bg-rose-500': item.status === 'error',
-                'bg-slate-400': item.status === 'paused'
-              }"
-              :style="{ width: `${item.progress}%` }"
+              class="h-full rounded-full transition-all"
+              :class="u.status === 'error' ? 'bg-rose-500' : u.status === 'paused' ? 'bg-slate-400' : 'bg-brand-600'"
+              :style="{ width: `${u.progress}%` }"
             ></div>
           </div>
-
-          <!-- Status & Transferred Indicator -->
-          <div class="flex items-center justify-between text-[10px] text-slate-500 font-mono">
-            <div class="flex items-center space-x-1.5 max-w-[260px] truncate">
-              <Loader2 v-if="item.status === 'encrypting' || item.status === 'completing' || (item.status === 'uploading' && item.errorMessage)" class="w-3 h-3 text-amber-600 animate-spin shrink-0" />
-              <CheckCircle2 v-else-if="item.status === 'completed'" class="w-3 h-3 text-emerald-600 shrink-0" />
-              <AlertCircle v-else-if="item.status === 'error'" class="w-3 h-3 text-rose-500 shrink-0" />
-
-              <span
-                class="truncate"
-                :class="{
-                  'text-rose-600 font-medium': item.status === 'error',
-                  'text-amber-600 font-medium': item.status === 'uploading' && item.errorMessage
-                }"
-                :title="item.errorMessage || item.status"
-              >
-                <template v-if="item.status === 'encrypting'">Encrypting chunks client-side...</template>
-                <template v-else-if="item.status === 'completing'">Verifying & finalizing vault...</template>
-                <template v-else-if="item.status === 'completed'">Vault upload secured</template>
-                <template v-else-if="item.status === 'error'">{{ item.errorMessage || 'Upload failed' }}</template>
-                <span v-else-if="item.errorMessage">{{ item.errorMessage }}</span>
-                <span v-else>{{ formatBytes(item.completedBytes) }} / {{ formatBytes(item.size) }}</span>
-              </span>
-            </div>
-            <span class="font-bold text-slate-700">{{ item.progress }}%</span>
-          </div>
-        </div>
-      </div>
+        </li>
+      </ul>
     </div>
   </div>
 </template>
