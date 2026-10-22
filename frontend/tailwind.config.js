@@ -43,7 +43,7 @@ export default {
         },
         success: { DEFAULT: token("success"), soft: token("success-soft") },
         warning: { DEFAULT: token("warning"), soft: token("warning-soft") },
-        danger: { DEFAULT: token("danger"), hover: token("danger-hover"), soft: token("danger-soft") },
+        danger: { DEFAULT: token("danger"), hover: token("danger-hover"), fg: token("danger-fg"), soft: token("danger-soft") },
         info: { DEFAULT: token("info"), soft: token("info-soft") },
         // Static brand scale (marketing illustrations only; UI uses semantic tokens).
         brand: {

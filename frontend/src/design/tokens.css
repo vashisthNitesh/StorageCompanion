@@ -32,6 +32,7 @@
   --warning-soft: 255 251 235;
   --danger: 220 38 38;
   --danger-hover: 185 28 28;
+  --danger-fg: 255 255 255;
   --danger-soft: 254 242 242;
   --info: 3 105 161;
   --info-soft: 240 249 255;
@@ -71,6 +72,7 @@
   --warning-soft: 50 37 10;
   --danger: 248 113 113;
   --danger-hover: 252 165 165;
+  --danger-fg: 40 8 10;
   --danger-soft: 60 21 24;
   --info: 56 189 248;
   --info-soft: 13 39 56;
@@ -107,6 +109,7 @@
     --warning-soft: 50 37 10;
     --danger: 248 113 113;
     --danger-hover: 252 165 165;
+  --danger-fg: 40 8 10;
     --danger-soft: 60 21 24;
     --info: 56 189 248;
     --info-soft: 13 39 56;

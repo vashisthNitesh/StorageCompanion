@@ -26,6 +26,8 @@ const routes: RouteRecordRaw[] = [
       },
     ],
   },
+  // Component catalogue, development builds only (tree-shaken from production).
+  ...(import.meta.env.DEV ? [{ path: "/_design", component: () => import("../design/DesignSystem.vue") }] : []),
   { path: "/:pathMatch(.*)*", redirect: "/" },
 ];
 

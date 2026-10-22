@@ -4,13 +4,17 @@
 const ACCESS_TOKEN_STORAGE_KEY = "sc_access_token";
 const DEFAULT_TIMEOUT_MS = 30_000;
 
+export type ApiFailureReason = "http" | "network" | "timeout";
+
 export class ApiError extends Error {
   status: number;
   data: any;
-  constructor(message: string, status: number, data: any = {}) {
+  reason: ApiFailureReason;
+  constructor(message: string, status: number, data: any = {}, reason: ApiFailureReason = "http") {
     super(message);
     this.status = status;
     this.data = data;
+    this.reason = reason;
   }
 }
 
@@ -88,10 +92,10 @@ async function fetchWithTimeout(input: string, init: RequestInit = {}, timeoutMs
     return await fetch(input, { ...init, signal: controller.signal });
   } catch (err: any) {
     if (controller.signal.aborted && !outerSignal?.aborted) {
-      throw new ApiError("The server took too long to respond. Please check your connection and try again.", 0);
+      throw new ApiError("timeout", 0, {}, "timeout");
     }
     if (err?.name === "AbortError") throw err;
-    throw new ApiError("Could not reach the server. Please check your connection and try again.", 0);
+    throw new ApiError("network", 0, {}, "network");
   } finally {
     clearTimeout(timer);
   }
@@ -125,6 +129,7 @@ export async function apiFetch(endpoint: string, options: ApiFetchOptions = {}):
   return response;
 }
 
+/** Builds an ApiError from a failed response. Its message is NOT user copy; use normalizeApiError(). */
 export async function errorFromResponse(response: Response): Promise<ApiError> {
   let data: any = {};
   try {
@@ -132,14 +137,7 @@ export async function errorFromResponse(response: Response): Promise<ApiError> {
   } catch {
     data = {};
   }
-  const detail = data.error || data.message || data.detail;
-  const fallback =
-    response.status === 429
-      ? "Too many attempts. Please wait a moment and try again."
-      : response.status >= 500
-        ? "Something went wrong on our side. Please try again."
-        : `Request failed (${response.status}).`;
-  return new ApiError(typeof detail === "string" && detail ? detail : fallback, response.status, data);
+  return new ApiError(`HTTP ${response.status}`, response.status, data);
 }
 
 export async function apiRequest<T = any>(endpoint: string, options: ApiFetchOptions = {}): Promise<T> {
