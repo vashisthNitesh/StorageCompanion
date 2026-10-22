@@ -98,13 +98,14 @@ async function verifyMfa(code: string) {
         <UiFormField label="Email" :error="form.errors.email">
           <UiInput v-model="form.values.email" type="email" autocomplete="username" inputmode="email" placeholder="you@example.com" @blur="form.blur('email')" />
         </UiFormField>
-        <UiFormField id="login-password" :error="form.errors.password">
-          <div class="mb-1.5 flex items-baseline justify-between">
-            <label :for="'login-password'" class="text-base font-medium text-fg">Password</label>
+        <div>
+          <UiFormField label="Password" :error="form.errors.password">
+            <UiPasswordInput v-model="form.values.password" autocomplete="current-password" @blur="form.blur('password')" />
+          </UiFormField>
+          <div class="mt-1.5 text-right">
             <router-link to="/forgot-password" class="text-sm font-medium text-primary hover:underline">Forgot password?</router-link>
           </div>
-          <UiPasswordInput v-model="form.values.password" autocomplete="current-password" @blur="form.blur('password')" />
-        </UiFormField>
+        </div>
         <UiButton type="submit" variant="primary" size="lg" block :loading="form.submitting.value">Sign in</UiButton>
       </form>
     </template>

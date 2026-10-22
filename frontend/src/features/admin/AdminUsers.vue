@@ -286,7 +286,7 @@ onMounted(() => {
         <UiButton @click="load">Try again</UiButton>
       </UiEmptyState>
     </div>
-    <div v-else class="mt-4 overflow-x-auto rounded-lg border border-line bg-surface">
+    <div v-else class="relative mt-4 overflow-x-auto rounded-lg border border-line bg-surface">
       <table class="w-full min-w-[720px] text-left text-base">
         <thead class="border-b border-line bg-surface-sunken text-sm text-fg-muted">
           <tr>

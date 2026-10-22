@@ -25,7 +25,7 @@ const rows: [string, boolean | string, boolean | string, boolean | string][] = [
 
       <section class="mx-auto mt-20 max-w-4xl">
         <h2 class="text-center text-2xl font-semibold tracking-tight text-fg">How SmartSpace compares</h2>
-        <div class="mt-8 rounded-lg border border-line bg-surface shadow-xs overflow-x-auto">
+        <div class="relative mt-8 overflow-x-auto rounded-lg border border-line bg-surface shadow-xs">
           <table class="w-full min-w-[560px] text-left text-base">
             <thead class="border-b border-line text-fg-subtle">
               <tr>

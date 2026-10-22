@@ -8,7 +8,7 @@ defineProps<{ plans: Plan[]; currentCode?: string | null }>();
 </script>
 
 <template>
-  <div class="overflow-x-auto rounded-lg border border-line bg-surface scrollbar-thin">
+  <div class="relative overflow-x-auto rounded-lg border border-line bg-surface scrollbar-thin">
     <table class="tabular w-full min-w-[640px] text-left text-base">
       <caption class="sr-only">Compare plans</caption>
       <thead>

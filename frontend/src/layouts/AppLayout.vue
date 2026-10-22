@@ -145,6 +145,10 @@ async function signOut() {
 
 <template>
   <div class="flex h-[100dvh] overflow-hidden bg-canvas">
+    <a
+      href="#main-content"
+      class="fixed left-3 top-3 z-[70] -translate-y-24 rounded bg-surface px-3 py-2 text-base font-medium text-fg shadow-md transition-transform focus:translate-y-0"
+    >Skip to content</a>
     <input ref="fileInput" type="file" multiple class="hidden" tabindex="-1" aria-hidden="true" @change="onPicked" />
     <input ref="folderInput" type="file" webkitdirectory class="hidden" tabindex="-1" aria-hidden="true" @change="onPicked" />
 
@@ -180,7 +184,7 @@ async function signOut() {
         </template>
       </UiBanner>
 
-      <main ref="scrollEl" class="min-h-0 flex-1 overflow-y-auto scrollbar-thin" tabindex="-1">
+      <main id="main-content" ref="scrollEl" class="min-h-0 flex-1 overflow-y-auto scrollbar-thin" tabindex="-1">
         <div class="mx-auto w-full max-w-[1200px] px-4 pb-24 pt-6 sm:px-6 sm:pt-8 lg:px-8">
           <div v-if="restoringGoogle" class="space-y-3" aria-busy="true">
             <UiSkeleton class="h-8 w-48" />

@@ -34,7 +34,7 @@ const cards = computed(() =>
 
 <template>
   <div
-    class="-mx-4 flex snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-2 pt-3 scrollbar-thin md:mx-0 md:grid md:grid-cols-3 md:gap-x-4 md:gap-y-6 md:overflow-visible md:px-0 lg:grid-cols-5"
+    class="relative -mx-4 flex snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-2 pt-3 scrollbar-thin md:mx-0 md:grid md:grid-cols-3 md:gap-x-4 md:gap-y-6 md:overflow-visible md:px-0 lg:grid-cols-5"
     role="list"
     aria-label="Plans"
   >

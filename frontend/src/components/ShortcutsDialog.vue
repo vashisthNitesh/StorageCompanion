@@ -29,6 +29,7 @@ const groups = [
       { keys: ["Shift", "↑↓"], label: "Extend selection" },
       { keys: [modKey, "A"], label: "Select all" },
       { keys: ["F2"], label: "Rename" },
+      { keys: ["Shift", "F10"], label: "Open item menu" },
       { keys: ["Delete"], label: "Move to trash" },
       { keys: ["Esc"], label: "Clear selection" },
     ],

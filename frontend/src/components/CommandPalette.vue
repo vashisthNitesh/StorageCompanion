@@ -114,7 +114,10 @@ const items = computed<Item[]>(() => {
           },
         ]
       : [];
-  return [...fileItems, ...searchAll, ...matchedActions];
+  // A command whose name starts with the query ("trash" → Trash) is what people mean; list it first.
+  const strong = matchedActions.filter((a) => q && a.label.toLowerCase().startsWith(q));
+  const rest = matchedActions.filter((a) => !strong.includes(a));
+  return [...strong, ...fileItems, ...searchAll, ...rest];
 });
 
 const groups = computed(() => {

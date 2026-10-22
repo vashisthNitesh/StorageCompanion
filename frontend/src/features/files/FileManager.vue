@@ -154,6 +154,13 @@ function toggleAll() {
   selected.value = selected.value.size === items.value.length ? new Set() : new Set(items.value.map((n) => n.id));
 }
 
+function openContextMenuFor(id: string) {
+  const row = document.getElementById(`row-${id}`);
+  if (!row) return;
+  const r = row.getBoundingClientRect();
+  row.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: r.left + Math.min(240, r.width / 2), clientY: r.top + r.height / 2 }));
+}
+
 function onListKey(e: KeyboardEvent) {
   if (renamingId.value) return;
   const list = items.value;
@@ -206,6 +213,13 @@ function onListKey(e: KeyboardEvent) {
       return;
     case "Escape":
       return clearSelection();
+    case "ContextMenu":
+    case "F10":
+      // Shift+F10 / the Menu key open the row's context menu, as in desktop file managers.
+      if (e.key === "F10" && !e.shiftKey) return;
+      e.preventDefault();
+      if (focused) openContextMenuFor(focused.id);
+      return;
     case "a":
       if (e.metaKey || e.ctrlKey) {
         e.preventDefault();
