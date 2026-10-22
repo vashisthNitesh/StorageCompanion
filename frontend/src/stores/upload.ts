@@ -287,13 +287,13 @@ export const useUploadStore = defineStore("upload", () => {
             if (res.ok) break;
             if (res.status === -1) return; // paused or cancelled
             if (res.status === 401) {
-              if (!(await refreshAccessToken())) throw new ApiError("auth", 401);
+              if (!(await refreshAccessToken())) throw new ApiError("auth", 401, {}, "http", "/api/v1/uploads");
               continue;
             }
-            if ([400, 402, 403, 404, 413].includes(res.status)) throw new ApiError("upload", res.status, res.data ?? {});
+            if ([400, 402, 403, 404, 413].includes(res.status)) throw new ApiError("upload", res.status, res.data ?? {}, "http", "/api/v1/uploads");
             if (res.status === 0 && !navigator.onLine) continue;
             attempt += 1;
-            if (attempt > MAX_PART_ATTEMPTS) throw new ApiError("upload", res.status, res.data ?? {}, res.status === 0 ? "network" : "http");
+            if (attempt > MAX_PART_ATTEMPTS) throw new ApiError("upload", res.status, res.data ?? {}, res.status === 0 ? "network" : "http", "/api/v1/uploads");
             item.notice = "Reconnecting…";
             await sleep(Math.min(15_000, 1000 * 2 ** (attempt - 2)));
             item.notice = undefined;

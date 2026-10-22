@@ -29,13 +29,21 @@ describe("normalizeApiError", () => {
   it.each([
     [401, COPY.session],
     [403, COPY.forbidden],
-    [404, COPY.notFound],
-    [409, COPY.conflict],
+    [404, COPY.unavailable],
+    [409, COPY.staleConflict],
+    [413, COPY.generic],
     [429, COPY.rateLimited],
     [500, COPY.generic],
     [502, COPY.generic],
   ])("maps HTTP %s", (status, message) => {
     expect(normalizeApiError(http(status, { error: "Traceback (most recent call last)" })).message).toBe(message);
+  });
+
+  it("uses file wording only for file requests", () => {
+    const onFiles = (status: number) => new ApiError(`HTTP ${status}`, status, {}, "http", "/api/v1/nodes/abc");
+    expect(normalizeApiError(onFiles(404)).message).toBe(COPY.notFound);
+    expect(normalizeApiError(onFiles(409)).message).toBe(COPY.conflict);
+    expect(normalizeApiError(onFiles(413)).message).toBe(COPY.tooLarge);
   });
 
   it("keeps our lockout wording but not DRF's throttle text", () => {

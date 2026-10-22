@@ -36,6 +36,8 @@ export const COPY = {
   forbidden: "You don't have access to this.",
   notFound: "This item no longer exists.",
   conflict: "A file with this name already exists here.",
+  staleConflict: "This changed since you opened it. Refresh and try again.",
+  tooLarge: "This file is larger than your plan allows.",
   rateLimited: "Too many attempts. Try again in a minute.",
   validation: "Please check the highlighted fields and try again.",
   planRequired: "Choose a plan to start uploading files.",
@@ -81,6 +83,8 @@ export function normalizeApiError(err: unknown): NormalizedError {
   }
 
   const { status, data, reason } = err;
+  // Not-found, conflict and too-large copy talks about files only where the request was about files.
+  const aboutFiles = /\/api\/v1\/(nodes|uploads|files)\b/.test(err.path ?? "");
   const code: string | undefined = typeof data?.code === "string" ? data.code : undefined;
   const base = { status, code, fieldErrors: {} as Record<string, string> };
 
@@ -97,7 +101,7 @@ export function normalizeApiError(err: unknown): NormalizedError {
       ...base,
       kind: "too_large",
       maxFileSizeGb: gb,
-      message: gb ? `This file is larger than your plan allows (max ${gb} GB per file).` : "This file is larger than your plan allows.",
+      message: gb ? `This file is larger than your plan allows (max ${gb} GB per file).` : COPY.tooLarge,
       retryable: false,
     };
   }
@@ -128,11 +132,11 @@ export function normalizeApiError(err: unknown): NormalizedError {
     case status === 403:
       return { ...base, kind: "forbidden", message: COPY.forbidden, retryable: false };
     case status === 404:
-      return { ...base, kind: "not_found", message: COPY.notFound, retryable: false };
+      return { ...base, kind: "not_found", message: aboutFiles ? COPY.notFound : COPY.unavailable, retryable: !aboutFiles };
     case status === 409:
-      return { ...base, kind: "conflict", message: COPY.conflict, retryable: false };
+      return { ...base, kind: "conflict", message: aboutFiles ? COPY.conflict : COPY.staleConflict, retryable: false };
     case status === 413:
-      return { ...base, kind: "too_large", message: "This file is larger than your plan allows.", retryable: false };
+      return { ...base, kind: "too_large", message: aboutFiles ? COPY.tooLarge : COPY.generic, retryable: false };
     case status === 429: {
       // Our lockout message says how long to wait; DRF's generic "Request was throttled…" doesn't read well.
       const server = data?.error ?? data?.detail;

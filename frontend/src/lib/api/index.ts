@@ -10,11 +10,14 @@ export class ApiError extends Error {
   status: number;
   data: any;
   reason: ApiFailureReason;
-  constructor(message: string, status: number, data: any = {}, reason: ApiFailureReason = "http") {
+  /** API path that failed (e.g. "/api/v1/nodes/…"), so error copy can fit the context. */
+  path: string;
+  constructor(message: string, status: number, data: any = {}, reason: ApiFailureReason = "http", path = "") {
     super(message);
     this.status = status;
     this.data = data;
     this.reason = reason;
+    this.path = path;
   }
 }
 
@@ -121,6 +124,8 @@ export async function apiFetch(endpoint: string, options: ApiFetchOptions = {}):
     if (refreshed?.access_token) {
       headers.set("Authorization", `Bearer ${refreshed.access_token}`);
       response = await fetchWithTimeout(endpoint, { ...config, headers }, timeoutMs);
+      // Even a freshly issued token was rejected: the session is no longer usable.
+      if (response.status === 401) onSessionExpired?.();
     } else if (token) {
       onSessionExpired?.();
     }
@@ -137,7 +142,13 @@ export async function errorFromResponse(response: Response): Promise<ApiError> {
   } catch {
     data = {};
   }
-  return new ApiError(`HTTP ${response.status}`, response.status, data);
+  let path = "";
+  try {
+    path = new URL(response.url).pathname;
+  } catch {
+    // Synthetic responses have no URL.
+  }
+  return new ApiError(`HTTP ${response.status}`, response.status, data, "http", path);
 }
 
 export async function apiRequest<T = any>(endpoint: string, options: ApiFetchOptions = {}): Promise<T> {
