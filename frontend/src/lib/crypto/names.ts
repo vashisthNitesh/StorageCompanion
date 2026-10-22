@@ -59,7 +59,7 @@ export async function decryptName(
 
     const decoder = new TextDecoder();
     return decoder.decode(decryptedBuffer);
-  } catch (err) {
+  } catch {
     return "[Encrypted File]";
   }
 }

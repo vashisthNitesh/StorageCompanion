@@ -176,7 +176,7 @@ export const useAuthStore = defineStore("auth", () => {
       if (profile.wrapped_master_key && profile.kdf_salt) {
         try {
           await unlockWithPassword(profile, password);
-        } catch (err) {
+        } catch {
           // Admin accounts do not use a vault; customers must be able to decrypt.
           if (!isAdmin) {
             clearSession();

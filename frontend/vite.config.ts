@@ -6,8 +6,10 @@ import path from "path";
 const apiTarget = process.env.API_PROXY_TARGET || "http://127.0.0.1:8000";
 
 // https://vitejs.dev/config/
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   plugins: [vue()],
+  // Production builds must never log to the browser console.
+  esbuild: mode === "production" ? { drop: ["console", "debugger"] } : {},
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
@@ -30,4 +32,4 @@ export default defineConfig({
   worker: {
     format: "es",
   },
-});
+}));

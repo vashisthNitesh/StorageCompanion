@@ -1,0 +1,132 @@
+/*
+ * SmartSpace design tokens.
+ * Colours are RGB triplets so Tailwind can apply opacity (`bg-primary/10`).
+ * Light is the default; dark applies with [data-theme="dark"], or with the
+ * system preference when no explicit theme is chosen.
+ */
+:root {
+  color-scheme: light;
+
+  --bg: 248 250 252;
+  --bg-subtle: 241 245 249;
+  --surface: 255 255 255;
+  --surface-raised: 255 255 255;
+  --surface-sunken: 246 248 251;
+  --border: 226 232 240;
+  --border-strong: 203 213 225;
+  --text: 15 23 42;
+  --text-muted: 71 85 105;
+  --text-subtle: 100 116 139;
+  --overlay: 15 23 42;
+
+  --primary: 47 91 234;
+  --primary-hover: 36 72 196;
+  --primary-fg: 255 255 255;
+  --primary-soft: 238 243 254;
+  --primary-soft-fg: 33 62 168;
+  --ring: 47 91 234;
+
+  --success: 21 128 61;
+  --success-soft: 236 253 243;
+  --warning: 180 83 9;
+  --warning-soft: 255 251 235;
+  --danger: 220 38 38;
+  --danger-hover: 185 28 28;
+  --danger-soft: 254 242 242;
+  --info: 3 105 161;
+  --info-soft: 240 249 255;
+
+  --shadow-color: 15 23 42;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --dur-fast: 120ms;
+  --dur-base: 180ms;
+  --dur-slow: 220ms;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: 10 13 20;
+  --bg-subtle: 16 20 29;
+  --surface: 17 22 32;
+  --surface-raised: 25 31 44;
+  --surface-sunken: 13 17 25;
+  --border: 37 45 60;
+  --border-strong: 55 66 86;
+  --text: 231 235 243;
+  --text-muted: 163 174 192;
+  --text-subtle: 132 144 165;
+  --overlay: 2 4 8;
+
+  --primary: 128 158 255;
+  --primary-hover: 157 181 255;
+  --primary-fg: 8 13 32;
+  --primary-soft: 29 39 72;
+  --primary-soft-fg: 176 196 255;
+  --ring: 128 158 255;
+
+  --success: 74 222 128;
+  --success-soft: 18 44 31;
+  --warning: 251 191 36;
+  --warning-soft: 50 37 10;
+  --danger: 248 113 113;
+  --danger-hover: 252 165 165;
+  --danger-soft: 60 21 24;
+  --info: 56 189 248;
+  --info-soft: 13 39 56;
+
+  --shadow-color: 0 0 0;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    --bg: 10 13 20;
+    --bg-subtle: 16 20 29;
+    --surface: 17 22 32;
+    --surface-raised: 25 31 44;
+    --surface-sunken: 13 17 25;
+    --border: 37 45 60;
+    --border-strong: 55 66 86;
+    --text: 231 235 243;
+    --text-muted: 163 174 192;
+    --text-subtle: 132 144 165;
+    --overlay: 2 4 8;
+
+    --primary: 128 158 255;
+    --primary-hover: 157 181 255;
+    --primary-fg: 8 13 32;
+    --primary-soft: 29 39 72;
+    --primary-soft-fg: 176 196 255;
+    --ring: 128 158 255;
+
+    --success: 74 222 128;
+    --success-soft: 18 44 31;
+    --warning: 251 191 36;
+    --warning-soft: 50 37 10;
+    --danger: 248 113 113;
+    --danger-hover: 252 165 165;
+    --danger-soft: 60 21 24;
+    --info: 56 189 248;
+    --info-soft: 13 39 56;
+
+    --shadow-color: 0 0 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 0ms;
+    --dur-base: 0ms;
+    --dur-slow: 0ms;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
