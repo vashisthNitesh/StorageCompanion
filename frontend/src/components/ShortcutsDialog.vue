@@ -15,6 +15,7 @@ const groups = [
     title: "Anywhere",
     items: [
       { keys: [modKey, "K"], label: "Search and commands" },
+      { keys: ["/"], label: "Search files" },
       { keys: ["U"], label: "Upload files" },
       { keys: ["N"], label: "New folder" },
       { keys: ["?"], label: "Show keyboard shortcuts" },

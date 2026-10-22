@@ -115,6 +115,7 @@ onUnmounted(() => offs.forEach((off) => off()));
 
 useShortcuts(() => [
   { keys: "mod+k", allowInInputs: true, handler: () => emitAppEvent("command-palette") },
+  { keys: "/", handler: () => emitAppEvent("command-palette") },
   { keys: "shift+?", handler: () => emitAppEvent("shortcuts-help") },
   { keys: "?", handler: () => emitAppEvent("shortcuts-help") },
   ...(isCustomer.value
