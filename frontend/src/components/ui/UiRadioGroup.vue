@@ -2,11 +2,11 @@
 import { RadioGroupRoot, RadioGroupItem, RadioGroupIndicator } from "reka-ui";
 
 const model = defineModel<string>();
-defineProps<{ options: { value: string; label: string; description?: string; disabled?: boolean }[]; ariaLabel?: string; orientation?: "vertical" | "horizontal" }>();
+defineProps<{ options: { value: string; label: string; description?: string; disabled?: boolean }[]; label?: string; orientation?: "vertical" | "horizontal" }>();
 </script>
 
 <template>
-  <RadioGroupRoot v-model="model" :aria-label="ariaLabel" :orientation="orientation ?? 'vertical'" class="flex gap-3" :class="orientation === 'horizontal' ? 'flex-row flex-wrap' : 'flex-col'">
+  <RadioGroupRoot v-model="model" :aria-label="label" :orientation="orientation ?? 'vertical'" class="flex gap-3" :class="orientation === 'horizontal' ? 'flex-row flex-wrap' : 'flex-col'">
     <label v-for="o in options" :key="o.value" class="flex cursor-pointer items-start gap-2.5" :class="{ 'opacity-50': o.disabled }">
       <RadioGroupItem
         :value="o.value"

@@ -270,9 +270,12 @@ export const useFilesStore = defineStore("files", () => {
     return fetchNodes(folderId);
   }
 
+  /** Item to focus and select after navigation (command palette results). */
+  const revealId = ref<string | null>(null);
   async function revealNode(node: { id: string; parent: string | null }) {
     await openFolderFromSearch(node.parent);
     highlight([node.id]);
+    revealId.value = node.id;
   }
 
   function navigateToCrumb(index: number) {
@@ -417,6 +420,7 @@ export const useFilesStore = defineStore("files", () => {
     isSearchActive,
     searchError,
     highlightIds,
+    revealId,
     fetchNodes,
     search,
     clearSearch,

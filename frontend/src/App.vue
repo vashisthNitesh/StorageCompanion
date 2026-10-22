@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { TooltipProvider } from "reka-ui";
-import UploadTray from "./features/files/UploadTray.vue";
+import UploadPanel from "./features/files/UploadPanel.vue";
 import AppToaster from "./components/AppToaster.vue";
 import UiConfirmHost from "./components/ui/UiConfirmHost.vue";
 </script>
@@ -8,7 +8,7 @@ import UiConfirmHost from "./components/ui/UiConfirmHost.vue";
 <template>
   <TooltipProvider :delay-duration="300" :skip-delay-duration="200">
     <router-view />
-    <UploadTray />
+    <UploadPanel />
     <UiConfirmHost />
     <AppToaster />
   </TooltipProvider>

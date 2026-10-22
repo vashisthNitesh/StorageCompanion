@@ -111,14 +111,14 @@ watch([() => files.currentParentId, searching, isRecent, filter], () => {
 });
 // Revealed items (command palette) get focused and selected.
 watch(
-  () => files.highlightIds,
-  (ids) => {
-    if (ids.size !== 1) return;
-    const id = [...ids][0];
+  () => [files.revealId, items.value.length] as const,
+  ([id]) => {
+    if (!id) return;
     const index = items.value.findIndex((n) => n.id === id);
     if (index < 0) return;
     selected.value = new Set([id]);
     focusedId.value = id;
+    files.revealId = null;
     nextTick(() => listRef.value?.scrollToIndex(index));
   }
 );

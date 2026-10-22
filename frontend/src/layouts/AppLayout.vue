@@ -11,6 +11,7 @@ import CommandPalette from "../components/CommandPalette.vue";
 import ShortcutsDialog from "../components/ShortcutsDialog.vue";
 import PlanPickerModal from "../features/billing/PlanPickerModal.vue";
 import VaultUnlockModal from "../features/auth/VaultUnlockModal.vue";
+import ConflictDialog from "../features/files/ConflictDialog.vue";
 import { useAuthStore } from "../stores/auth";
 import { useFilesStore } from "../stores/files";
 import { useUploadStore } from "../stores/upload";
@@ -90,7 +91,7 @@ const fileInput = ref<HTMLInputElement | null>(null);
 const folderInput = ref<HTMLInputElement | null>(null);
 function onPicked(e: Event) {
   const input = e.target as HTMLInputElement;
-  if (input.files?.length) uploader.upload(Array.from(input.files), route.path.startsWith("/app/files") ? filesStore.currentParentId : null);
+  if (input.files?.length) void uploader.upload(Array.from(input.files), route.path.startsWith("/app/files") ? filesStore.currentParentId : null);
   input.value = "";
 }
 
@@ -195,5 +196,6 @@ async function signOut() {
     <ShortcutsDialog />
     <PlanPickerModal />
     <VaultUnlockModal :open="needsUnlock" @sign-out="signOut" />
+    <ConflictDialog />
   </div>
 </template>

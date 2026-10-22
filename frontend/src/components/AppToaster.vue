@@ -3,8 +3,14 @@ import { computed, onMounted, onUnmounted, ref } from "vue";
 import { Toaster } from "vue-sonner";
 import "vue-sonner/style.css";
 import { useThemeStore } from "../stores/theme";
+import { useUploadStore } from "../stores/upload";
 
 const theme = useThemeStore();
+const uploads = useUploadStore();
+// On desktop, toasts stack above the upload panel when it's open.
+const offset = computed(() =>
+  isMobile.value ? 12 : { right: 24, bottom: uploads.panelHeight ? uploads.panelHeight + 32 : 24 }
+);
 const isMobile = ref(false);
 let mq: MediaQueryList | null = null;
 const update = () => (isMobile.value = !!mq?.matches);
@@ -42,7 +48,7 @@ const style = computed(() => ({
     :close-button="true"
     :style="style"
     :toast-options="{ class: 'sc-toast' }"
-    :offset="isMobile ? 12 : 24"
+    :offset="offset"
   />
 </template>
 
