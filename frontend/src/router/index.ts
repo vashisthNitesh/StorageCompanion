@@ -8,6 +8,7 @@ const routes: RouteRecordRaw[] = [
   { path: "/legal", name: "legal", component: () => import("../pages/Legal.vue") },
   { path: "/login", name: "login", component: () => import("../features/auth/LoginView.vue"), meta: { guestOnly: true } },
   { path: "/register", name: "register", component: () => import("../features/auth/RegisterView.vue"), meta: { guestOnly: true } },
+  { path: "/forgot-password", name: "forgot-password", component: () => import("../features/auth/ForgotPasswordView.vue"), meta: { guestOnly: true } },
   {
     path: "/app",
     component: () => import("../layouts/AppLayout.vue"),
@@ -29,7 +30,8 @@ const routes: RouteRecordRaw[] = [
   },
   // Component catalogue, development builds only (tree-shaken from production).
   ...(import.meta.env.DEV ? [{ path: "/_design", component: () => import("../design/DesignSystem.vue") }] : []),
-  { path: "/:pathMatch(.*)*", redirect: "/" },
+  { path: "/app/:pathMatch(.*)*", redirect: "/app/files" },
+  { path: "/:pathMatch(.*)*", name: "not-found", component: () => import("../pages/NotFound.vue") },
 ];
 
 export const router = createRouter({

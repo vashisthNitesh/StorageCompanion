@@ -133,8 +133,12 @@ export function normalizeApiError(err: unknown): NormalizedError {
       return { ...base, kind: "conflict", message: COPY.conflict, retryable: false };
     case status === 413:
       return { ...base, kind: "too_large", message: "This file is larger than your plan allows.", retryable: false };
-    case status === 429:
-      return { ...base, kind: "rate_limited", message: COPY.rateLimited, retryable: true };
+    case status === 429: {
+      // Our lockout message says how long to wait; DRF's generic "Request was throttled…" doesn't read well.
+      const server = data?.error ?? data?.detail;
+      const message = isHumanText(server) && !/throttled/i.test(server) ? server : COPY.rateLimited;
+      return { ...base, kind: "rate_limited", message, retryable: true };
+    }
     case status === 503:
       return { ...base, kind: "unavailable", message: COPY.unavailable, retryable: true };
     case status >= 500:

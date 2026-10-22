@@ -38,6 +38,11 @@ describe("normalizeApiError", () => {
     expect(normalizeApiError(http(status, { error: "Traceback (most recent call last)" })).message).toBe(message);
   });
 
+  it("keeps our lockout wording but not DRF's throttle text", () => {
+    expect(normalizeApiError(http(429, { error: "Too many failed sign-in attempts. Please wait 15 minutes and try again." })).message).toContain("15 minutes");
+    expect(normalizeApiError(http(429, { error: "Request was throttled. Expected available in 42 seconds." })).message).toBe(COPY.rateLimited);
+  });
+
   it("maps plan and size codes", () => {
     expect(normalizeApiError(http(402, { code: "SUBSCRIPTION_REQUIRED" })).kind).toBe("plan_required");
     expect(normalizeApiError(http(413, { code: "QUOTA_EXCEEDED" })).kind).toBe("quota");

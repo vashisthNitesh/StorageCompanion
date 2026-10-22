@@ -7,7 +7,7 @@ import { useToastStore } from "../../stores/toast";
 import { formatDate } from "../../lib/format";
 import BaseModal from "../../components/BaseModal.vue";
 import ConfirmDialog from "../../components/ConfirmDialog.vue";
-import PasswordInput from "../auth/PasswordInput.vue";
+import UiPasswordInput from "../../components/ui/UiPasswordInput.vue";
 
 interface AdminUser {
   id: string;
@@ -329,7 +329,7 @@ onUnmounted(() => document.removeEventListener("click", closeMenu));
         </div>
         <div>
           <label class="label" for="new-password">Temporary password</label>
-          <PasswordInput id="new-password" v-model="createForm.password" autocomplete="new-password" :minlength="10" required />
+          <UiPasswordInput id="new-password" v-model="createForm.password" autocomplete="new-password" :minlength="10" required />
           <p class="hint">Share it securely. The person's encrypted vault is created the first time they sign in.</p>
         </div>
         <div class="grid grid-cols-2 gap-3">

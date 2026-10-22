@@ -1,144 +1,117 @@
 <script setup lang="ts">
-import { ref, computed } from "vue";
+import { ref } from "vue";
 import { useRouter, useRoute } from "vue-router";
-import { AlertCircle, Loader2, ShieldCheck } from "lucide-vue-next";
 import { useAuthStore } from "../../stores/auth";
 import { homeFor } from "../../router";
+import UiButton from "../../components/ui/UiButton.vue";
+import UiFormField from "../../components/ui/UiFormField.vue";
+import UiInput from "../../components/ui/UiInput.vue";
+import UiPasswordInput from "../../components/ui/UiPasswordInput.vue";
+import UiAlert from "../../components/ui/UiAlert.vue";
+import { rules, useForm } from "../../composables/useForm";
+import { normalizeApiError } from "../../lib/errors";
 import AuthShell from "./AuthShell.vue";
+import OrDivider from "./OrDivider.vue";
+import MfaStep from "./MfaStep.vue";
 import GoogleSignInButton from "./GoogleSignInButton.vue";
-import PasswordInput from "./PasswordInput.vue";
 
 const router = useRouter();
 const route = useRoute();
 const authStore = useAuthStore();
 
-const email = ref("");
-const password = ref("");
-const totpCode = ref("");
-const errorMessage = ref("");
-const busy = ref(false);
+const form = useForm(
+  { email: "", password: "" },
+  { email: [rules.required("Enter your email.")], password: [rules.required("Enter your password.")] }
+);
 // When 2FA is required we remember which method started the sign-in.
 const mfaFor = ref<null | { kind: "password" } | { kind: "google"; credential: string }>(null);
-
-const sessionExpired = computed(() => route.query.expired === "1");
+const useBackup = ref(false);
+const googleBusy = ref(false);
+const googleError = ref("");
 
 function goNext() {
   const redirect = typeof route.query.redirect === "string" && route.query.redirect.startsWith("/app") ? route.query.redirect : null;
   router.replace(redirect || homeFor(authStore.isMasterAdmin));
 }
 
-async function run(action: () => Promise<{ mfaRequired?: true; success?: true }>, onMfa: () => void) {
-  errorMessage.value = "";
-  busy.value = true;
-  try {
-    const res = await action();
-    if ("mfaRequired" in res && res.mfaRequired) {
-      onMfa();
-      return;
+/** Sign-in failures get one honest, non-revealing message. */
+function signInError(err: unknown): string {
+  const n = normalizeApiError(err);
+  if (n.kind === "validation" || n.kind === "auth") return "Email or password is incorrect.";
+  if (err instanceof Error && /vault/.test(err.message)) return "Your password was accepted, but your files couldn't be unlocked. Please contact support.";
+  return n.message;
+}
+
+async function submitPassword() {
+  await form.submit(async (v) => {
+    try {
+      const res = await authStore.login(v.email.trim(), v.password);
+      if ("mfaRequired" in res) {
+        mfaFor.value = { kind: "password" };
+        return;
+      }
+      goNext();
+    } catch (err) {
+      form.formError.value = signInError(err);
     }
-    goNext();
-  } catch (err: any) {
-    errorMessage.value = err.message || "Sign-in failed. Please try again.";
+  });
+}
+
+async function onGoogleCredential(credential: string) {
+  googleBusy.value = true;
+  googleError.value = "";
+  try {
+    const res = await authStore.loginWithGoogle(credential);
+    if ("mfaRequired" in res) mfaFor.value = { kind: "google", credential };
+    else goNext();
+  } catch (err) {
+    googleError.value = normalizeApiError(err).message;
   } finally {
-    busy.value = false;
+    googleBusy.value = false;
   }
 }
 
-function submitPassword() {
-  return run(
-    () => authStore.login(email.value.trim(), password.value, totpCode.value || undefined),
-    () => (mfaFor.value = { kind: "password" })
-  );
-}
-
-function onGoogleCredential(credential: string) {
-  return run(
-    () => authStore.loginWithGoogle(credential),
-    () => (mfaFor.value = { kind: "google", credential })
-  );
-}
-
-function submitMfa() {
+async function verifyMfa(code: string) {
   const pending = mfaFor.value;
   if (!pending) return;
-  if (pending.kind === "google") {
-    return run(() => authStore.loginWithGoogle(pending.credential, totpCode.value), () => {});
-  }
-  return submitPassword();
-}
-
-function cancelMfa() {
-  mfaFor.value = null;
-  totpCode.value = "";
-  errorMessage.value = "";
+  const res =
+    pending.kind === "google"
+      ? await authStore.loginWithGoogle(pending.credential, code)
+      : await authStore.login(form.values.email.trim(), form.values.password, code);
+  if (!("mfaRequired" in res)) goNext();
 }
 </script>
 
 <template>
   <AuthShell
-    :title="mfaFor ? 'Two-step verification' : 'Sign in'"
-    :subtitle="mfaFor ? 'Enter the 6-digit code from your authenticator app, or one of your backup codes.' : 'Welcome back. Sign in to open your files.'"
+    :title="mfaFor ? 'Two-step verification' : 'Sign in to SmartSpace'"
+    :subtitle="mfaFor ? (useBackup ? 'Enter one of your recovery codes.' : 'Enter the 6-digit code from your authenticator app.') : 'Welcome back.'"
   >
-    <div v-if="sessionExpired && !errorMessage && !mfaFor" class="alert-info mb-5">
-      <AlertCircle class="mt-0.5 h-4 w-4 shrink-0" />
-      <span>Your session ended. Please sign in again.</span>
-    </div>
-    <div v-if="errorMessage" class="alert-error mb-5" role="alert">
-      <AlertCircle class="mt-0.5 h-4 w-4 shrink-0" />
-      <span>{{ errorMessage }}</span>
-    </div>
-
-    <form v-if="mfaFor" class="space-y-5" @submit.prevent="submitMfa">
-      <div>
-        <label for="totp" class="label">Verification code</label>
-        <input
-          id="totp"
-          v-model="totpCode"
-          class="input h-12 text-center font-mono text-lg tracking-[0.3em]"
-          inputmode="numeric"
-          autocomplete="one-time-code"
-          placeholder="000000"
-          maxlength="16"
-          required
-          autofocus
-        />
-      </div>
-      <button type="submit" class="btn-primary btn-lg w-full" :disabled="busy || !totpCode.trim()">
-        <Loader2 v-if="busy" class="h-4 w-4 animate-spin" />
-        <ShieldCheck v-else class="h-4 w-4" />
-        Verify and sign in
-      </button>
-      <button type="button" class="btn-ghost w-full" @click="cancelMfa">Use a different account</button>
-    </form>
+    <MfaStep v-if="mfaFor" :verify="verifyMfa" @cancel="mfaFor = null; useBackup = false" @update:use-backup="useBackup = $event" />
 
     <template v-else>
-      <GoogleSignInButton text="signin_with" :disabled="busy" @credential="onGoogleCredential" />
-
-      <div class="my-6 flex items-center gap-3 text-xs uppercase tracking-wide text-slate-400">
-        <span class="h-px flex-1 bg-slate-200"></span>
-        or sign in with email
-        <span class="h-px flex-1 bg-slate-200"></span>
-      </div>
-
-      <form class="space-y-4" @submit.prevent="submitPassword">
-        <div>
-          <label for="email" class="label">Email</label>
-          <input id="email" v-model="email" class="input" type="text" autocomplete="username" placeholder="you@example.com" required />
-        </div>
-        <div>
-          <label for="password" class="label">Password</label>
-          <PasswordInput id="password" v-model="password" autocomplete="current-password" required />
-        </div>
-        <button type="submit" class="btn-primary btn-lg w-full" :disabled="busy">
-          <Loader2 v-if="busy" class="h-4 w-4 animate-spin" />
-          {{ busy ? "Signing in…" : "Sign in" }}
-        </button>
+      <GoogleSignInButton text="signin_with" :disabled="googleBusy || form.submitting.value" @credential="onGoogleCredential" />
+      <UiAlert v-if="googleError" class="mt-3">{{ googleError }}</UiAlert>
+      <OrDivider label="or with email" />
+      <form :ref="(el) => (form.formEl.value = el as HTMLFormElement)" novalidate class="space-y-4" @submit.prevent="submitPassword">
+        <UiAlert v-if="form.formError.value">{{ form.formError.value }}</UiAlert>
+        <UiFormField label="Email" :error="form.errors.email">
+          <UiInput v-model="form.values.email" type="email" autocomplete="username" inputmode="email" placeholder="you@example.com" @blur="form.blur('email')" />
+        </UiFormField>
+        <UiFormField id="login-password" :error="form.errors.password">
+          <div class="mb-1.5 flex items-baseline justify-between">
+            <label :for="'login-password'" class="text-base font-medium text-fg">Password</label>
+            <router-link to="/forgot-password" class="text-sm font-medium text-primary hover:underline">Forgot password?</router-link>
+          </div>
+          <UiPasswordInput v-model="form.values.password" autocomplete="current-password" @blur="form.blur('password')" />
+        </UiFormField>
+        <UiButton type="submit" variant="primary" size="lg" block :loading="form.submitting.value">Sign in</UiButton>
       </form>
+    </template>
 
-      <p class="mt-8 text-center text-sm text-slate-500">
-        New to SmartSpace?
-        <router-link to="/register" class="font-medium text-brand-600 hover:text-brand-700">Create an account</router-link>
-      </p>
+    <template #footer>
+      New to SmartSpace?
+      <router-link to="/register" class="font-medium text-primary hover:underline">Create an account</router-link>
     </template>
   </AuthShell>
 </template>
