@@ -62,7 +62,8 @@ function firstString(value: unknown): string | undefined {
 }
 
 function extractFieldErrors(data: any): Record<string, string> {
-  const details = data?.details && typeof data.details === "object" ? data.details : data;
+  if (Array.isArray(data)) return {};
+  const details = data?.details && typeof data.details === "object" && !Array.isArray(data.details) ? data.details : data;
   const out: Record<string, string> = {};
   if (!details || typeof details !== "object") return out;
   for (const [key, value] of Object.entries(details)) {
@@ -104,7 +105,10 @@ export function normalizeApiError(err: unknown): NormalizedError {
   switch (true) {
     case status === 400 || status === 422: {
       const fieldErrors = extractFieldErrors(data);
-      const top = data?.error ?? data?.message ?? firstString(data?.details?.non_field_errors) ?? data?.detail;
+      // DRF sometimes returns a bare list of messages (e.g. raise ValidationError("…")).
+      const top = Array.isArray(data)
+        ? firstString(data)
+        : data?.error ?? data?.message ?? firstString(data?.details?.non_field_errors) ?? data?.detail;
       // The backend also copies the first field error into `error` as "field: message";
       // when field errors exist that duplicate belongs under the field, not in a banner.
       const duplicatesField = typeof top === "string" && Object.values(fieldErrors).some((m) => top.includes(m));

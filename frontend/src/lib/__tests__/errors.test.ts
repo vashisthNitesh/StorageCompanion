@@ -20,6 +20,12 @@ describe("normalizeApiError", () => {
     expect(normalizeApiError(http(400, { error: "<html>Bad Request</html>" })).message).toBe(COPY.validation);
   });
 
+  it("reads DRF list-shaped errors", () => {
+    const n = normalizeApiError(http(400, ["Could not start the payment. Please try again."]));
+    expect(n.message).toBe("Could not start the payment. Please try again.");
+    expect(n.fieldErrors).toEqual({});
+  });
+
   it.each([
     [401, COPY.session],
     [403, COPY.forbidden],

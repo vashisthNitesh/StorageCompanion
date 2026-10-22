@@ -1,255 +1,229 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
-import { Check, Download, Loader2, AlertCircle, Receipt, HardDrive, CalendarClock } from "lucide-vue-next";
+import { Download, Receipt, HardDrive, CloudOff } from "lucide-vue-next";
+import UiPageHeader from "../../components/ui/UiPageHeader.vue";
+import UiCard from "../../components/ui/UiCard.vue";
+import UiButton from "../../components/ui/UiButton.vue";
+import UiBadge from "../../components/ui/UiBadge.vue";
+import UiProgress from "../../components/ui/UiProgress.vue";
+import UiSegmented from "../../components/ui/UiSegmented.vue";
+import UiSkeleton from "../../components/ui/UiSkeleton.vue";
+import UiEmptyState from "../../components/ui/UiEmptyState.vue";
+import UiAlert from "../../components/ui/UiAlert.vue";
+import PlanCards from "./PlanCards.vue";
+import CompareTable from "./CompareTable.vue";
+import CheckoutDialog from "./CheckoutDialog.vue";
 import { useAuthStore } from "../../stores/auth";
-import { useBillingStore, type Plan, type Invoice } from "../../stores/billing";
-import { useToastStore } from "../../stores/toast";
+import { useBillingStore, type Invoice, type Plan } from "../../stores/billing";
+import { normalizeApiError } from "../../lib/errors";
+import { reportError } from "../../lib/reportError";
 import { formatBytes, formatDate, formatMoney } from "../../lib/format";
-import { GST_STATES } from "../../lib/gstStates";
-import ConfirmDialog from "../../components/ConfirmDialog.vue";
+import { storageLabel, yearlySavingsPercent } from "./planCatalog";
 
 const route = useRoute();
 const authStore = useAuthStore();
 const billing = useBillingStore();
-const toast = useToastStore();
 
 const interval = ref<"monthly" | "yearly">("yearly");
-const billingState = ref<string>(safeGet("sc_billing_state"));
-const loading = ref(true);
-const payingPlan = ref<string | null>(null);
-const checkoutError = ref("");
-const confirmCancel = ref(false);
+const loadingInvoices = ref(true);
+const invoicesError = ref<unknown>(null);
 const downloading = ref<string | null>(null);
+const checkout = ref<{ open: boolean; plan: Plan | null }>({ open: false, plan: null });
+const pickerEl = ref<HTMLElement | null>(null);
 
-const highlighted = computed(() => (typeof route.query.plan === "string" ? route.query.plan : "value"));
-const sub = computed(() => billing.currentSubscription);
-const profileSub = computed(() => authStore.user?.subscription);
-const isActive = computed(() => !!profileSub.value?.can_upload);
+const sub = computed(() => authStore.user?.subscription);
+const quota = computed(() => authStore.user?.quota);
+const hasPlan = computed(() => !!sub.value?.has_active_subscription);
+const ended = computed(() => !!sub.value?.plan_code && !sub.value?.can_upload);
+const currentPlan = computed(() => billing.plans.find((p) => p.code === sub.value?.plan_code) ?? null);
+const currentCode = computed(() => (hasPlan.value ? sub.value?.plan_code ?? null : null));
+const usedPct = computed(() => (quota.value?.bytes_limit ? Math.min(100, (quota.value.bytes_used / quota.value.bytes_limit) * 100) : 0));
+const daysLeft = computed(() => sub.value?.days_until_expiration ?? null);
+const savings = computed(() => yearlySavingsPercent(billing.plans));
 
-function safeGet(key: string) {
+function choose(plan: Plan) {
+  checkout.value = { open: true, plan };
+}
+function extend() {
+  if (currentPlan.value) choose(currentPlan.value);
+}
+function scrollToPlans() {
+  pickerEl.value?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+async function loadInvoices() {
+  loadingInvoices.value = true;
+  invoicesError.value = null;
   try {
-    return localStorage.getItem(key) || "";
-  } catch {
-    return "";
-  }
-}
-
-function price(plan: Plan) {
-  return interval.value === "yearly" ? parseFloat(plan.price_yearly) : parseFloat(plan.price_monthly);
-}
-function savings(plan: Plan) {
-  const monthly = parseFloat(plan.price_monthly) * 12;
-  const yearly = parseFloat(plan.price_yearly);
-  return monthly > yearly ? Math.round(((monthly - yearly) / monthly) * 100) : 0;
-}
-function storageLabel(bytes: number) {
-  const gb = bytes / 1024 ** 3;
-  return gb >= 1000 ? `${(gb / 1000).toFixed(gb % 1000 ? 1 : 0)} TB` : `${Math.round(gb)} GB`;
-}
-
-async function choose(plan: Plan) {
-  checkoutError.value = "";
-  if (!billingState.value) {
-    checkoutError.value = "Select your state so we can issue a correct GST invoice.";
-    document.getElementById("billing-state")?.focus();
-    return;
-  }
-  try {
-    localStorage.setItem("sc_billing_state", billingState.value);
-  } catch {
-    // ignore
-  }
-  payingPlan.value = plan.code;
-  try {
-    await billing.checkout(plan.code, interval.value, billingState.value);
-    toast.success(`You're on ${plan.name}. Happy uploading!`);
-  } catch (err: any) {
-    checkoutError.value = err.message || "Payment failed. You haven't been charged.";
+    await billing.fetchInvoices();
+  } catch (err) {
+    invoicesError.value = err;
   } finally {
-    payingPlan.value = null;
+    loadingInvoices.value = false;
   }
-}
-
-async function cancelPlan() {
-  await billing.cancel();
-  toast.info("Your plan won't renew. It stays active until the end of the period.");
 }
 
 async function downloadInvoice(inv: Invoice) {
   downloading.value = inv.id;
   try {
     await billing.downloadInvoice(inv);
-  } catch (err: any) {
-    toast.error(err.message || "Couldn't download the invoice.");
+  } catch (err) {
+    reportError(err, { retry: () => void downloadInvoice(inv) });
   } finally {
     downloading.value = null;
   }
 }
 
-function statusBadge(status: string) {
-  if (["active", "extended", "trialing"].includes(status)) return { cls: "badge-green", text: "Active" };
-  if (["grace_period", "expired", "past_due"].includes(status)) return { cls: "badge-amber", text: "Expired" };
-  if (status === "canceled") return { cls: "badge-amber", text: "Cancelled" };
-  return { cls: "badge-gray", text: status.replace("_", " ") };
-}
+const statusBadge = (status: string) =>
+  ({
+    paid: { tone: "success" as const, label: "Paid" },
+    failed: { tone: "danger" as const, label: "Failed" },
+    refunded: { tone: "neutral" as const, label: "Refunded" },
+  })[status] ?? { tone: "neutral" as const, label: status.charAt(0).toUpperCase() + status.slice(1) };
 
 onMounted(async () => {
-  await Promise.all([billing.fetchPlans(), billing.fetchSubscription(), billing.fetchInvoices(), authStore.fetchAuthConfig()]);
-  loading.value = false;
+  void loadInvoices();
+  void authStore.fetchAuthConfig();
+  await billing.ensurePlans();
+  // Arriving from the pricing page with ?plan=… goes straight to checkout.
+  const wanted = typeof route.query.plan === "string" ? billing.plans.find((p) => p.code === route.query.plan) : null;
+  if (wanted) choose(wanted);
 });
 </script>
 
 <template>
-  <div>
-    <h1 class="page-title">Plan & billing</h1>
-    <p class="page-subtitle">Prices include GST. Plans don't renew automatically; we'll remind you in the app a week before yours ends.</p>
+  <div class="space-y-8">
+    <UiPageHeader title="Plan & billing" description="Prepaid plans in INR, GST included. Plans don't renew automatically." />
 
     <!-- Current plan -->
-    <section class="mt-6 card card-body">
-      <div v-if="loading" class="h-16 animate-pulse rounded-lg bg-slate-100"></div>
-      <div v-else-if="sub" class="flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
-        <div>
-          <div class="flex items-center gap-2">
-            <h2 class="section-title">{{ sub.plan_details.name }}</h2>
-            <span :class="statusBadge(sub.status).cls">{{ statusBadge(sub.status).text }}</span>
+    <UiCard v-if="!billing.plansLoaded && !billing.plansError" aria-busy="true">
+      <div class="space-y-3">
+        <UiSkeleton class="h-5 w-40" />
+        <UiSkeleton class="h-2 w-full" />
+        <UiSkeleton class="h-4 w-64" />
+      </div>
+    </UiCard>
+    <UiCard v-else-if="sub?.plan_code">
+      <div class="flex flex-col gap-6 md:flex-row md:items-start md:justify-between">
+        <div class="min-w-0 flex-1">
+          <div class="flex flex-wrap items-center gap-2">
+            <h2 class="text-md font-semibold text-fg">{{ sub.plan_name }}</h2>
+            <UiBadge v-if="ended" tone="warning">Ended</UiBadge>
+            <UiBadge v-else-if="daysLeft !== null && daysLeft <= 7" tone="warning">Ends soon</UiBadge>
+            <UiBadge v-else tone="success" dot>Active</UiBadge>
           </div>
-          <div class="mt-2 flex flex-wrap gap-x-6 gap-y-1 text-sm text-slate-600">
-            <span class="inline-flex items-center gap-1.5"><HardDrive class="h-4 w-4 text-slate-400" />{{ storageLabel(sub.plan_details.storage_bytes) }} storage</span>
-            <span class="inline-flex items-center gap-1.5">
-              <CalendarClock class="h-4 w-4 text-slate-400" />
-              {{ isActive ? (sub.cancel_at_period_end ? "Ends" : "Active until") : "Ended" }} {{ formatDate(sub.current_period_end) }}
-            </span>
+          <div class="mt-4 max-w-md">
+            <UiProgress :value="usedPct" :tone="usedPct >= 95 ? 'danger' : usedPct >= 80 ? 'warning' : 'primary'" label="Storage used" />
+            <p class="tabular mt-2 text-base text-fg-muted">
+              {{ formatBytes(quota?.bytes_used) }} of {{ currentPlan ? storageLabel(currentPlan.storage_bytes) : formatBytes(quota?.bytes_limit, 0) }} used
+            </p>
           </div>
-          <p v-if="!isActive && profileSub?.grace_period_ends_at" class="mt-2 text-sm text-amber-800">
-            Your files are kept until {{ formatDate(profileSub.grace_period_ends_at) }}. Renew before then to keep them.
+          <p class="tabular mt-3 text-base text-fg-muted">
+            <template v-if="ended">
+              Ended on {{ formatDate(sub.current_period_end) }}. Your files are kept until {{ formatDate(sub.grace_period_ends_at) }}; renew to upload again.
+            </template>
+            <template v-else>
+              Valid until <span class="font-medium text-fg">{{ formatDate(sub.current_period_end) }}</span>
+              <template v-if="daysLeft !== null"> · {{ daysLeft }} {{ daysLeft === 1 ? "day" : "days" }} left</template>
+            </template>
           </p>
         </div>
-        <div class="md:text-right">
-          <p class="text-sm text-slate-500">Storage used</p>
-          <p class="text-lg font-semibold text-slate-900">
-            {{ formatBytes(authStore.user?.quota?.bytes_used) }}
-            <span class="text-sm font-normal text-slate-500">of {{ storageLabel(sub.plan_details.storage_bytes) }}</span>
-          </p>
-          <button v-if="isActive && !sub.cancel_at_period_end && sub.status === 'active'" class="mt-1 text-sm text-slate-500 underline hover:text-slate-700" @click="confirmCancel = true">
-            Don't renew this plan
-          </button>
+        <div class="flex shrink-0 gap-2">
+          <UiButton variant="primary" :disabled="!currentPlan" @click="extend">{{ ended ? "Renew plan" : "Extend plan" }}</UiButton>
+          <UiButton @click="scrollToPlans">Change plan</UiButton>
         </div>
       </div>
-      <div v-else class="flex items-center gap-3">
-        <span class="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-50 text-brand-600"><HardDrive class="h-5 w-5" /></span>
-        <div>
-          <h2 class="section-title">No plan yet</h2>
-          <p class="text-sm text-slate-500">Pick a plan below to start uploading.</p>
+    </UiCard>
+    <UiCard v-else>
+      <div class="flex flex-col gap-4 sm:flex-row sm:items-center">
+        <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-primary-soft text-primary"><HardDrive :size="20" :stroke-width="1.75" aria-hidden="true" /></span>
+        <div class="flex-1">
+          <h2 class="text-md font-semibold text-fg">No plan yet</h2>
+          <p class="text-base text-fg-muted">Pick a plan below to start uploading. Your files are encrypted on your device.</p>
         </div>
       </div>
-    </section>
+    </UiCard>
 
     <!-- Plans -->
-    <section class="mt-10">
-      <div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+    <section ref="pickerEl" class="scroll-mt-6" aria-labelledby="plans-heading">
+      <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h2 class="section-title">{{ sub ? "Change or renew your plan" : "Choose a plan" }}</h2>
-          <p class="mt-1 text-sm text-slate-500">Buying the plan you already have adds time to it.</p>
+          <h2 id="plans-heading" class="text-md font-semibold text-fg">{{ hasPlan ? "Change or extend your plan" : "Choose a plan" }}</h2>
+          <p class="mt-1 text-base text-fg-muted">Prices include GST. We'll ask for your state at checkout for the invoice.</p>
         </div>
-        <div class="flex flex-col gap-3 sm:flex-row sm:items-end">
-          <div>
-            <label for="billing-state" class="label">Your state (for GST)</label>
-            <select id="billing-state" v-model="billingState" class="input h-9 sm:w-60">
-              <option value="" disabled>Select state…</option>
-              <option v-for="s in GST_STATES" :key="s.code" :value="s.code">{{ s.name }}</option>
-            </select>
-          </div>
-          <div class="inline-flex rounded-lg border border-slate-200 bg-white p-0.5" role="group" aria-label="Billing period">
-            <button
-              v-for="opt in (['monthly', 'yearly'] as const)"
-              :key="opt"
-              class="h-8 rounded-md px-3 text-sm font-medium"
-              :class="interval === opt ? 'bg-slate-900 text-white' : 'text-slate-600 hover:text-slate-900'"
-              :aria-pressed="interval === opt"
-              @click="interval = opt"
-            >
-              {{ opt === "monthly" ? "Monthly" : "Yearly" }}
-            </button>
-          </div>
-        </div>
+        <UiSegmented
+          v-model="interval"
+          label="Billing period"
+          :options="[
+            { value: 'monthly', label: 'Monthly' },
+            { value: 'yearly', label: 'Yearly', badge: savings ? `Save ${savings}%` : undefined },
+          ]"
+        />
       </div>
-
-      <div v-if="!authStore.paymentsEnabled && !loading" class="alert-warning mt-5">
-        <AlertCircle class="mt-0.5 h-4 w-4 shrink-0" />
-        Online payments are temporarily unavailable. Please try again later.
+      <UiAlert v-if="billing.plansError" class="mt-5">
+        {{ normalizeApiError(billing.plansError).message }}
+        <template #action><UiButton size="sm" @click="billing.fetchPlans()">Retry</UiButton></template>
+      </UiAlert>
+      <UiAlert v-else-if="!authStore.paymentsEnabled" tone="warning" class="mt-5">Online payments are unavailable right now. Please try again later.</UiAlert>
+      <div class="mt-5">
+        <PlanCards
+          :plans="billing.plans"
+          :interval="interval"
+          :current-code="currentCode"
+          :loading="!billing.plansLoaded && !billing.plansError"
+          :disabled="!authStore.paymentsEnabled"
+          disabled-reason="Online payments are unavailable right now"
+          @select="choose"
+        />
       </div>
-      <div v-if="checkoutError" class="alert-error mt-5" role="alert">
-        <AlertCircle class="mt-0.5 h-4 w-4 shrink-0" />{{ checkoutError }}
-      </div>
-      <div v-if="billing.plansError" class="alert-error mt-5">
-        {{ billing.plansError }} <button class="ml-1 underline" @click="billing.fetchPlans()">Retry</button>
-      </div>
-
-      <div class="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-        <template v-if="loading">
-          <div v-for="i in 5" :key="i" class="h-72 animate-pulse rounded-xl bg-white ring-1 ring-slate-200"></div>
-        </template>
-        <article
-          v-for="plan in billing.plans"
-          v-else
-          :key="plan.code"
-          class="relative flex flex-col rounded-xl bg-white p-5 ring-1"
-          :class="plan.code === highlighted ? 'ring-2 ring-brand-600 shadow-pop' : 'ring-slate-200 shadow-card'"
-        >
-          <span v-if="plan.code === highlighted" class="badge-blue absolute -top-2.5 left-5 bg-white">Recommended</span>
-          <h3 class="font-semibold text-slate-900">{{ plan.name }}</h3>
-          <p class="mt-1 text-2xl font-semibold tracking-tight text-slate-900">{{ storageLabel(plan.storage_bytes) }}</p>
-          <p class="mt-3">
-            <span class="text-xl font-semibold text-slate-900">{{ formatMoney(price(plan), plan.currency) }}</span>
-            <span class="text-sm text-slate-500">/{{ interval === "yearly" ? "year" : "month" }}</span>
-          </p>
-          <p v-if="interval === 'yearly' && savings(plan)" class="text-xs font-medium text-emerald-700">Save {{ savings(plan) }}% vs monthly</p>
-          <p class="mt-3 text-sm text-slate-500">{{ plan.description }}</p>
-          <ul class="mt-4 flex-1 space-y-2 text-sm text-slate-700">
-            <li class="flex gap-2"><Check class="mt-0.5 h-4 w-4 shrink-0 text-brand-600" />Files up to {{ storageLabel(plan.max_file_size) }} each</li>
-            <li v-for="f in plan.features.slice(1, 4)" :key="f" class="flex gap-2"><Check class="mt-0.5 h-4 w-4 shrink-0 text-brand-600" />{{ f }}</li>
-          </ul>
-          <button
-            class="mt-5 w-full"
-            :class="plan.code === highlighted ? 'btn-primary' : 'btn-secondary'"
-            :disabled="!!payingPlan || !authStore.paymentsEnabled"
-            @click="choose(plan)"
-          >
-            <Loader2 v-if="payingPlan === plan.code" class="h-4 w-4 animate-spin" />
-            {{ sub?.plan_details.code === plan.code ? "Renew" : sub ? "Switch to this plan" : "Choose plan" }}
-          </button>
-        </article>
-      </div>
+      <details class="group mt-6">
+        <summary class="inline-flex cursor-pointer select-none items-center gap-1.5 rounded text-base font-medium text-primary hover:underline">
+          Compare all features
+        </summary>
+        <div class="mt-4"><CompareTable :plans="billing.plans" :current-code="currentCode" /></div>
+      </details>
     </section>
 
     <!-- Invoices -->
-    <section class="mt-10">
-      <h2 class="section-title">Invoices</h2>
-      <div class="mt-4 card overflow-hidden">
-        <div v-if="!billing.invoices.length" class="flex items-center gap-3 px-5 py-6 text-sm text-slate-500">
-          <Receipt class="h-5 w-5 text-slate-300" /> Your invoices will appear here after your first payment.
+    <section aria-labelledby="invoices-heading">
+      <h2 id="invoices-heading" class="text-md font-semibold text-fg">Invoices</h2>
+      <div class="mt-4 overflow-hidden rounded-lg border border-line bg-surface">
+        <div v-if="loadingInvoices" class="space-y-px" aria-busy="true">
+          <div v-for="i in 3" :key="i" class="flex h-12 items-center gap-4 px-4"><UiSkeleton class="h-3.5 w-24" /><UiSkeleton class="h-3.5 w-32" /><UiSkeleton class="ml-auto h-3.5 w-16" /></div>
         </div>
-        <table v-else class="w-full text-left text-sm">
-          <thead class="border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+        <UiEmptyState v-else-if="invoicesError" compact :icon="CloudOff" tone="danger" title="Couldn't load invoices" :description="normalizeApiError(invoicesError).message">
+          <UiButton @click="loadInvoices">Try again</UiButton>
+        </UiEmptyState>
+        <UiEmptyState v-else-if="!billing.invoices.length" compact :icon="Receipt" tone="neutral" title="No invoices yet" description="Your GST invoices appear here after each payment." />
+        <table v-else class="tabular w-full text-left text-base">
+          <thead class="border-b border-line bg-surface-sunken text-sm text-fg-muted">
             <tr>
-              <th class="px-5 py-2.5 font-medium">Date</th>
-              <th class="hidden px-5 py-2.5 font-medium sm:table-cell">Plan</th>
-              <th class="px-5 py-2.5 font-medium">Amount</th>
-              <th class="px-5 py-2.5"><span class="sr-only">Download</span></th>
+              <th scope="col" class="px-4 py-2.5 font-medium">Date</th>
+              <th scope="col" class="hidden px-4 py-2.5 font-medium sm:table-cell">Invoice</th>
+              <th scope="col" class="hidden px-4 py-2.5 font-medium md:table-cell">Plan</th>
+              <th scope="col" class="px-4 py-2.5 text-right font-medium">Amount</th>
+              <th scope="col" class="px-4 py-2.5 font-medium">Status</th>
+              <th scope="col" class="px-4 py-2.5"><span class="sr-only">Download</span></th>
             </tr>
           </thead>
-          <tbody class="divide-y divide-slate-100">
+          <tbody class="divide-y divide-line">
             <tr v-for="inv in billing.invoices" :key="inv.id">
-              <td class="px-5 py-3 text-slate-700">{{ formatDate(inv.issued_at) }}</td>
-              <td class="hidden px-5 py-3 text-slate-700 sm:table-cell">{{ inv.plan_name || "Storage plan" }} <span class="text-slate-400">· {{ inv.billing_interval || "" }}</span></td>
-              <td class="px-5 py-3 font-medium text-slate-900">{{ formatMoney(inv.amount, inv.currency) }}</td>
-              <td class="px-5 py-3 text-right">
-                <button class="btn-ghost btn-sm" :disabled="downloading === inv.id" @click="downloadInvoice(inv)">
-                  <Loader2 v-if="downloading === inv.id" class="h-4 w-4 animate-spin" />
-                  <Download v-else class="h-4 w-4" />
-                  <span class="hidden sm:inline">Download</span>
-                </button>
+              <td class="px-4 py-3 text-fg">{{ formatDate(inv.issued_at) }}</td>
+              <td class="hidden px-4 py-3 font-mono text-sm text-fg-muted sm:table-cell">{{ inv.id.slice(0, 8).toUpperCase() }}</td>
+              <td class="hidden px-4 py-3 text-fg md:table-cell">{{ inv.plan_name || "Storage plan" }}<span v-if="inv.billing_interval" class="text-fg-subtle"> · {{ inv.billing_interval === "yearly" ? "Yearly" : "Monthly" }}</span></td>
+              <td class="px-4 py-3 text-right font-medium text-fg">{{ formatMoney(parseFloat(inv.amount), inv.currency) }}</td>
+              <td class="px-4 py-3"><UiBadge :tone="statusBadge(inv.status).tone">{{ statusBadge(inv.status).label }}</UiBadge></td>
+              <td class="px-2 py-3 text-right">
+                <UiButton
+                  variant="ghost"
+                  size="sm"
+                  icon-only
+                  :icon="Download"
+                  :loading="downloading === inv.id"
+                  :aria-label="`Download invoice from ${formatDate(inv.issued_at)}`"
+                  @click="downloadInvoice(inv)"
+                />
               </td>
             </tr>
           </tbody>
@@ -257,13 +231,6 @@ onMounted(async () => {
       </div>
     </section>
 
-    <ConfirmDialog
-      :open="confirmCancel"
-      title="Stop renewing?"
-      :message="`Your plan stays active until ${formatDate(sub?.current_period_end)}. After that, uploads pause and your files are kept for 90 days.`"
-      confirm-label="Don't renew"
-      :action="cancelPlan"
-      @close="confirmCancel = false"
-    />
+    <CheckoutDialog v-model:open="checkout.open" v-model:interval="interval" :plan="checkout.plan" />
   </div>
 </template>
