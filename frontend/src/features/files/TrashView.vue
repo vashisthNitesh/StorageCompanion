@@ -36,7 +36,7 @@ async function load() {
 async function restore(node: FileNode) {
   busyId.value = node.id;
   try {
-    await filesStore.restoreNode(node.id);
+    await filesStore.restoreNode(node);
     items.value = items.value.filter((n) => n.id !== node.id);
     toast.success(`“${node.name}” restored.`);
   } catch (err: any) {

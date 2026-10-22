@@ -1,8 +1,9 @@
 import { cn } from "./cn";
 
-export function inputClasses(opts: { invalid?: boolean; size?: "sm" | "md" | "lg"; extra?: string }) {
+export function inputClasses(opts: { invalid?: boolean; size?: "sm" | "md" | "lg"; extra?: string; block?: boolean }) {
   return cn(
-    "block w-full rounded border bg-surface text-fg placeholder:text-fg-subtle shadow-xs",
+    opts.block === false ? "inline-flex" : "block w-full",
+    "rounded border bg-surface text-fg placeholder:text-fg-subtle shadow-xs",
     "transition-[border-color,box-shadow] duration-fast ease-out",
     "focus:outline-none focus-visible:outline-none focus:ring-4",
     "disabled:cursor-not-allowed disabled:bg-canvas-subtle disabled:text-fg-subtle",

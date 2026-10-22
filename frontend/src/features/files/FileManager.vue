@@ -1,348 +1,540 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import { useRoute } from "vue-router";
 import {
-  ChevronRight,
   FolderPlus,
   Upload,
-  FolderUp,
-  LayoutGrid,
   List,
-  RefreshCw,
-  SearchX,
+  LayoutGrid,
+  ArrowUpNarrowWide,
+  ArrowDownWideNarrow,
+  Download,
+  FolderOpen,
+  Pencil,
+  FolderInput,
+  FileUp,
+  Info,
+  Trash2,
   UploadCloud,
-  AlertCircle,
-  Loader2,
+  SearchX,
   CreditCard,
+  FolderClosed,
+  Filter,
+  Clock,
+  CloudOff,
 } from "lucide-vue-next";
-import { useFilesStore, type FileNode } from "../../stores/files";
+import UiBreadcrumbs from "../../components/ui/UiBreadcrumbs.vue";
+import UiButton from "../../components/ui/UiButton.vue";
+import UiSelect from "../../components/ui/UiSelect.vue";
+import UiSegmented from "../../components/ui/UiSegmented.vue";
+import UiSkeleton from "../../components/ui/UiSkeleton.vue";
+import UiEmptyState from "../../components/ui/UiEmptyState.vue";
+import type { MenuEntry } from "../../components/ui/menuTypes";
+import { useFilesStore, compareNodes, type FileNode, type SearchResult, type SortField } from "../../stores/files";
 import { useAuthStore } from "../../stores/auth";
 import { useUploadStore } from "../../stores/upload";
-import { useToastStore } from "../../stores/toast";
-import { useFilePicker } from "../../composables/useFilePicker";
-import { FILTERS, kindOf, type FilterKey } from "./fileTypes";
-import { useFileDownload } from "./useFileDownload";
+import { useUploader } from "../../composables/useUploader";
+import { useShortcuts } from "../../composables/useShortcuts";
+import { emitAppEvent, onAppEvent } from "../../lib/events";
+import { normalizeApiError } from "../../lib/errors";
 import { formatBytes } from "../../lib/format";
+import { FILTERS, kindOf, type FilterKey } from "./fileTypes";
+import { useFileActions } from "./useFileActions";
 import FileListView from "./FileListView.vue";
 import FileGridView from "./FileGridView.vue";
-import ItemMenu, { type ItemAction } from "./ItemMenu.vue";
 import NameDialog from "./NameDialog.vue";
 import MoveDialog from "./MoveDialog.vue";
-import VersionsDialog from "./VersionsDialog.vue";
+import DetailsDrawer from "./DetailsDrawer.vue";
+import BulkBar from "./BulkBar.vue";
 
-const filesStore = useFilesStore();
+const route = useRoute();
+const files = useFilesStore();
 const authStore = useAuthStore();
 const uploadStore = useUploadStore();
-const toast = useToastStore();
-const picker = useFilePicker();
-const { downloadFile } = useFileDownload();
+const uploader = useUploader();
+const actions = useFileActions();
 
+const isRecent = computed(() => route.meta.view === "recent");
+const searching = computed(() => !isRecent.value && files.isSearchActive);
 const filter = ref<FilterKey>("all");
-const sort = ref<"name" | "-name" | "-updated" | "-size">("name");
-const selectedId = ref<string | null>(null);
-const dragDepth = ref(0);
 
-const menu = ref<{ node: FileNode | null; x: number; y: number }>({ node: null, x: 0, y: 0 });
-const nameDialog = ref<null | { mode: "create" } | { mode: "rename"; node: FileNode }>(null);
-const moveTarget = ref<FileNode | null>(null);
-const versionsTarget = ref<FileNode | null>(null);
+// --- Data per mode ------------------------------------------------------------
+const recent = ref<SearchResult[]>([]);
+const recentLoading = ref(false);
+const recentError = ref<unknown>(null);
+async function loadRecent() {
+  recentLoading.value = true;
+  recentError.value = null;
+  try {
+    recent.value = await files.recentFiles(100);
+  } catch (err) {
+    recentError.value = err;
+  } finally {
+    recentLoading.value = false;
+  }
+}
+
+function applyFilter<T extends FileNode>(list: T[]): T[] {
+  const kinds = FILTERS.find((f) => f.key === filter.value)?.kinds ?? [];
+  return kinds.length ? list.filter((n) => kinds.includes(kindOf(n))) : list;
+}
+const source = computed<FileNode[]>(() => (isRecent.value ? recent.value : searching.value ? files.searchResults : files.nodes));
+const items = computed(() => {
+  const list = applyFilter([...source.value]);
+  return isRecent.value ? list : list.sort(compareNodes(files.prefs.sort, files.prefs.dir));
+});
+const loading = computed(() =>
+  isRecent.value ? recentLoading.value && !recent.value.length : searching.value ? files.isSearching && !files.searchResults.length : files.isLoading && !files.loaded
+);
+const error = computed(() => (isRecent.value ? recentError.value : searching.value ? files.searchError : files.loadError));
+const totalSize = computed(() => items.value.reduce((s, n) => s + (n.type === "file" ? n.size_bytes : 0), 0));
+const noPlan = computed(() => !authStore.user?.subscription?.has_active_subscription);
+const crumbs = computed(() => files.breadcrumbs.map((c, i) => ({ key: c.id ?? `root-${i}`, label: c.name })));
+const currentFolderName = computed(() => files.breadcrumbs.at(-1)?.name ?? "My files");
+
+// --- Selection & keyboard -------------------------------------------------------
+const selected = ref<Set<string>>(new Set());
+const focusedId = ref<string | null>(null);
+const anchorId = ref<string | null>(null);
+const renamingId = ref<string | null>(null);
+const listRef = ref<InstanceType<typeof FileListView> | null>(null);
+const selectedNodes = computed(() => items.value.filter((n) => selected.value.has(n.id)));
+
+function clearSelection() {
+  selected.value = new Set();
+  anchorId.value = null;
+}
+watch([() => files.currentParentId, searching, isRecent, filter], () => {
+  clearSelection();
+  focusedId.value = null;
+  renamingId.value = null;
+});
+// Revealed items (command palette) get focused and selected.
+watch(
+  () => files.highlightIds,
+  (ids) => {
+    if (ids.size !== 1) return;
+    const id = [...ids][0];
+    const index = items.value.findIndex((n) => n.id === id);
+    if (index < 0) return;
+    selected.value = new Set([id]);
+    focusedId.value = id;
+    nextTick(() => listRef.value?.scrollToIndex(index));
+  }
+);
+
+function rangeIds(fromId: string | null, toId: string) {
+  const ids = items.value.map((n) => n.id);
+  const a = fromId ? ids.indexOf(fromId) : -1;
+  const b = ids.indexOf(toId);
+  if (a < 0) return [toId];
+  return ids.slice(Math.min(a, b), Math.max(a, b) + 1);
+}
+
+function onItemClick(node: FileNode, e: MouseEvent) {
+  focusedId.value = node.id;
+  if (e.shiftKey) {
+    selected.value = new Set(rangeIds(anchorId.value, node.id));
+  } else if (e.metaKey || e.ctrlKey) {
+    toggle(node);
+  } else {
+    selected.value = new Set([node.id]);
+    anchorId.value = node.id;
+  }
+}
+function toggle(node: FileNode) {
+  const next = new Set(selected.value);
+  if (next.has(node.id)) next.delete(node.id);
+  else next.add(node.id);
+  selected.value = next;
+  anchorId.value = node.id;
+  focusedId.value = node.id;
+}
+function toggleAll() {
+  selected.value = selected.value.size === items.value.length ? new Set() : new Set(items.value.map((n) => n.id));
+}
+
+function onListKey(e: KeyboardEvent) {
+  if (renamingId.value) return;
+  const list = items.value;
+  if (!list.length) return;
+  const index = Math.max(0, list.findIndex((n) => n.id === focusedId.value));
+  const grid = useGrid.value;
+  const step = grid ? Math.max(1, getComputedStyle(e.currentTarget as HTMLElement).gridTemplateColumns.split(" ").length) : 1;
+  const move = (to: number) => {
+    e.preventDefault();
+    const next = list[Math.max(0, Math.min(list.length - 1, to))];
+    focusedId.value = next.id;
+    if (e.shiftKey) selected.value = new Set(rangeIds(anchorId.value ?? list[index].id, next.id));
+    else if (!e.metaKey && !e.ctrlKey) {
+      selected.value = new Set([next.id]);
+      anchorId.value = next.id;
+    }
+    listRef.value?.scrollToIndex(list.indexOf(next));
+    if (grid) document.getElementById(`row-${next.id}`)?.scrollIntoView({ block: "nearest" });
+  };
+  const focused = list.find((n) => n.id === focusedId.value);
+  switch (e.key) {
+    case "ArrowDown":
+      return move(focusedId.value ? index + step : 0);
+    case "ArrowUp":
+      return move(index - step);
+    case "ArrowRight":
+      return grid ? move(index + 1) : undefined;
+    case "ArrowLeft":
+      return grid ? move(index - 1) : undefined;
+    case "Home":
+      return move(0);
+    case "End":
+      return move(list.length - 1);
+    case "Enter":
+      e.preventDefault();
+      if (focused) open(focused);
+      return;
+    case " ":
+      e.preventDefault();
+      if (focused) toggle(focused);
+      return;
+    case "F2":
+      e.preventDefault();
+      if (selectedNodes.value.length === 1) startRename(selectedNodes.value[0]);
+      return;
+    case "Delete":
+    case "Backspace":
+      e.preventDefault();
+      if (selectedNodes.value.length) void trash(selectedNodes.value);
+      return;
+    case "Escape":
+      return clearSelection();
+    case "a":
+      if (e.metaKey || e.ctrlKey) {
+        e.preventDefault();
+        selected.value = new Set(list.map((n) => n.id));
+      }
+  }
+}
+
+// --- Actions ----------------------------------------------------------------------
+const nameDialog = ref<{ open: boolean; mode: "create" | "rename"; node?: FileNode }>({ open: false, mode: "create" });
+const moveDialog = ref<{ open: boolean; nodes: FileNode[] }>({ open: false, nodes: [] });
+const details = ref<{ open: boolean; node: FileNode | null }>({ open: false, node: null });
 const versionInput = ref<HTMLInputElement | null>(null);
 const versionFor = ref<FileNode | null>(null);
 
-const SORTS = [
-  { key: "name", label: "Name (A–Z)" },
-  { key: "-name", label: "Name (Z–A)" },
-  { key: "-updated", label: "Last modified" },
-  { key: "-size", label: "Largest first" },
-] as const;
-
-function applyFilterAndSort<T extends FileNode>(list: T[]): T[] {
-  const kinds = FILTERS.find((f) => f.key === filter.value)?.kinds || [];
-  const filtered = kinds.length ? list.filter((n) => kinds.includes(kindOf(n))) : [...list];
-  const cmp: Record<typeof sort.value, (a: T, b: T) => number> = {
-    name: (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }),
-    "-name": (a, b) => b.name.localeCompare(a.name, undefined, { numeric: true, sensitivity: "base" }),
-    "-updated": (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
-    "-size": (a, b) => (b.size_bytes || 0) - (a.size_bytes || 0),
-  };
-  // Folders always first, like every desktop file manager.
-  return filtered.sort((a, b) => (a.type === b.type ? cmp[sort.value](a, b) : a.type === "folder" ? -1 : 1));
-}
-
-const items = computed(() => applyFilterAndSort(filesStore.nodes));
-const results = computed(() => applyFilterAndSort(filesStore.searchResults));
-const searching = computed(() => filesStore.isSearchActive);
-const visible = computed(() => (searching.value ? results.value : items.value));
-const totalSize = computed(() => items.value.reduce((s, n) => s + (n.type === "file" ? n.size_bytes : 0), 0));
-
-const canUpload = computed(() => authStore.canUpload);
-const noPlan = computed(() => !authStore.user?.subscription?.has_active_subscription);
-
 function open(node: FileNode) {
   if (node.type === "folder") {
-    selectedId.value = null;
-    if (searching.value) void filesStore.openFolderFromSearch(node.id);
-    else void filesStore.openFolder(node.id, node.name);
+    if (searching.value || isRecent.value) void files.openFolderFromSearch(node.id);
+    else void files.openFolder(node.id, node.name);
   } else {
-    void downloadFile(node);
+    void actions.download([node]);
   }
 }
-
-function openMenu(node: FileNode, x: number, y: number) {
-  selectedId.value = node.id;
-  menu.value = { node, x, y };
+function startRename(node: FileNode) {
+  if (useGrid.value) nameDialog.value = { open: true, mode: "rename", node };
+  else renamingId.value = node.id;
 }
-
-async function onMenu(action: ItemAction) {
-  const node = menu.value.node;
-  menu.value = { node: null, x: 0, y: 0 };
-  if (!node) return;
-  switch (action) {
-    case "open":
-    case "download":
-      return open(node);
-    case "rename":
-      nameDialog.value = { mode: "rename", node };
-      return;
-    case "move":
-      moveTarget.value = node;
-      return;
-    case "versions":
-      versionsTarget.value = node;
-      return;
-    case "new-version":
-      if (!canUpload.value) {
-        toast.info("Choose a plan to upload files.");
-        return;
-      }
-      versionFor.value = node;
-      versionInput.value?.click();
-      return;
-    case "trash":
-      try {
-        await filesStore.trashNode(node.id);
-        toast.success(`“${node.name}” moved to trash.`);
-      } catch (err: any) {
-        toast.error(err.message || "Couldn't move to trash.");
-      }
-  }
+async function commitRename(node: FileNode, name: string) {
+  renamingId.value = null;
+  await actions.rename(node, name);
+  nextTick(() => listRef.value?.focus());
 }
-
+async function trash(nodes: FileNode[]) {
+  const done = await actions.trash(nodes);
+  if (done.length) clearSelection();
+  if (isRecent.value) recent.value = recent.value.filter((n) => !done.includes(n));
+}
+function newFolder() {
+  if (searching.value) files.clearSearch();
+  nameDialog.value = { open: true, mode: "create" };
+}
 async function submitName(name: string) {
-  const dialog = nameDialog.value;
-  if (!dialog) return;
-  if (dialog.mode === "create") {
-    await filesStore.createFolder(name);
-    toast.success(`Folder “${name}” created.`);
-  } else {
-    await filesStore.renameNode(dialog.node.id, name);
-  }
+  const d = nameDialog.value;
+  if (d.mode === "create") await files.createFolder(name);
+  else if (d.node) await actions.rename(d.node, name, { rethrow: true });
 }
-
+function uploadNewVersion(node: FileNode) {
+  if (!uploader.ensureCanUpload()) return;
+  versionFor.value = node;
+  versionInput.value?.click();
+}
 function onVersionPicked(e: Event) {
   const input = e.target as HTMLInputElement;
   const file = input.files?.[0];
-  if (file && versionFor.value) {
-    uploadStore.uploadNewVersion(file, versionFor.value);
-    toast.info(`Uploading a new version of “${versionFor.value.name}”.`);
-  }
+  if (file && versionFor.value) uploadStore.uploadNewVersion(file, versionFor.value);
   input.value = "";
   versionFor.value = null;
 }
+async function moveTo(dest: { id: string | null; name: string }) {
+  await actions.move(moveDialog.value.nodes, dest);
+  clearSelection();
+}
 
+function menuFor(node: FileNode): MenuEntry[] {
+  const targets = selected.value.has(node.id) && selected.value.size > 1 ? selectedNodes.value : [node];
+  const many = targets.length > 1;
+  const entries: MenuEntry[] = [];
+  if (!many) {
+    entries.push(
+      node.type === "folder"
+        ? { label: "Open", icon: FolderOpen, shortcut: "↵", onSelect: () => open(node) }
+        : { label: "Download", icon: Download, shortcut: "↵", onSelect: () => open(node) }
+    );
+  } else if (targets.some((n) => n.type === "file")) {
+    const count = targets.filter((n) => n.type === "file").length;
+    entries.push({ label: `Download ${count} ${count === 1 ? "file" : "files"}`, icon: Download, onSelect: () => void actions.download(targets) });
+  }
+  if (!many) entries.push({ label: "Rename", icon: Pencil, shortcut: "F2", onSelect: () => startRename(node) });
+  entries.push({ label: "Move to…", icon: FolderInput, onSelect: () => (moveDialog.value = { open: true, nodes: targets }) });
+  if (!many && node.type === "file") entries.push({ label: "Upload new version", icon: FileUp, onSelect: () => uploadNewVersion(node) });
+  if (!many) entries.push({ label: "Details", icon: Info, onSelect: () => (details.value = { open: true, node }) });
+  entries.push(
+    { separator: true },
+    { label: many ? `Move ${targets.length} items to trash` : "Move to trash", icon: Trash2, danger: true, shortcut: "Del", onSelect: () => void trash(targets) }
+  );
+  return entries;
+}
+
+// --- Toolbar options -----------------------------------------------------------------
+const typeOptions = FILTERS.map((f) => ({ value: f.key, label: f.label }));
+const sortOptions: { value: SortField; label: string }[] = [
+  { value: "name", label: "Name" },
+  { value: "modified", label: "Modified" },
+  { value: "size", label: "Size" },
+];
+function sortBy(field: SortField) {
+  if (files.prefs.sort === field) files.prefs = { ...files.prefs, dir: files.prefs.dir === "asc" ? "desc" : "asc" };
+  else files.prefs = { ...files.prefs, sort: field, dir: field === "name" ? "asc" : "desc" };
+}
+function toggleDir() {
+  files.prefs = { ...files.prefs, dir: files.prefs.dir === "asc" ? "desc" : "asc" };
+}
+const viewOptions = [
+  { value: "list" as const, label: "List view", icon: List, hideLabel: true },
+  { value: "grid" as const, label: "Grid view", icon: LayoutGrid, hideLabel: true },
+];
+const useGrid = computed(() => files.prefs.view === "grid" && !searching.value && !isRecent.value);
+const filterLabel = computed(() => FILTERS.find((f) => f.key === filter.value)?.label.toLowerCase() ?? "items");
+
+// --- Drag and drop ------------------------------------------------------------------
+const dragDepth = ref(0);
+function onDragEnter(e: DragEvent) {
+  if (!isRecent.value && e.dataTransfer?.types.includes("Files")) dragDepth.value++;
+}
 function onDrop(e: DragEvent) {
   dragDepth.value = 0;
-  const files = e.dataTransfer?.files;
-  if (!files?.length) return;
-  if (!canUpload.value) {
-    toast.info("Choose a plan to start uploading files.");
-    return;
-  }
-  void uploadStore.uploadFiles(files, filesStore.currentParentId);
+  const dropped = e.dataTransfer?.files;
+  if (dropped?.length && !isRecent.value) uploader.upload(Array.from(dropped), files.currentParentId);
 }
 
-function onDragEnter(e: DragEvent) {
-  if (e.dataTransfer?.types.includes("Files")) dragDepth.value++;
-}
-
+// --- Lifecycle ---------------------------------------------------------------------
 function load() {
-  if (authStore.masterKey) void filesStore.fetchNodes(filesStore.currentParentId);
+  if (!authStore.masterKey) return;
+  if (isRecent.value) void loadRecent();
+  else void files.fetchNodes(files.currentParentId);
 }
+function retry() {
+  if (searching.value) void files.search(files.searchQuery);
+  else load();
+}
+let off: (() => void) | null = null;
+onMounted(() => {
+  load();
+  off = onAppEvent("new-folder", newFolder);
+});
+onUnmounted(() => off?.());
+watch(() => authStore.masterKey, (k) => k && load());
+watch(isRecent, load);
 
-onMounted(load);
-watch(() => authStore.masterKey, (key) => key && load());
-watch(() => filesStore.currentParentId, () => (selectedId.value = null));
+useShortcuts(() => [{ keys: "escape", handler: clearSelection }]);
 </script>
 
 <template>
   <div
-    class="relative min-h-[60vh]"
+    class="relative"
     @dragenter.prevent="onDragEnter"
     @dragover.prevent
     @dragleave="dragDepth = Math.max(0, dragDepth - 1)"
     @drop.prevent="onDrop"
   >
-    <input ref="versionInput" type="file" class="hidden" @change="onVersionPicked" />
+    <input ref="versionInput" type="file" class="hidden" tabindex="-1" aria-hidden="true" @change="onVersionPicked" />
 
-    <!-- Header: breadcrumbs + actions -->
+    <!-- Page header -->
     <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-      <nav v-if="!searching" aria-label="Folder path" class="min-w-0">
-        <ol class="flex flex-wrap items-center gap-1 text-lg font-semibold text-slate-900 sm:text-xl">
-          <li v-for="(crumb, i) in filesStore.breadcrumbs" :key="crumb.id ?? 'root'" class="flex min-w-0 items-center gap-1">
-            <ChevronRight v-if="i > 0" class="h-4 w-4 shrink-0 text-slate-400" />
-            <button
-              v-if="i < filesStore.breadcrumbs.length - 1"
-              class="max-w-[12rem] truncate rounded-md px-1.5 py-0.5 text-slate-500 hover:bg-slate-100 hover:text-slate-900"
-              @click="filesStore.navigateToCrumb(i)"
-            >
-              {{ crumb.name }}
-            </button>
-            <span v-else class="max-w-[16rem] truncate px-1.5" aria-current="page">{{ crumb.name }}</span>
-          </li>
-        </ol>
-      </nav>
-      <div v-else class="min-w-0">
-        <h1 class="page-title">Search results</h1>
-        <p class="page-subtitle truncate">
-          <template v-if="filesStore.isSearching">Searching for “{{ filesStore.searchQuery }}”…</template>
-          <template v-else>{{ results.length }} {{ results.length === 1 ? "match" : "matches" }} for “{{ filesStore.searchQuery }}”</template>
-        </p>
-      </div>
-
-      <div v-if="!searching" class="flex flex-wrap items-center gap-2">
-        <button class="btn-secondary" title="Create a new folder here" @click="nameDialog = { mode: 'create' }">
-          <FolderPlus class="h-4 w-4" /> New folder
-        </button>
-        <button class="btn-secondary hidden sm:inline-flex" title="Upload a whole folder" @click="picker.pickFolder()">
-          <FolderUp class="h-4 w-4" /> Upload folder
-        </button>
-        <button class="btn-primary" title="Upload files to this folder" @click="picker.pickFiles()">
-          <Upload class="h-4 w-4" /> Upload
-        </button>
-      </div>
-      <button v-else class="btn-secondary self-start sm:self-auto" @click="filesStore.clearSearch()">Clear search</button>
-    </div>
-
-    <!-- Filter / sort / view -->
-    <div class="mt-5 flex flex-wrap items-center gap-2">
-      <label class="sr-only" for="filter">Show</label>
-      <select id="filter" v-model="filter" class="input h-9 w-auto pr-8">
-        <option v-for="f in FILTERS" :key="f.key" :value="f.key">{{ f.label }}</option>
-      </select>
-      <label class="sr-only" for="sort">Sort by</label>
-      <select id="sort" v-model="sort" class="input h-9 w-auto pr-8">
-        <option v-for="s in SORTS" :key="s.key" :value="s.key">Sort: {{ s.label }}</option>
-      </select>
-      <span v-if="!searching && items.length" class="hidden text-sm text-slate-500 md:inline">
-        {{ items.length }} {{ items.length === 1 ? "item" : "items" }}<template v-if="totalSize"> · {{ formatBytes(totalSize) }}</template>
-      </span>
-      <div class="ml-auto flex items-center gap-1 rounded-lg border border-slate-200 bg-white p-0.5" role="group" aria-label="View">
-        <button
-          class="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-sm"
-          :class="filesStore.viewMode === 'list' ? 'bg-slate-100 text-slate-900' : 'text-slate-500 hover:text-slate-900'"
-          :aria-pressed="filesStore.viewMode === 'list'"
-          title="List view"
-          @click="filesStore.setViewMode('list')"
-        >
-          <List class="h-4 w-4" /><span class="hidden sm:inline">List</span>
-        </button>
-        <button
-          class="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-sm"
-          :class="filesStore.viewMode === 'grid' ? 'bg-slate-100 text-slate-900' : 'text-slate-500 hover:text-slate-900'"
-          :aria-pressed="filesStore.viewMode === 'grid'"
-          title="Grid view"
-          @click="filesStore.setViewMode('grid')"
-        >
-          <LayoutGrid class="h-4 w-4" /><span class="hidden sm:inline">Grid</span>
-        </button>
-      </div>
-    </div>
-
-    <div class="mt-4">
-      <!-- Vault locked / opening -->
-      <div v-if="!authStore.masterKey" class="card card-body flex items-center justify-center gap-2 py-16 text-sm text-slate-500">
-        <Loader2 class="h-4 w-4 animate-spin" /> Waiting for your vault to unlock…
-      </div>
-
-      <!-- Search states -->
-      <template v-else-if="searching">
-        <div v-if="filesStore.isSearching && !results.length" class="card card-body flex items-center justify-center gap-2 py-16 text-sm text-slate-500">
-          <Loader2 class="h-4 w-4 animate-spin" /> Searching all your folders…
-        </div>
-        <div v-else-if="filesStore.searchError" class="card card-body py-12 text-center">
-          <AlertCircle class="mx-auto h-8 w-8 text-rose-500" />
-          <p class="mt-3 text-sm text-slate-700">{{ filesStore.searchError }}</p>
-          <button class="btn-secondary mt-4" @click="filesStore.search(filesStore.searchQuery)"><RefreshCw class="h-4 w-4" /> Try again</button>
-        </div>
-        <div v-else-if="!results.length" class="card card-body py-16 text-center">
-          <SearchX class="mx-auto h-10 w-10 text-slate-300" />
-          <p class="mt-3 font-medium text-slate-900">No matches</p>
-          <p class="mt-1 text-sm text-slate-500">Try a different word or part of the file name.</p>
-        </div>
-        <FileListView v-else :items="results" :selected-id="selectedId" show-location @select="selectedId = $event.id" @open="open" @menu="openMenu" />
-      </template>
-
-      <!-- Folder states -->
-      <div v-else-if="filesStore.isLoading && !items.length" class="card overflow-hidden" aria-busy="true">
-        <div v-for="i in 6" :key="i" class="flex items-center gap-3 border-b border-slate-100 px-4 py-3 last:border-0">
-          <div class="h-9 w-9 animate-pulse rounded-lg bg-slate-100"></div>
-          <div class="h-3 w-1/3 animate-pulse rounded bg-slate-100"></div>
-        </div>
-      </div>
-      <div v-else-if="filesStore.loadError" class="card card-body py-12 text-center">
-        <AlertCircle class="mx-auto h-8 w-8 text-rose-500" />
-        <p class="mt-3 text-sm text-slate-700">{{ filesStore.loadError }}</p>
-        <button class="btn-secondary mt-4" @click="load"><RefreshCw class="h-4 w-4" /> Try again</button>
-      </div>
-      <div v-else-if="!filesStore.nodes.length" class="card card-body flex flex-col items-center py-16 text-center">
-        <span class="flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-50 text-brand-600"><UploadCloud class="h-7 w-7" /></span>
-        <template v-if="noPlan">
-          <p class="mt-4 font-medium text-slate-900">Welcome to SmartSpace</p>
-          <p class="mt-1 max-w-sm text-sm text-slate-500">Choose a plan to start uploading. Your files are encrypted on this device before they leave it.</p>
-          <router-link to="/app/billing" class="btn-primary mt-5"><CreditCard class="h-4 w-4" /> See plans</router-link>
+      <div class="min-w-0">
+        <h1 v-if="isRecent" class="text-xl font-semibold text-fg">Recent</h1>
+        <template v-else-if="searching">
+          <h1 class="text-xl font-semibold text-fg">Search results</h1>
+          <p class="mt-1 truncate text-base text-fg-muted" aria-live="polite">
+            <template v-if="files.isSearching">Searching for “{{ files.searchQuery }}”…</template>
+            <template v-else>{{ items.length }} {{ items.length === 1 ? "result" : "results" }} for “{{ files.searchQuery }}”</template>
+          </p>
         </template>
         <template v-else>
-          <p class="mt-4 font-medium text-slate-900">{{ filesStore.currentParentId ? "This folder is empty" : "No files yet" }}</p>
-          <p class="mt-1 max-w-sm text-sm text-slate-500">Drag files here, or use the buttons below.</p>
-          <div class="mt-5 flex flex-wrap justify-center gap-2">
-            <button class="btn-primary" @click="picker.pickFiles()"><Upload class="h-4 w-4" /> Upload files</button>
-            <button class="btn-secondary" @click="nameDialog = { mode: 'create' }"><FolderPlus class="h-4 w-4" /> New folder</button>
-          </div>
+          <h1 class="sr-only">My files</h1>
+          <UiBreadcrumbs :items="crumbs" @navigate="files.navigateToCrumb" />
         </template>
       </div>
-      <div v-else-if="!items.length" class="card card-body py-12 text-center text-sm text-slate-500">
-        Nothing here matches “{{ FILTERS.find((f) => f.key === filter)?.label }}”.
-        <button class="ml-1 font-medium text-brand-600 hover:underline" @click="filter = 'all'">Show everything</button>
+      <div class="flex shrink-0 items-center gap-2">
+        <UiButton v-if="searching" @click="files.clearSearch()">Clear search</UiButton>
+        <template v-else-if="!isRecent">
+          <UiButton :icon="FolderPlus" shortcut="N" tooltip="New folder" @click="newFolder">New folder</UiButton>
+          <UiButton variant="primary" :icon="Upload" shortcut="U" tooltip="Upload files to this folder" @click="emitAppEvent('upload-files')">Upload</UiButton>
+        </template>
       </div>
-      <template v-else>
-        <FileListView v-if="filesStore.viewMode === 'list'" :items="visible" :selected-id="selectedId" @select="selectedId = $event.id" @open="open" @menu="openMenu" />
-        <FileGridView v-else :items="visible" :selected-id="selectedId" @select="selectedId = $event.id" @open="open" @menu="openMenu" />
-        <p class="mt-3 text-xs text-slate-400 hidden sm:block">Tip: double-click a folder to open it or a file to download it. Right-click for more options.</p>
+    </div>
+
+    <!-- Toolbar -->
+    <div class="mt-5 flex flex-wrap items-center gap-2">
+      <UiSelect v-model="filter" :options="typeOptions" aria-label="Filter by type" size="sm" :searchable="false" :block="false" trigger-class="min-w-[136px]" />
+      <template v-if="!isRecent">
+        <UiSelect
+          :model-value="files.prefs.sort"
+          :options="sortOptions"
+          prefix="Sort:"
+          aria-label="Sort by"
+          size="sm"
+          :searchable="false"
+          :block="false"
+          trigger-class="min-w-[148px]"
+          @update:model-value="(v) => sortBy(v as SortField)"
+        />
+        <UiButton
+          size="sm"
+          icon-only
+          :icon="files.prefs.dir === 'asc' ? ArrowUpNarrowWide : ArrowDownWideNarrow"
+          :aria-label="files.prefs.dir === 'asc' ? 'Sorted ascending. Switch to descending' : 'Sorted descending. Switch to ascending'"
+          @click="toggleDir"
+        />
       </template>
+      <span v-if="items.length && !loading" class="tabular hidden text-sm text-fg-subtle md:inline">
+        {{ items.length }} {{ items.length === 1 ? "item" : "items" }}<template v-if="totalSize"> · {{ formatBytes(totalSize) }}</template>
+      </span>
+      <div v-if="!searching && !isRecent" class="ml-auto">
+        <UiSegmented
+          :model-value="files.prefs.view"
+          :options="viewOptions"
+          label="View"
+          size="sm"
+          @update:model-value="(v) => (files.prefs = { ...files.prefs, view: v })"
+        />
+      </div>
+    </div>
+
+    <!-- Content -->
+    <div class="mt-4">
+      <!-- Waiting for the vault / loading: skeleton of the real layout -->
+      <div v-if="!authStore.masterKey || loading" aria-busy="true" aria-label="Loading files">
+        <div v-if="useGrid" class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+          <div v-for="i in 10" :key="i" class="rounded-lg border border-line bg-surface p-2">
+            <UiSkeleton class="aspect-[4/3] w-full" />
+            <UiSkeleton class="mt-3 h-3.5 w-3/4" />
+            <UiSkeleton class="mt-2 h-3 w-1/2" />
+          </div>
+        </div>
+        <div v-else class="overflow-hidden rounded-lg border border-line bg-surface">
+          <div class="h-10 border-b border-line bg-surface-sunken" />
+          <div v-for="i in 8" :key="i" class="flex h-11 items-center gap-3 border-b border-line px-3 last:border-0">
+            <UiSkeleton class="h-4 w-4" />
+            <UiSkeleton class="h-8 w-8" />
+            <UiSkeleton class="h-3.5" :class="i % 3 ? 'w-1/3' : 'w-1/4'" />
+            <UiSkeleton class="ml-auto hidden h-3 w-16 md:block" />
+            <UiSkeleton class="hidden h-3 w-12 md:block" />
+          </div>
+        </div>
+      </div>
+
+      <div v-else-if="error" class="rounded-lg border border-line bg-surface">
+        <UiEmptyState :icon="CloudOff" tone="danger" title="Couldn't load your files" :description="normalizeApiError(error).message">
+          <UiButton @click="retry">Try again</UiButton>
+        </UiEmptyState>
+      </div>
+
+      <div v-else-if="!items.length" class="rounded-lg border border-dashed border-line-strong bg-surface">
+        <UiEmptyState v-if="searching" :icon="SearchX" tone="neutral" :title="`No results for “${files.searchQuery}”`" description="Check the spelling or try part of the file name.">
+          <UiButton @click="files.clearSearch()">Clear search</UiButton>
+        </UiEmptyState>
+        <UiEmptyState v-else-if="source.length && filter !== 'all'" :icon="Filter" tone="neutral" title="Nothing matches this filter" :description="`There are no ${filterLabel} here.`">
+          <UiButton @click="filter = 'all'">Show all types</UiButton>
+        </UiEmptyState>
+        <UiEmptyState v-else-if="isRecent" :icon="Clock" tone="neutral" title="No recent files" description="Files you upload or change appear here." />
+        <UiEmptyState v-else-if="noPlan && !files.currentParentId" :icon="CreditCard" title="Welcome to SmartSpace" description="Choose a plan to start uploading. Your files are encrypted on this device before they leave it.">
+          <UiButton variant="primary" @click="emitAppEvent('plan-picker', {})">Choose a plan</UiButton>
+        </UiEmptyState>
+        <UiEmptyState v-else-if="files.currentParentId" :icon="FolderClosed" tone="neutral" :title="`“${currentFolderName}” is empty`" description="Drop files here, or upload from your device.">
+          <UiButton variant="primary" :icon="Upload" @click="emitAppEvent('upload-files')">Upload files</UiButton>
+          <UiButton :icon="FolderPlus" @click="newFolder">New folder</UiButton>
+        </UiEmptyState>
+        <UiEmptyState v-else :icon="UploadCloud" title="Drop files here or click Upload" description="Everything is encrypted on your device before it's uploaded.">
+          <UiButton variant="primary" :icon="Upload" @click="emitAppEvent('upload-files')">Upload files</UiButton>
+          <UiButton :icon="FolderPlus" @click="newFolder">New folder</UiButton>
+        </UiEmptyState>
+      </div>
+
+      <FileGridView
+        v-else-if="useGrid"
+        :items="items"
+        :selected="selected"
+        :focused-id="focusedId"
+        :highlight-ids="files.highlightIds"
+        :menu-for="menuFor"
+        :list-label="`Contents of ${currentFolderName}`"
+        @click="onItemClick"
+        @toggle="toggle"
+        @open="open"
+        @keydown="onListKey"
+      />
+      <FileListView
+        v-else
+        ref="listRef"
+        :items="items"
+        :selected="selected"
+        :focused-id="focusedId"
+        :renaming-id="renamingId"
+        :show-location="searching || isRecent"
+        :highlight-ids="files.highlightIds"
+        :menu-for="menuFor"
+        :sort="isRecent ? undefined : { field: files.prefs.sort, dir: files.prefs.dir }"
+        :list-label="isRecent ? 'Recent files' : searching ? 'Search results' : `Contents of ${currentFolderName}`"
+        @click="onItemClick"
+        @toggle="toggle"
+        @toggle-all="toggleAll"
+        @open="open"
+        @rename-commit="commitRename"
+        @rename-cancel="renamingId = null"
+        @sort="sortBy"
+        @keydown="onListKey"
+      />
     </div>
 
     <!-- Drop overlay -->
-    <div
-      v-if="dragDepth > 0"
-      class="pointer-events-none fixed inset-0 z-40 flex items-center justify-center bg-brand-600/10 p-6 backdrop-blur-[1px]"
-    >
-      <div class="rounded-2xl border-2 border-dashed border-brand-500 bg-white px-10 py-8 text-center shadow-pop">
-        <UploadCloud class="mx-auto h-10 w-10 text-brand-600" />
-        <p class="mt-3 font-medium text-slate-900">Drop to upload to “{{ filesStore.breadcrumbs.at(-1)?.name }}”</p>
-        <p class="mt-1 text-sm text-slate-500">Files are encrypted before they're uploaded.</p>
+    <div v-if="dragDepth > 0" class="pointer-events-none fixed inset-0 z-40 flex items-center justify-center bg-primary/5 p-6 backdrop-blur-[1px]">
+      <div class="flex flex-col items-center rounded-xl border-2 border-dashed border-primary bg-surface-raised px-12 py-10 text-center shadow-xl">
+        <UploadCloud :size="36" :stroke-width="1.5" class="text-primary" aria-hidden="true" />
+        <p class="mt-3 text-md font-semibold text-fg">Drop to upload to “{{ currentFolderName }}”</p>
+        <p class="mt-1 text-base text-fg-muted">Files are encrypted before they leave your device.</p>
       </div>
     </div>
 
-    <ItemMenu :node="menu.node" :x="menu.x" :y="menu.y" @select="onMenu" @close="menu = { node: null, x: 0, y: 0 }" />
-    <NameDialog
-      :open="!!nameDialog"
-      :title="nameDialog?.mode === 'rename' ? 'Rename' : 'New folder'"
-      :label="nameDialog?.mode === 'rename' ? 'New name' : 'Folder name'"
-      :initial="nameDialog?.mode === 'rename' ? nameDialog.node.name : 'Untitled folder'"
-      :confirm-label="nameDialog?.mode === 'rename' ? 'Rename' : 'Create'"
-      :submit="submitName"
-      @close="nameDialog = null"
+    <BulkBar
+      :count="selected.size"
+      :can-download="selectedNodes.some((n) => n.type === 'file')"
+      @download="actions.download(selectedNodes)"
+      @move="moveDialog = { open: true, nodes: selectedNodes }"
+      @rename="selectedNodes[0] && startRename(selectedNodes[0])"
+      @trash="trash(selectedNodes)"
+      @clear="clearSelection"
     />
-    <MoveDialog :open="!!moveTarget" :node="moveTarget" @close="moveTarget = null" @moved="toast.success('Moved.')" />
-    <VersionsDialog :open="!!versionsTarget" :node="versionsTarget" @close="versionsTarget = null" />
+
+    <NameDialog
+      v-model:open="nameDialog.open"
+      :mode="nameDialog.mode"
+      :type="nameDialog.node?.type ?? 'folder'"
+      :initial="nameDialog.node?.name"
+      :parent-id="nameDialog.node ? nameDialog.node.parent : files.currentParentId"
+      :except-id="nameDialog.node?.id"
+      :submit="submitName"
+    />
+    <MoveDialog v-model:open="moveDialog.open" :nodes="moveDialog.nodes" @move="moveTo" />
+    <DetailsDrawer v-model:open="details.open" :node="details.node" />
   </div>
 </template>

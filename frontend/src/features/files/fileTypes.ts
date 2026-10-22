@@ -21,17 +21,17 @@ interface KindInfo {
 }
 
 const KINDS: Record<FileKind, KindInfo> = {
-  folder: { label: "Folder", icon: Folder, tint: "text-amber-500 bg-amber-50" },
-  image: { label: "Image", icon: FileImage, tint: "text-emerald-600 bg-emerald-50" },
-  video: { label: "Video", icon: FileVideo, tint: "text-violet-600 bg-violet-50" },
-  audio: { label: "Audio", icon: FileAudio, tint: "text-pink-600 bg-pink-50" },
-  pdf: { label: "PDF", icon: FileText, tint: "text-rose-600 bg-rose-50" },
-  doc: { label: "Document", icon: FileText, tint: "text-brand-600 bg-brand-50" },
-  sheet: { label: "Spreadsheet", icon: FileSpreadsheet, tint: "text-green-700 bg-green-50" },
-  slides: { label: "Presentation", icon: Presentation, tint: "text-orange-600 bg-orange-50" },
-  archive: { label: "Archive", icon: FileArchive, tint: "text-slate-600 bg-slate-100" },
-  code: { label: "Code", icon: FileCode, tint: "text-sky-600 bg-sky-50" },
-  other: { label: "File", icon: File, tint: "text-slate-500 bg-slate-100" },
+  folder: { label: "Folder", icon: Folder, tint: "text-amber-500 bg-amber-500/10" },
+  image: { label: "Image", icon: FileImage, tint: "text-emerald-600 bg-emerald-500/10 dark:text-emerald-400" },
+  video: { label: "Video", icon: FileVideo, tint: "text-violet-600 bg-violet-500/10 dark:text-violet-400" },
+  audio: { label: "Audio", icon: FileAudio, tint: "text-pink-600 bg-pink-500/10 dark:text-pink-400" },
+  pdf: { label: "PDF", icon: FileText, tint: "text-rose-600 bg-rose-500/10 dark:text-rose-400" },
+  doc: { label: "Document", icon: FileText, tint: "text-primary bg-primary/10" },
+  sheet: { label: "Spreadsheet", icon: FileSpreadsheet, tint: "text-green-700 bg-green-500/10 dark:text-green-400" },
+  slides: { label: "Presentation", icon: Presentation, tint: "text-orange-600 bg-orange-500/10 dark:text-orange-400" },
+  archive: { label: "Archive", icon: FileArchive, tint: "text-fg-muted bg-canvas-subtle" },
+  code: { label: "Code", icon: FileCode, tint: "text-sky-600 bg-sky-500/10 dark:text-sky-400" },
+  other: { label: "File", icon: File, tint: "text-fg-subtle bg-canvas-subtle" },
 };
 
 const EXTENSIONS: Record<string, FileKind> = {};
@@ -56,14 +56,13 @@ export function kindInfo(kind: FileKind): KindInfo {
   return KINDS[kind];
 }
 
-export type FilterKey = "all" | "folders" | "documents" | "images" | "videos" | "audio" | "archives";
+export type FilterKey = "all" | "folders" | "documents" | "images" | "videos" | "archives";
 
 export const FILTERS: { key: FilterKey; label: string; kinds: FileKind[] }[] = [
-  { key: "all", label: "All items", kinds: [] },
+  { key: "all", label: "All types", kinds: [] },
   { key: "folders", label: "Folders", kinds: ["folder"] },
   { key: "documents", label: "Documents", kinds: ["pdf", "doc", "sheet", "slides"] },
-  { key: "images", label: "Photos & images", kinds: ["image"] },
+  { key: "images", label: "Images", kinds: ["image"] },
   { key: "videos", label: "Videos", kinds: ["video"] },
-  { key: "audio", label: "Audio", kinds: ["audio"] },
   { key: "archives", label: "Archives", kinds: ["archive"] },
 ];

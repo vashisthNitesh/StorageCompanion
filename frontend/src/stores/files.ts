@@ -1,5 +1,5 @@
 import { defineStore } from "pinia";
-import { ref, computed } from "vue";
+import { ref, computed, watch } from "vue";
 import { apiRequest } from "../lib/api";
 import { useAuthStore } from "./auth";
 import { encryptName, decryptName } from "../lib/crypto/names";
@@ -26,15 +26,40 @@ export interface Crumb {
   name: string;
 }
 
+export type SortField = "name" | "modified" | "size";
+export type SortDir = "asc" | "desc";
+export interface ViewPrefs {
+  view: "list" | "grid";
+  sort: SortField;
+  dir: SortDir;
+}
+
 const ROOT_CRUMB: Crumb = { id: null, name: "My files" };
+const DEFAULT_PREFS: ViewPrefs = { view: "list", sort: "name", dir: "asc" };
+
+/** Names that can't be decrypted are shown with a neutral placeholder, never raw ciphertext. */
+const UNREADABLE = "[Encrypted File]";
 
 async function decryptNodes(key: Uint8Array, items: any[]): Promise<FileNode[]> {
   return Promise.all(
-    items.map(async (item) => ({
-      ...item,
-      name: await decryptName(key, item.encrypted_name, item.name_nonce),
-    }))
+    items.map(async (item) => {
+      const name = await decryptName(key, item.encrypted_name, item.name_nonce);
+      return { ...item, name: name === UNREADABLE ? "Unreadable name" : name };
+    })
   );
+}
+
+export function compareNodes(field: SortField, dir: SortDir) {
+  const sign = dir === "asc" ? 1 : -1;
+  return (a: FileNode, b: FileNode) => {
+    // Folders always first, like every desktop file manager.
+    if (a.type !== b.type) return a.type === "folder" ? -1 : 1;
+    let r = 0;
+    if (field === "name") r = a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" });
+    else if (field === "modified") r = new Date(a.updated_at).getTime() - new Date(b.updated_at).getTime();
+    else r = (a.size_bytes || 0) - (b.size_bytes || 0);
+    return r * sign || a.name.localeCompare(b.name);
+  };
 }
 
 export const useFilesStore = defineStore("files", () => {
@@ -43,54 +68,51 @@ export const useFilesStore = defineStore("files", () => {
   const nodes = ref<FileNode[]>([]);
   const currentParentId = ref<string | null>(null);
   const breadcrumbs = ref<Crumb[]>([ROOT_CRUMB]);
-  const viewMode = ref<"grid" | "list">(
-    (typeof localStorage !== "undefined" && (localStorage.getItem("sc_view_mode") as "grid" | "list")) || "list"
-  );
   const isLoading = ref(false);
-  const loadError = ref("");
+  const loaded = ref(false);
+  const loadError = ref<unknown>(null);
 
-  // Search across every folder. Names are encrypted, so the whole tree is fetched and
-  // decrypted in the browser once, then reused until something changes.
+  // --- View preferences, persisted per user ------------------------------------
+  const prefs = ref<ViewPrefs>({ ...DEFAULT_PREFS });
+  const prefsKey = computed(() => (authStore.user ? `sc_files_prefs_${authStore.user.id}` : null));
+  watch(
+    prefsKey,
+    (key) => {
+      if (!key) return;
+      try {
+        const saved = JSON.parse(localStorage.getItem(key) || "null");
+        prefs.value = { ...DEFAULT_PREFS, ...(saved ?? {}) };
+      } catch {
+        prefs.value = { ...DEFAULT_PREFS };
+      }
+    },
+    { immediate: true }
+  );
+  watch(
+    prefs,
+    (p) => {
+      if (!prefsKey.value) return;
+      try {
+        localStorage.setItem(prefsKey.value, JSON.stringify(p));
+      } catch {}
+    },
+    { deep: true }
+  );
+
+  // --- Search index (names are encrypted, so the tree is decrypted in the browser) ---
   const searchQuery = ref("");
   const isSearching = ref(false);
-  const searchError = ref("");
+  const searchError = ref<unknown>(null);
+  const searchResults = ref<SearchResult[]>([]);
+  const isSearchActive = computed(() => searchQuery.value.trim().length > 0);
   let allNodesIndex: FileNode[] | null = null;
   let indexPromise: Promise<FileNode[]> | null = null;
-
   let requestSeq = 0;
-
-  function setViewMode(mode: "grid" | "list") {
-    viewMode.value = mode;
-    try {
-      localStorage.setItem("sc_view_mode", mode);
-    } catch {
-      // storage unavailable
-    }
-  }
+  let searchSeq = 0;
 
   function invalidateIndex() {
     allNodesIndex = null;
     indexPromise = null;
-  }
-
-  async function fetchNodes(parentId: string | null = currentParentId.value) {
-    const key = authStore.masterKey;
-    if (!key) return;
-    const seq = ++requestSeq;
-    isLoading.value = true;
-    loadError.value = "";
-    currentParentId.value = parentId;
-
-    try {
-      const endpoint = parentId ? `/api/v1/nodes?parent=${encodeURIComponent(parentId)}` : "/api/v1/nodes";
-      const items = await apiRequest<any[]>(endpoint);
-      const decrypted = await decryptNodes(key, items);
-      if (seq === requestSeq) nodes.value = decrypted;
-    } catch (err: any) {
-      if (seq === requestSeq) loadError.value = err.message || "Couldn't load your files.";
-    } finally {
-      if (seq === requestSeq) isLoading.value = false;
-    }
   }
 
   async function loadIndex(): Promise<FileNode[]> {
@@ -119,42 +141,65 @@ export const useFilesStore = defineStore("files", () => {
       parts.unshift(parent.name);
       parentId = parent.parent;
     }
-    return parts.length ? `My files / ${parts.join(" / ")}` : "My files";
+    return ["My files", ...parts].join(" / ");
   }
 
-  const searchResults = ref<SearchResult[]>([]);
-  const isSearchActive = computed(() => searchQuery.value.trim().length > 0);
+  async function fetchNodes(parentId: string | null = currentParentId.value) {
+    const key = authStore.masterKey;
+    if (!key) return;
+    const seq = ++requestSeq;
+    isLoading.value = true;
+    loadError.value = null;
+    if (parentId !== currentParentId.value) nodes.value = [];
+    currentParentId.value = parentId;
+    try {
+      const endpoint = parentId ? `/api/v1/nodes?parent=${encodeURIComponent(parentId)}` : "/api/v1/nodes";
+      const decrypted = await decryptNodes(key, await apiRequest<any[]>(endpoint));
+      if (seq === requestSeq) {
+        nodes.value = decrypted;
+        loaded.value = true;
+      }
+    } catch (err) {
+      if (seq === requestSeq) loadError.value = err;
+    } finally {
+      if (seq === requestSeq) isLoading.value = false;
+    }
+  }
 
-  let searchSeq = 0;
   async function search(query: string) {
     searchQuery.value = query;
     const q = query.trim().toLowerCase();
     const seq = ++searchSeq;
     if (!q) {
       searchResults.value = [];
-      searchError.value = "";
+      searchError.value = null;
       isSearching.value = false;
       return;
     }
     isSearching.value = true;
-    searchError.value = "";
+    searchError.value = null;
     try {
       const index = await loadIndex();
       if (seq !== searchSeq) return;
       const byId = new Map(index.map((n) => [n.id, n]));
       const terms = q.split(/\s+/).filter(Boolean);
       searchResults.value = index
-        .filter((n) => {
-          const name = n.name.toLowerCase();
-          return terms.every((t) => name.includes(t));
-        })
-        .slice(0, 200)
+        .filter((n) => terms.every((t) => n.name.toLowerCase().includes(t)))
+        .slice(0, 500)
         .map((n) => ({ ...n, location: locationOf(n, byId) }));
-    } catch (err: any) {
-      if (seq === searchSeq) searchError.value = err.message || "Search failed. Please try again.";
+    } catch (err) {
+      if (seq === searchSeq) searchError.value = err;
     } finally {
       if (seq === searchSeq) isSearching.value = false;
     }
+  }
+
+  function clearSearch() {
+    searchSeq++;
+    searchQuery.value = "";
+    searchResults.value = [];
+    searchError.value = null;
+    isSearching.value = false;
   }
 
   /** Name lookup for the command palette; doesn't change the visible search. */
@@ -171,7 +216,18 @@ export const useFilesStore = defineStore("files", () => {
       .map((n) => ({ ...n, location: locationOf(n, byId) }));
   }
 
-  /** Items to briefly highlight (new uploads, revealed search hits). */
+  /** Most recently changed files across all folders. */
+  async function recentFiles(limit = 100): Promise<SearchResult[]> {
+    const index = await loadIndex();
+    const byId = new Map(index.map((n) => [n.id, n]));
+    return index
+      .filter((n) => n.type === "file")
+      .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+      .slice(0, limit)
+      .map((n) => ({ ...n, location: locationOf(n, byId) }));
+  }
+
+  // --- Highlighting (new uploads, revealed items) -------------------------------
   const highlightIds = ref<Set<string>>(new Set());
   function highlight(ids: string[]) {
     highlightIds.value = new Set([...highlightIds.value, ...ids]);
@@ -182,20 +238,7 @@ export const useFilesStore = defineStore("files", () => {
     }, 2400);
   }
 
-  /** Opens the folder containing `node` and highlights it. */
-  async function revealNode(node: { id: string; parent: string | null }) {
-    await openFolderFromSearch(node.parent);
-    highlight([node.id]);
-  }
-
-  function clearSearch() {
-    searchSeq++;
-    searchQuery.value = "";
-    searchResults.value = [];
-    searchError.value = "";
-    isSearching.value = false;
-  }
-
+  // --- Navigation -----------------------------------------------------------------
   async function folderPath(folderId: string): Promise<Crumb[]> {
     const index = await loadIndex();
     const byId = new Map(index.map((n) => [n.id, n]));
@@ -207,93 +250,6 @@ export const useFilesStore = defineStore("files", () => {
       current = current.parent ? byId.get(current.parent) : undefined;
     }
     return [ROOT_CRUMB, ...path];
-  }
-
-  async function createFolder(folderName: string, parentId: string | null = currentParentId.value) {
-    if (!authStore.masterKey) throw new Error("Unlock your vault first.");
-    const { ciphertextBase64, nonceHex } = await encryptName(authStore.masterKey, folderName);
-    const res = await apiRequest<FileNode>("/api/v1/nodes", {
-      method: "POST",
-      body: JSON.stringify({ parent: parentId, encrypted_name: ciphertextBase64, name_nonce: nonceHex }),
-    });
-    res.name = folderName;
-    if (parentId === currentParentId.value) nodes.value = [res, ...nodes.value];
-    invalidateIndex();
-    return res;
-  }
-
-  async function renameNode(nodeId: string, newName: string) {
-    if (!authStore.masterKey) throw new Error("Unlock your vault first.");
-    const { ciphertextBase64, nonceHex } = await encryptName(authStore.masterKey, newName);
-    await apiRequest(`/api/v1/nodes/${nodeId}`, {
-      method: "PATCH",
-      body: JSON.stringify({ encrypted_name: ciphertextBase64, name_nonce: nonceHex }),
-    });
-    const target = nodes.value.find((n) => n.id === nodeId);
-    if (target) target.name = newName;
-    const hit = searchResults.value.find((n) => n.id === nodeId);
-    if (hit) hit.name = newName;
-    invalidateIndex();
-  }
-
-  async function moveNode(nodeId: string, newParentId: string | null) {
-    await apiRequest(`/api/v1/nodes/${nodeId}`, { method: "PATCH", body: JSON.stringify({ parent: newParentId }) });
-    if (newParentId !== currentParentId.value) nodes.value = nodes.value.filter((n) => n.id !== nodeId);
-    invalidateIndex();
-  }
-
-  function applyQuota(res: { quota?: any } | undefined) {
-    if (res?.quota && authStore.user) authStore.user.quota = res.quota;
-    else authStore.fetchProfile().catch(() => {});
-  }
-
-  async function trashNode(nodeId: string) {
-    const res = await apiRequest<{ quota?: any }>(`/api/v1/nodes/${nodeId}`, { method: "DELETE" });
-    nodes.value = nodes.value.filter((n) => n.id !== nodeId);
-    searchResults.value = searchResults.value.filter((n) => n.id !== nodeId);
-    invalidateIndex();
-    applyQuota(res);
-  }
-
-  async function restoreNode(nodeId: string) {
-    const res = await apiRequest<{ quota?: any }>(`/api/v1/nodes/${nodeId}/restore`, { method: "POST" });
-    invalidateIndex();
-    applyQuota(res);
-  }
-
-  async function permanentDeleteNode(nodeId: string) {
-    const res = await apiRequest<{ quota?: any }>(`/api/v1/nodes/${nodeId}?permanent=true`, { method: "DELETE" });
-    invalidateIndex();
-    applyQuota(res);
-  }
-
-  async function fetchTrash(): Promise<FileNode[]> {
-    if (!authStore.masterKey) return [];
-    const items = await apiRequest<any[]>("/api/v1/nodes?trashed=true");
-    return decryptNodes(authStore.masterKey, items);
-  }
-
-  /** All folders (for the Move dialog), excluding `excludeId` and everything inside it. */
-  async function listFolders(excludeId?: string): Promise<{ id: string | null; name: string; depth: number }[]> {
-    const index = await loadIndex();
-    const folders = index.filter((n) => n.type === "folder");
-    const children = new Map<string | null, FileNode[]>();
-    for (const f of folders) {
-      const list = children.get(f.parent) || [];
-      list.push(f);
-      children.set(f.parent, list);
-    }
-    const out: { id: string | null; name: string; depth: number }[] = [{ id: null, name: "My files", depth: 0 }];
-    const walk = (parentId: string | null, depth: number) => {
-      const list = (children.get(parentId) || []).sort((a, b) => a.name.localeCompare(b.name));
-      for (const f of list) {
-        if (f.id === excludeId) continue;
-        out.push({ id: f.id, name: f.name, depth });
-        walk(f.id, depth + 1);
-      }
-    };
-    walk(null, 1);
-    return out;
   }
 
   function openFolder(folderId: string | null, folderName?: string) {
@@ -314,6 +270,11 @@ export const useFilesStore = defineStore("files", () => {
     return fetchNodes(folderId);
   }
 
+  async function revealNode(node: { id: string; parent: string | null }) {
+    await openFolderFromSearch(node.parent);
+    highlight([node.id]);
+  }
+
   function navigateToCrumb(index: number) {
     const target = breadcrumbs.value[index];
     if (!target) return;
@@ -322,8 +283,120 @@ export const useFilesStore = defineStore("files", () => {
     return fetchNodes(target.id);
   }
 
+  // --- Mutations (optimistic; callers handle errors and undo) ----------------------
+  function nameExists(name: string, parentId: string | null, exceptId?: string): boolean {
+    const lower = name.trim().toLowerCase();
+    const siblings = parentId === currentParentId.value ? nodes.value : (allNodesIndex ?? []).filter((n) => n.parent === parentId);
+    return siblings.some((n) => n.id !== exceptId && n.name.toLowerCase() === lower);
+  }
+
+  async function createFolder(folderName: string, parentId: string | null = currentParentId.value) {
+    if (!authStore.masterKey) throw new Error("vault_locked");
+    const { ciphertextBase64, nonceHex } = await encryptName(authStore.masterKey, folderName);
+    const res = await apiRequest<FileNode>("/api/v1/nodes", {
+      method: "POST",
+      body: JSON.stringify({ parent: parentId, encrypted_name: ciphertextBase64, name_nonce: nonceHex }),
+    });
+    res.name = folderName;
+    if (parentId === currentParentId.value) {
+      nodes.value = [res, ...nodes.value];
+      highlight([res.id]);
+    }
+    invalidateIndex();
+    return res;
+  }
+
+  function patchLocal(id: string, patch: Partial<FileNode>) {
+    nodes.value = nodes.value.map((n) => (n.id === id ? { ...n, ...patch } : n));
+    searchResults.value = searchResults.value.map((n) => (n.id === id ? { ...n, ...patch } : n));
+  }
+
+  async function renameNode(nodeId: string, newName: string) {
+    if (!authStore.masterKey) throw new Error("vault_locked");
+    const before = nodes.value.find((n) => n.id === nodeId) ?? searchResults.value.find((n) => n.id === nodeId);
+    patchLocal(nodeId, { name: newName });
+    try {
+      const { ciphertextBase64, nonceHex } = await encryptName(authStore.masterKey, newName);
+      await apiRequest(`/api/v1/nodes/${nodeId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ encrypted_name: ciphertextBase64, name_nonce: nonceHex }),
+      });
+      invalidateIndex();
+    } catch (err) {
+      if (before) patchLocal(nodeId, { name: before.name });
+      throw err;
+    }
+  }
+
+  async function moveNode(node: FileNode, newParentId: string | null) {
+    const wasVisible = nodes.value.some((n) => n.id === node.id);
+    if (newParentId !== currentParentId.value) nodes.value = nodes.value.filter((n) => n.id !== node.id);
+    try {
+      await apiRequest(`/api/v1/nodes/${node.id}`, { method: "PATCH", body: JSON.stringify({ parent: newParentId }) });
+      invalidateIndex();
+      if (newParentId === currentParentId.value && !wasVisible) {
+        nodes.value = [...nodes.value, { ...node, parent: newParentId }];
+        highlight([node.id]);
+      }
+    } catch (err) {
+      if (wasVisible && !nodes.value.some((n) => n.id === node.id)) nodes.value = [...nodes.value, node];
+      throw err;
+    }
+  }
+
+  function applyQuota(res: { quota?: any } | undefined) {
+    if (res?.quota && authStore.user) authStore.user.quota = res.quota;
+    else authStore.fetchProfile().catch(() => {});
+  }
+
+  async function trashNode(node: FileNode) {
+    nodes.value = nodes.value.filter((n) => n.id !== node.id);
+    searchResults.value = searchResults.value.filter((n) => n.id !== node.id);
+    try {
+      applyQuota(await apiRequest<{ quota?: any }>(`/api/v1/nodes/${node.id}`, { method: "DELETE" }));
+      invalidateIndex();
+    } catch (err) {
+      if (node.parent === currentParentId.value) nodes.value = [...nodes.value, node];
+      throw err;
+    }
+  }
+
+  async function restoreNode(node: FileNode) {
+    applyQuota(await apiRequest<{ quota?: any }>(`/api/v1/nodes/${node.id}/restore`, { method: "POST" }));
+    invalidateIndex();
+    if (node.parent === currentParentId.value && !nodes.value.some((n) => n.id === node.id)) {
+      nodes.value = [...nodes.value, { ...node, trashed_at: null }];
+      highlight([node.id]);
+    }
+  }
+
+  async function permanentDeleteNode(nodeId: string) {
+    applyQuota(await apiRequest<{ quota?: any }>(`/api/v1/nodes/${nodeId}?permanent=true`, { method: "DELETE" }));
+    invalidateIndex();
+  }
+
+  async function fetchTrash(): Promise<FileNode[]> {
+    if (!authStore.masterKey) return [];
+    return decryptNodes(authStore.masterKey, await apiRequest<any[]>("/api/v1/nodes?trashed=true"));
+  }
+
+  /** Called by the upload store when a file finishes; updates the list in place. */
+  function upsertUploaded(node: FileNode) {
+    invalidateIndex();
+    if (node.parent !== currentParentId.value) return;
+    const exists = nodes.value.some((n) => n.id === node.id);
+    nodes.value = exists ? nodes.value.map((n) => (n.id === node.id ? { ...n, ...node } : n)) : [...nodes.value, node];
+    highlight([node.id]);
+  }
+
+  /** Folder tree for the Move dialog. */
+  async function folderTree(): Promise<FileNode[]> {
+    return (await loadIndex()).filter((n) => n.type === "folder");
+  }
+
   function reset() {
     nodes.value = [];
+    loaded.value = false;
     currentParentId.value = null;
     breadcrumbs.value = [ROOT_CRUMB];
     invalidateIndex();
@@ -334,18 +407,27 @@ export const useFilesStore = defineStore("files", () => {
     nodes,
     currentParentId,
     breadcrumbs,
-    viewMode,
     isLoading,
+    loaded,
     loadError,
+    prefs,
     searchQuery,
     searchResults,
     isSearching,
     isSearchActive,
     searchError,
-    setViewMode,
+    highlightIds,
     fetchNodes,
     search,
     clearSearch,
+    findNodes,
+    recentFiles,
+    highlight,
+    openFolder,
+    openFolderFromSearch,
+    revealNode,
+    navigateToCrumb,
+    nameExists,
     createFolder,
     renameNode,
     moveNode,
@@ -353,15 +435,9 @@ export const useFilesStore = defineStore("files", () => {
     restoreNode,
     permanentDeleteNode,
     fetchTrash,
-    listFolders,
-    openFolder,
-    openFolderFromSearch,
-    navigateToCrumb,
+    upsertUploaded,
+    folderTree,
     invalidateIndex,
     reset,
-    findNodes,
-    highlightIds,
-    highlight,
-    revealNode,
   };
 });

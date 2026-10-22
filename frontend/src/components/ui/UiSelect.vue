@@ -49,8 +49,10 @@ const props = withDefaults(
     /** Text shown before the value inside the trigger, e.g. "Sort:". */
     prefix?: string;
     triggerClass?: string;
+    /** Full-width trigger (forms). Toolbars pass false to size to content. */
+    block?: boolean;
   }>(),
-  { placeholder: "Select…", size: "md", searchable: undefined }
+  { placeholder: "Select…", size: "md", searchable: undefined, block: true }
 );
 const emit = defineEmits<{ blur: [] }>();
 
@@ -71,7 +73,8 @@ const trigger = computed(() =>
   inputClasses({
     invalid: isInvalid.value,
     size: props.size,
-    extra: cn("flex items-center justify-between gap-2 text-left data-[placeholder]:text-fg-subtle", props.triggerClass),
+    block: props.block,
+    extra: cn(props.block ? "flex" : "", "items-center justify-between gap-2 whitespace-nowrap text-left data-[placeholder]:text-fg-subtle", props.triggerClass),
   })
 );
 const content =

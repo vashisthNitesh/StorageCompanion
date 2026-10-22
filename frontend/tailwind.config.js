@@ -3,7 +3,11 @@ const token = (name) => `rgb(var(--${name}) / <alpha-value>)`;
 
 export default {
   content: ["./index.html", "./src/**/*.{vue,js,ts}"],
-  darkMode: ["selector", '[data-theme="dark"]'],
+  // Dark styles apply for an explicit dark theme, or the system preference unless light is forced.
+  darkMode: [
+    "variant",
+    ['&:is([data-theme="dark"] *)', '@media (prefers-color-scheme: dark) { &:not([data-theme="light"] *) }'],
+  ],
   theme: {
     fontSize: {
       xs: ["12px", { lineHeight: "16px" }],

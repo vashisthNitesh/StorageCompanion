@@ -1,10 +1,11 @@
 import { ref } from "vue";
 import { useAuthStore } from "../../stores/auth";
-import { useToastStore } from "../../stores/toast";
 import { apiRequest, apiFetch, errorFromResponse } from "../../lib/api";
 import { unwrapKey } from "../../lib/crypto/keys";
 import { importFileKey, deriveChunkNonce } from "../../lib/crypto/content";
 import { hexToUint8Array } from "../../lib/crypto/kdf";
+import { normalizeApiError } from "../../lib/errors";
+import { toast } from "../../lib/toast";
 import type { FileNode } from "../../stores/files";
 
 // Shared across components so every view shows the same progress.
@@ -22,9 +23,10 @@ const GCM_TAG = 16;
 // Files at least this big are streamed straight to disk when the browser supports it.
 const STREAM_TO_DISK_BYTES = 400 * 1024 * 1024;
 
+class DecryptError extends Error {}
+
 export function useFileDownload() {
   const authStore = useAuthStore();
-  const toast = useToastStore();
 
   const keyFor = (node: FileNode, version?: number) => (version ? `${node.id}:v${version}` : node.id);
   const isDownloading = (node: FileNode, version?: number) => keyFor(node, version) in progress.value;
@@ -33,7 +35,7 @@ export function useFileDownload() {
   async function downloadFile(node: FileNode, version?: number): Promise<void> {
     if (node.type !== "file") return;
     if (!authStore.masterKey) {
-      toast.error("Unlock your vault before downloading.");
+      toast.info("Unlock your files first, then try the download again.");
       return;
     }
     const key = keyFor(node, version);
@@ -58,13 +60,18 @@ export function useFileDownload() {
 
       const res = await apiFetch(info.download_url, { timeoutMs: 60_000 });
       if (!res.ok) throw await errorFromResponse(res);
-      if (!res.body) throw new Error("Your browser couldn't read the download.");
+      if (!res.body) throw new DecryptError();
 
       const fileKey = await importFileKey(await unwrapKey(authStore.masterKey, info.wrapped_file_key));
       const baseNonce = hexToUint8Array(info.content_nonce);
       const encPart = (info.part_size || 8 * 1024 * 1024) + GCM_TAG;
-      const decryptPart = async (bytes: Uint8Array, n: number) =>
-        new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: deriveChunkNonce(baseNonce, n) }, fileKey, bytes));
+      const decryptPart = async (bytes: Uint8Array, n: number) => {
+        try {
+          return new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: deriveChunkNonce(baseNonce, n) }, fileKey, bytes));
+        } catch {
+          throw new DecryptError();
+        }
+      };
 
       const reader = res.body.getReader();
       const parts: Uint8Array[] = [];
@@ -72,11 +79,7 @@ export function useFileDownload() {
       let buffered = 0;
       let partNumber = 1;
       let received = 0;
-
-      const emit = async (plain: Uint8Array) => {
-        if (writable) await writable.write(plain);
-        else parts.push(plain);
-      };
+      const emit = async (plain: Uint8Array) => (writable ? writable.write(plain) : parts.push(plain));
 
       for (;;) {
         const { done, value } = await reader.read();
@@ -84,7 +87,6 @@ export function useFileDownload() {
         if (!value?.length) continue;
         received += value.length;
         if (total) progress.value = { ...progress.value, [key]: Math.min(99, Math.round((received / (total + GCM_TAG)) * 100)) };
-
         if (buffered + value.length > buffer.length) {
           const grown = new Uint8Array(Math.max(buffer.length * 2, buffered + value.length));
           grown.set(buffer.subarray(0, buffered));
@@ -92,7 +94,6 @@ export function useFileDownload() {
         }
         buffer.set(value, buffered);
         buffered += value.length;
-
         while (buffered >= encPart) {
           await emit(await decryptPart(buffer.slice(0, encPart), partNumber++));
           buffer.copyWithin(0, encPart, buffered);
@@ -114,19 +115,15 @@ export function useFileDownload() {
         a.remove();
         setTimeout(() => URL.revokeObjectURL(url), 30_000);
       }
-    } catch (err: any) {
-      if (writable) {
-        try {
-          await writable.abort();
-        } catch {
-          // ignore
-        }
-      }
+    } catch (err) {
+      try {
+        await writable?.abort();
+      } catch {}
       const message =
-        err?.name === "OperationError"
-          ? "This file couldn't be decrypted. It may be damaged."
-          : err?.message || "Download failed. Please try again.";
-      toast.error(`${node.name}: ${message}`);
+        err instanceof DecryptError
+          ? `“${node.name}” couldn't be decrypted. The file may be damaged.`
+          : `Couldn't download “${node.name}”. ${normalizeApiError(err).message}`;
+      toast.error(message, { retry: () => void downloadFile(node, version) });
     } finally {
       const next = { ...progress.value };
       delete next[key];
