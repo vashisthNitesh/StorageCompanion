@@ -157,6 +157,37 @@ export const useFilesStore = defineStore("files", () => {
     }
   }
 
+  /** Name lookup for the command palette; doesn't change the visible search. */
+  async function findNodes(query: string, limit = 8): Promise<SearchResult[]> {
+    const q = query.trim().toLowerCase();
+    if (!q) return [];
+    const index = await loadIndex();
+    const byId = new Map(index.map((n) => [n.id, n]));
+    const terms = q.split(/\s+/);
+    return index
+      .filter((n) => terms.every((t) => n.name.toLowerCase().includes(t)))
+      .sort((a, b) => (a.type === b.type ? 0 : a.type === "folder" ? -1 : 1))
+      .slice(0, limit)
+      .map((n) => ({ ...n, location: locationOf(n, byId) }));
+  }
+
+  /** Items to briefly highlight (new uploads, revealed search hits). */
+  const highlightIds = ref<Set<string>>(new Set());
+  function highlight(ids: string[]) {
+    highlightIds.value = new Set([...highlightIds.value, ...ids]);
+    setTimeout(() => {
+      const next = new Set(highlightIds.value);
+      ids.forEach((id) => next.delete(id));
+      highlightIds.value = next;
+    }, 2400);
+  }
+
+  /** Opens the folder containing `node` and highlights it. */
+  async function revealNode(node: { id: string; parent: string | null }) {
+    await openFolderFromSearch(node.parent);
+    highlight([node.id]);
+  }
+
   function clearSearch() {
     searchSeq++;
     searchQuery.value = "";
@@ -328,5 +359,9 @@ export const useFilesStore = defineStore("files", () => {
     navigateToCrumb,
     invalidateIndex,
     reset,
+    findNodes,
+    highlightIds,
+    highlight,
+    revealNode,
   };
 });

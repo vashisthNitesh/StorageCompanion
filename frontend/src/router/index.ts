@@ -15,6 +15,7 @@ const routes: RouteRecordRaw[] = [
     children: [
       { path: "", redirect: "/app/files" },
       { path: "files", name: "files", component: () => import("../features/files/FileManager.vue"), meta: { customer: true } },
+      { path: "recent", name: "recent", component: () => import("../features/files/FileManager.vue"), meta: { customer: true, view: "recent" } },
       { path: "trash", name: "trash", component: () => import("../features/files/TrashView.vue"), meta: { customer: true } },
       { path: "billing", name: "billing", component: () => import("../features/billing/BillingView.vue"), meta: { customer: true } },
       { path: "settings", name: "settings", component: () => import("../features/settings/SettingsView.vue") },

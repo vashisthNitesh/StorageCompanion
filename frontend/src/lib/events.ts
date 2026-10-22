@@ -3,6 +3,9 @@ type Events = {
   "plan-picker": { reason?: string; planCode?: string };
   "command-palette": undefined;
   "shortcuts-help": undefined;
+  "new-folder": undefined;
+  "upload-files": undefined;
+  "upload-folder": undefined;
 };
 type Handler<K extends keyof Events> = (payload: Events[K]) => void;
 const handlers = new Map<keyof Events, Set<(payload: unknown) => void>>();

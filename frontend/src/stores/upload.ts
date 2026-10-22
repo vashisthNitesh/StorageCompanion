@@ -334,6 +334,14 @@ export const useUploadStore = defineStore("upload", () => {
     pump();
   }
 
+  function cancelAll() {
+    for (const u of [...uploads.value]) if (u.status !== "completed") cancelUpload(u.id);
+  }
+
+  function showPanel() {
+    isTrayOpen.value = true;
+  }
+
   function clearFinished() {
     uploads.value = uploads.value.filter((u) => u.status !== "completed" && u.status !== "error");
   }
@@ -349,5 +357,7 @@ export const useUploadStore = defineStore("upload", () => {
     pauseUpload,
     cancelUpload,
     clearFinished,
+    showPanel,
+    cancelAll,
   };
 });

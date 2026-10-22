@@ -72,8 +72,8 @@ async function choose(plan: Plan) {
 }
 
 async function cancelPlan() {
-  const message = await billing.cancel();
-  toast.info(message);
+  await billing.cancel();
+  toast.info("Your plan won't renew. It stays active until the end of the period.");
 }
 
 async function downloadInvoice(inv: Invoice) {

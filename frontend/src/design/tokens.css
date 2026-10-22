@@ -38,6 +38,8 @@
   --info-soft: 240 249 255;
 
   --shadow-color: 15 23 42;
+  /* Logo wordmark accent only — never a UI colour. */
+  --logo-accent: 5 150 105;
   --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
   --dur-fast: 120ms;
   --dur-base: 180ms;
@@ -78,6 +80,7 @@
   --info-soft: 13 39 56;
 
   --shadow-color: 0 0 0;
+  --logo-accent: 52 211 153;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -115,6 +118,7 @@
     --info-soft: 13 39 56;
 
     --shadow-color: 0 0 0;
+    --logo-accent: 52 211 153;
   }
 }
 
