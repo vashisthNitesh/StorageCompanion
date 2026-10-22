@@ -105,8 +105,11 @@ export function normalizeApiError(err: unknown): NormalizedError {
     case status === 400 || status === 422: {
       const fieldErrors = extractFieldErrors(data);
       const top = data?.error ?? data?.message ?? firstString(data?.details?.non_field_errors) ?? data?.detail;
+      // The backend also copies the first field error into `error` as "field: message";
+      // when field errors exist that duplicate belongs under the field, not in a banner.
+      const duplicatesField = typeof top === "string" && Object.values(fieldErrors).some((m) => top.includes(m));
       const message = Object.keys(fieldErrors).length
-        ? isHumanText(top) && !Object.values(fieldErrors).includes(top)
+        ? isHumanText(top) && !duplicatesField
           ? top
           : COPY.validation
         : isHumanText(top)

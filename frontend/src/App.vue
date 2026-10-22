@@ -3,7 +3,6 @@ import { TooltipProvider } from "reka-ui";
 import UploadTray from "./features/files/UploadTray.vue";
 import AppToaster from "./components/AppToaster.vue";
 import UiConfirmHost from "./components/ui/UiConfirmHost.vue";
-import ToastHost from "./components/ToastHost.vue";
 </script>
 
 <template>
@@ -12,6 +11,5 @@ import ToastHost from "./components/ToastHost.vue";
     <UploadTray />
     <UiConfirmHost />
     <AppToaster />
-    <ToastHost />
   </TooltipProvider>
 </template>

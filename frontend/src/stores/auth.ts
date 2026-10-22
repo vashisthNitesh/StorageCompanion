@@ -17,6 +17,8 @@ import {
 } from "../lib/crypto/kdf";
 import { generateMasterKey, generateUserKeypair, wrapKey, unwrapKey } from "../lib/crypto/keys";
 import { generateRecoveryPhrase, deriveRecoveryKey } from "../lib/crypto/recovery";
+import { toast } from "../lib/toast";
+import { COPY } from "../lib/errors";
 
 export interface UserProfile {
   id: string;
@@ -123,13 +125,15 @@ export const useAuthStore = defineStore("auth", () => {
     saveMasterKeyToSession(null);
   }
 
-  setSessionExpiredHandler(() => {
-    if (user.value) {
-      clearSession();
-      if (typeof window !== "undefined" && window.location.pathname.startsWith("/app")) {
-        window.location.assign(`/login?expired=1&redirect=${encodeURIComponent(window.location.pathname)}`);
-      }
-    }
+  setSessionExpiredHandler(async () => {
+    if (!user.value) return;
+    clearSession();
+    const path = window.location.pathname;
+    if (!path.startsWith("/app")) return;
+    toast.info(COPY.session);
+    // Imported lazily: the router module itself depends on this store.
+    const { router } = await import("../router");
+    router.replace({ name: "login", query: { redirect: path } });
   });
 
   function setMasterKey(key: Uint8Array | null) {
