@@ -45,15 +45,15 @@ const sections = [
 </script>
 
 <template>
-  <div class="min-h-screen bg-white">
+  <div class="min-h-screen bg-canvas">
     <SiteHeader />
     <main class="mx-auto max-w-3xl px-4 py-16 sm:px-6 sm:py-20">
-      <h1 class="text-4xl font-semibold tracking-tight text-slate-900">Terms & privacy</h1>
-      <p class="mt-3 text-sm text-slate-500">Last updated October 2026</p>
+      <h1 class="text-4xl font-semibold tracking-tight text-fg">Terms & privacy</h1>
+      <p class="mt-3 text-sm text-fg-subtle">Last updated October 2026</p>
       <div class="mt-10 space-y-10">
         <section v-for="s in sections" :key="s.title">
-          <h2 class="text-lg font-semibold text-slate-900">{{ s.title }}</h2>
-          <p v-for="(p, i) in s.body" :key="i" class="mt-3 leading-relaxed text-slate-600">{{ p }}</p>
+          <h2 class="text-lg font-semibold text-fg">{{ s.title }}</h2>
+          <p v-for="(p, i) in s.body" :key="i" class="mt-3 leading-relaxed text-fg-muted">{{ p }}</p>
         </section>
       </div>
     </main>

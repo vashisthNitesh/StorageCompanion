@@ -16,6 +16,8 @@ import {
 import SiteHeader from "./components/SiteHeader.vue";
 import SiteFooter from "./components/SiteFooter.vue";
 import PlanGrid from "./components/PlanGrid.vue";
+import UiButton from "../components/ui/UiButton.vue";
+import UiBadge from "../components/ui/UiBadge.vue";
 import { useAuthStore } from "../stores/auth";
 import { homeFor } from "../router";
 
@@ -66,51 +68,51 @@ const openFaq = ref<number | null>(0);
 </script>
 
 <template>
-  <div class="min-h-screen bg-white">
+  <div class="min-h-screen bg-canvas">
     <SiteHeader />
 
     <!-- Hero -->
     <section class="relative overflow-hidden">
-      <div class="absolute inset-x-0 top-0 -z-0 h-[36rem] bg-gradient-to-b from-brand-50 to-white"></div>
+      <div class="absolute inset-x-0 top-0 -z-0 h-[36rem] bg-gradient-to-b from-primary-soft to-canvas"></div>
       <div class="relative mx-auto max-w-6xl px-4 pb-20 pt-16 sm:px-6 sm:pt-24 lg:pb-28">
         <div class="mx-auto max-w-3xl text-center">
-          <span class="badge-blue">Made in India · Priced in rupees</span>
-          <h1 class="mt-6 text-4xl font-semibold tracking-tight text-slate-900 sm:text-6xl">
-            Cloud storage that only <span class="text-brand-600">you</span> can read
+          <UiBadge tone="primary">Made in India · Priced in rupees</UiBadge>
+          <h1 class="mt-6 text-4xl font-semibold tracking-tight text-fg sm:text-6xl">
+            Cloud storage that only <span class="text-primary">you</span> can read
           </h1>
-          <p class="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-slate-600">
+          <p class="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-fg-muted">
             SmartSpace encrypts your photos, videos and documents on your device before they're uploaded. Original quality, unmetered downloads, from ₹39 a month.
           </p>
           <div class="mt-10 flex flex-col justify-center gap-3 sm:flex-row">
-            <router-link v-if="authStore.isAuthenticated" :to="homeFor(authStore.isMasterAdmin)" class="btn-primary btn-lg">
-              Open my files <ArrowRight class="h-4 w-4" />
-            </router-link>
-            <router-link v-else to="/register" class="btn-primary btn-lg">Get started <ArrowRight class="h-4 w-4" /></router-link>
-            <router-link to="/pricing" class="btn-secondary btn-lg">See pricing</router-link>
+            <UiButton v-if="authStore.isAuthenticated" variant="primary" size="lg" :icon-right="ArrowRight" :to="homeFor(authStore.isMasterAdmin)">
+              {{ authStore.isMasterAdmin ? "Open admin console" : "Open my files" }}
+            </UiButton>
+            <UiButton v-else variant="primary" size="lg" :icon-right="ArrowRight" to="/register">Get started</UiButton>
+            <UiButton size="lg" to="/pricing">See pricing</UiButton>
           </div>
-          <p class="mt-5 text-sm text-slate-500">Sign up free and choose a plan when you're ready to upload.</p>
+          <p class="mt-5 text-sm text-fg-subtle">Sign up free and choose a plan when you're ready to upload.</p>
         </div>
 
         <!-- Product preview -->
-        <div class="mx-auto mt-16 max-w-4xl rounded-2xl border border-slate-200 bg-white p-2 shadow-pop">
-          <div class="rounded-xl border border-slate-100 bg-slate-50">
-            <div class="flex items-center gap-1.5 border-b border-slate-100 px-4 py-3">
-              <span class="h-2.5 w-2.5 rounded-full bg-slate-200"></span><span class="h-2.5 w-2.5 rounded-full bg-slate-200"></span><span class="h-2.5 w-2.5 rounded-full bg-slate-200"></span>
-              <span class="ml-3 text-xs text-slate-400">My files / Wedding — Mehta 2026</span>
+        <div class="mx-auto mt-16 max-w-4xl rounded-2xl border border-line bg-surface p-2 shadow-xl" aria-hidden="true">
+          <div class="rounded-xl border border-line bg-canvas-subtle">
+            <div class="flex items-center gap-1.5 border-b border-line px-4 py-3">
+              <span class="h-2.5 w-2.5 rounded-full bg-line-strong"></span><span class="h-2.5 w-2.5 rounded-full bg-line-strong"></span><span class="h-2.5 w-2.5 rounded-full bg-line-strong"></span>
+              <span class="ml-3 text-xs text-fg-subtle">My files / Wedding — Mehta 2026</span>
             </div>
-            <ul class="divide-y divide-slate-100 text-left text-sm">
+            <ul class="divide-y divide-line text-left text-sm">
               <li v-for="row in [
                 ['Ceremony', 'Folder', '—'],
                 ['DSC_0412.ARW', 'Image', '48.2 MB'],
                 ['Highlights_4K_final.mov', 'Video', '3.4 GB'],
                 ['Contract_signed.pdf', 'PDF', '412 KB'],
               ]" :key="row[0]" class="grid grid-cols-[1fr_auto] items-center gap-4 px-4 py-3 sm:grid-cols-[1fr_120px_100px]">
-                <span class="flex items-center gap-3 font-medium text-slate-800">
-                  <span class="h-8 w-8 rounded-lg" :class="row[1] === 'Folder' ? 'bg-amber-100' : row[1] === 'Video' ? 'bg-violet-100' : row[1] === 'PDF' ? 'bg-rose-100' : 'bg-emerald-100'"></span>
+                <span class="flex items-center gap-3 font-medium text-fg">
+                  <span class="h-8 w-8 rounded-lg" :class="row[1] === 'Folder' ? 'bg-warning-soft' : row[1] === 'Video' ? 'bg-info-soft' : row[1] === 'PDF' ? 'bg-danger-soft' : 'bg-success-soft'"></span>
                   {{ row[0] }}
                 </span>
-                <span class="hidden text-slate-500 sm:block">{{ row[1] }}</span>
-                <span class="text-slate-500">{{ row[2] }}</span>
+                <span class="hidden text-fg-subtle sm:block">{{ row[1] }}</span>
+                <span class="text-fg-subtle">{{ row[2] }}</span>
               </li>
             </ul>
           </div>
@@ -119,17 +121,17 @@ const openFaq = ref<number | null>(0);
     </section>
 
     <!-- Features -->
-    <section id="features" class="scroll-mt-20 border-t border-slate-100 bg-slate-50 py-20 sm:py-24">
+    <section id="features" class="scroll-mt-20 border-t border-line bg-canvas-subtle py-20 sm:py-24">
       <div class="mx-auto max-w-6xl px-4 sm:px-6">
         <div class="mx-auto max-w-2xl text-center">
-          <h2 class="text-3xl font-semibold tracking-tight text-slate-900 sm:text-4xl">Everything your files need, nothing they don't</h2>
-          <p class="mt-4 text-lg text-slate-600">Simple, private storage for creators, photographers and families.</p>
+          <h2 class="text-3xl font-semibold tracking-tight text-fg sm:text-4xl">Everything your files need, nothing they don't</h2>
+          <p class="mt-4 text-lg text-fg-muted">Simple, private storage for creators, photographers and families.</p>
         </div>
         <div class="mt-14 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          <div v-for="f in features" :key="f.title" class="card card-body">
-            <span class="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-50 text-brand-600"><component :is="f.icon" class="h-5 w-5" /></span>
-            <h3 class="mt-4 font-semibold text-slate-900">{{ f.title }}</h3>
-            <p class="mt-2 text-sm leading-relaxed text-slate-600">{{ f.text }}</p>
+          <div v-for="f in features" :key="f.title" class="rounded-lg border border-line bg-surface p-6 shadow-xs">
+            <span class="flex h-10 w-10 items-center justify-center rounded-lg bg-primary-soft text-primary"><component :is="f.icon" :size="20" :stroke-width="1.75" aria-hidden="true" /></span>
+            <h3 class="mt-4 text-md font-semibold text-fg">{{ f.title }}</h3>
+            <p class="mt-2 text-base leading-relaxed text-fg-muted">{{ f.text }}</p>
           </div>
         </div>
       </div>
@@ -138,24 +140,24 @@ const openFaq = ref<number | null>(0);
     <!-- How it works -->
     <section class="py-20 sm:py-24">
       <div class="mx-auto max-w-6xl px-4 sm:px-6">
-        <h2 class="text-center text-3xl font-semibold tracking-tight text-slate-900">Up and running in minutes</h2>
+        <h2 class="text-center text-3xl font-semibold tracking-tight text-fg">Up and running in minutes</h2>
         <ol class="mt-14 grid gap-10 md:grid-cols-3">
           <li v-for="(s, i) in steps" :key="s.title" class="text-center">
-            <span class="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-slate-900 text-white"><component :is="s.icon" class="h-5 w-5" /></span>
-            <p class="mt-4 text-xs font-medium uppercase tracking-wide text-brand-600">Step {{ i + 1 }}</p>
-            <h3 class="mt-1 font-semibold text-slate-900">{{ s.title }}</h3>
-            <p class="mx-auto mt-2 max-w-xs text-sm text-slate-600">{{ s.text }}</p>
+            <span class="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-fg text-canvas"><component :is="s.icon" :size="20" :stroke-width="1.75" aria-hidden="true" /></span>
+            <p class="mt-4 text-xs font-medium uppercase tracking-wide text-primary">Step {{ i + 1 }}</p>
+            <h3 class="mt-1 text-md font-semibold text-fg">{{ s.title }}</h3>
+            <p class="mx-auto mt-2 max-w-xs text-base text-fg-muted">{{ s.text }}</p>
           </li>
         </ol>
       </div>
     </section>
 
     <!-- Pricing -->
-    <section id="pricing" class="scroll-mt-20 border-t border-slate-100 bg-slate-50 py-20 sm:py-24">
+    <section id="pricing" class="scroll-mt-20 border-t border-line bg-canvas-subtle py-20 sm:py-24">
       <div class="mx-auto max-w-6xl px-4 sm:px-6">
         <div class="mx-auto max-w-2xl text-center">
-          <h2 class="text-3xl font-semibold tracking-tight text-slate-900 sm:text-4xl">Simple pricing</h2>
-          <p class="mt-4 text-lg text-slate-600">Pay for storage, not for downloads.</p>
+          <h2 class="text-3xl font-semibold tracking-tight text-fg sm:text-4xl">Simple pricing</h2>
+          <p class="mt-4 text-lg text-fg-muted">Pay for storage, not for downloads.</p>
         </div>
         <div class="mt-10"><PlanGrid /></div>
       </div>
@@ -164,16 +166,22 @@ const openFaq = ref<number | null>(0);
     <!-- FAQ -->
     <section id="faq" class="scroll-mt-20 py-20 sm:py-24">
       <div class="mx-auto max-w-3xl px-4 sm:px-6">
-        <h2 class="text-center text-3xl font-semibold tracking-tight text-slate-900">Questions</h2>
-        <dl class="mt-10 divide-y divide-slate-200 rounded-2xl border border-slate-200">
+        <h2 class="text-center text-3xl font-semibold tracking-tight text-fg">Questions</h2>
+        <dl class="mt-10 divide-y divide-line rounded-2xl border border-line">
           <div v-for="(f, i) in faqs" :key="f.q">
             <dt>
-              <button class="flex w-full items-center justify-between gap-4 px-5 py-4 text-left font-medium text-slate-900" :aria-expanded="openFaq === i" @click="openFaq = openFaq === i ? null : i">
+              <button
+                :id="`faq-q-${i}`"
+                class="flex w-full items-center justify-between gap-4 rounded-2xl px-5 py-4 text-left text-md font-medium text-fg hover:text-primary"
+                :aria-expanded="openFaq === i"
+                :aria-controls="`faq-a-${i}`"
+                @click="openFaq = openFaq === i ? null : i"
+              >
                 {{ f.q }}
-                <ChevronDown class="h-5 w-5 shrink-0 text-slate-400 transition-transform" :class="{ 'rotate-180': openFaq === i }" />
+                <ChevronDown :size="20" aria-hidden="true" class="shrink-0 text-fg-subtle transition-transform duration-base" :class="{ 'rotate-180': openFaq === i }" />
               </button>
             </dt>
-            <dd v-if="openFaq === i" class="px-5 pb-5 text-sm leading-relaxed text-slate-600">{{ f.a }}</dd>
+            <dd v-if="openFaq === i" :id="`faq-a-${i}`" role="region" :aria-labelledby="`faq-q-${i}`" class="px-5 pb-5 text-base leading-relaxed text-fg-muted">{{ f.a }}</dd>
           </div>
         </dl>
       </div>
@@ -181,10 +189,10 @@ const openFaq = ref<number | null>(0);
 
     <!-- CTA -->
     <section class="px-4 pb-20 sm:px-6">
-      <div class="mx-auto max-w-6xl rounded-3xl bg-slate-900 px-6 py-14 text-center sm:px-12">
-        <h2 class="text-3xl font-semibold tracking-tight text-white">Keep your files private</h2>
-        <p class="mx-auto mt-3 max-w-xl text-slate-300">Create your account in under a minute.</p>
-        <router-link to="/register" class="btn mt-8 h-11 bg-white px-6 text-slate-900 hover:bg-slate-100">Get started <ArrowRight class="h-4 w-4" /></router-link>
+      <div class="mx-auto max-w-6xl rounded-3xl bg-primary px-6 py-14 text-center sm:px-12">
+        <h2 class="text-3xl font-semibold tracking-tight text-primary-fg">Keep your files private</h2>
+        <p class="mx-auto mt-3 max-w-xl text-primary-fg/80">Create your account in under a minute.</p>
+        <UiButton class="mt-8 border-transparent" size="lg" :icon-right="ArrowRight" to="/register">Get started</UiButton>
       </div>
     </section>
 

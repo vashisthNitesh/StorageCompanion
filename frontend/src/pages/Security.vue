@@ -33,25 +33,25 @@ const points = [
 </script>
 
 <template>
-  <div class="min-h-screen bg-white">
+  <div class="min-h-screen bg-canvas">
     <SiteHeader />
     <main class="mx-auto max-w-3xl px-4 py-16 sm:px-6 sm:py-20">
-      <h1 class="text-4xl font-semibold tracking-tight text-slate-900">How we protect your files</h1>
-      <p class="mt-4 text-lg text-slate-600">SmartSpace is built so your files stay private, even from us.</p>
+      <h1 class="text-4xl font-semibold tracking-tight text-fg">How we protect your files</h1>
+      <p class="mt-4 text-lg text-fg-muted">SmartSpace is built so your files stay private, even from us.</p>
 
       <ul class="mt-12 space-y-8">
         <li v-for="p in points" :key="p.title" class="flex gap-4">
-          <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-600"><component :is="p.icon" class="h-5 w-5" /></span>
+          <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary-soft text-primary"><component :is="p.icon" :size="20" :stroke-width="1.75" aria-hidden="true" /></span>
           <div>
-            <h2 class="font-semibold text-slate-900">{{ p.title }}</h2>
-            <p class="mt-1 leading-relaxed text-slate-600">{{ p.text }}</p>
+            <h2 class="text-md font-semibold text-fg">{{ p.title }}</h2>
+            <p class="mt-1 leading-relaxed text-fg-muted">{{ p.text }}</p>
           </div>
         </li>
       </ul>
 
-      <div class="mt-12 rounded-2xl border border-amber-200 bg-amber-50 p-6">
-        <h2 class="flex items-center gap-2 font-semibold text-amber-900"><AlertTriangle class="h-5 w-5" /> Two things to know</h2>
-        <ul class="mt-3 list-disc space-y-2 pl-5 text-sm leading-relaxed text-amber-900">
+      <div class="mt-12 rounded-2xl border border-warning/30 bg-warning-soft p-6">
+        <h2 class="flex items-center gap-2 font-semibold text-fg"><AlertTriangle :size="20" class="text-warning" aria-hidden="true" /> Two things to know</h2>
+        <ul class="mt-3 list-disc space-y-2 pl-5 text-base leading-relaxed text-fg">
           <li><strong>We can't reset your password.</strong> In an email account, your password is the only way to unlock your files. If you forget it, they can't be recovered.</li>
           <li>
             <strong>Google sign-in trades some privacy for convenience.</strong> Accounts created with Google don't have a separate password, so their vault key is derived on our
