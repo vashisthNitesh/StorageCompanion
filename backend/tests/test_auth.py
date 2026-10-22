@@ -199,6 +199,7 @@ def test_csp_header_is_sent(api_client):
     res = api_client.get("/api/v1/health")
     assert res.status_code == 200
     assert "default-src 'self'" in res["Content-Security-Policy"]
+    assert "'wasm-unsafe-eval'" in res["Content-Security-Policy"]
 
 
 @pytest.mark.django_db

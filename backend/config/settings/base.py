@@ -234,7 +234,7 @@ SPACEBYTE_PARENT_FOLDER_ID = env("SPACEBYTE_PARENT_FOLDER_ID")
 # Content-Security-Policy sent by Django responses (nginx sends the same policy for the SPA).
 CONTENT_SECURITY_POLICY = "; ".join([
     "default-src 'self'",
-    "script-src 'self' https://accounts.google.com/gsi/client https://checkout.razorpay.com https://*.razorpay.com",
+    "script-src 'self' 'wasm-unsafe-eval' https://accounts.google.com/gsi/client https://checkout.razorpay.com https://*.razorpay.com",
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com/gsi/style",
     "font-src 'self' https://fonts.gstatic.com",
     "img-src 'self' data: blob: https://*.googleusercontent.com https://*.razorpay.com",
