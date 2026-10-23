@@ -8,7 +8,7 @@ import UiContextMenu from "../../components/ui/UiContextMenu.vue";
 import UiProgressCircle from "../../components/ui/UiProgressCircle.vue";
 import type { MenuEntry } from "../../components/ui/menuTypes";
 import { formatBytes, formatRelative } from "../../lib/format";
-import { kindInfo, kindOf } from "./fileTypes";
+import FileThumb from "../preview/FileThumb.vue";
 import { useFileDownload } from "./useFileDownload";
 
 defineProps<{
@@ -56,8 +56,8 @@ const { isDownloading, progressOf } = useFileDownload();
         @click="emit('click', node, $event)"
         @dblclick="emit('open', node)"
       >
-        <div class="relative flex aspect-[4/3] items-center justify-center rounded" :class="kindInfo(kindOf(node)).tint">
-          <component :is="kindInfo(kindOf(node)).icon" :size="36" :stroke-width="1.5" aria-hidden="true" />
+        <div class="relative aspect-[4/3] overflow-hidden rounded">
+          <FileThumb :node="node" variant="card" />
           <span v-if="isDownloading(node)" class="absolute bottom-2 right-2 rounded-full bg-surface p-1 text-primary shadow-sm" role="status" :aria-label="`Downloading ${progressOf(node)}%`">
             <UiProgressCircle :value="progressOf(node)" :size="18" />
           </span>

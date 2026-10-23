@@ -107,6 +107,26 @@ def test_download_info_routes_through_authenticated_stream(auth_client, subscrib
 
 
 @pytest.mark.django_db
+def test_download_info_purpose_controls_activity_log(auth_client, subscribed_user):
+    from apps.audit.models import AuditLog
+
+    node = Node.objects.create(
+        owner=subscribed_user, type=Node.TYPE_FILE, encrypted_name="ZW5j", name_nonce="123456", size_bytes=100
+    )
+    FileVersion.objects.create(
+        node=node, version_no=1, object_key="mock_key_1", size_bytes=100, wrapped_file_key="key", content_nonce="nonce"
+    )
+    actions = lambda: list(AuditLog.objects.filter(target_id=str(node.id)).values_list("action", flat=True))
+
+    assert auth_client.get(f"/api/v1/nodes/{node.id}/download?purpose=thumbnail").status_code == 200
+    assert actions() == []
+    assert auth_client.get(f"/api/v1/nodes/{node.id}/download?purpose=preview").status_code == 200
+    assert actions() == ["file.previewed"]
+    assert auth_client.get(f"/api/v1/nodes/{node.id}/download").status_code == 200
+    assert sorted(actions()) == ["file.downloaded", "file.previewed"]
+
+
+@pytest.mark.django_db
 def test_other_users_cannot_download(subscribed_user):
     node = Node.objects.create(
         owner=subscribed_user, type=Node.TYPE_FILE, encrypted_name="ZW5j", name_nonce="1", size_bytes=1

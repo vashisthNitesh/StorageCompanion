@@ -226,12 +226,16 @@ class NodeDownloadView(APIView):
 
         download_info = get_download_info(node=node, user=request.user, version_no=parse_version(request))
 
-        AuditLog.objects.create(
-            user=request.user,
-            action="file.downloaded",
-            target_type="node",
-            target_id=str(node.id),
-        )
+        # The browser also fetches keys to draw thumbnails and open the in-app viewer.
+        # Thumbnails aren't something the person did, so they aren't logged.
+        purpose = request.query_params.get("purpose", "download")
+        if purpose != "thumbnail":
+            AuditLog.objects.create(
+                user=request.user,
+                action="file.previewed" if purpose == "preview" else "file.downloaded",
+                target_type="node",
+                target_id=str(node.id),
+            )
         return Response(download_info)
 
 

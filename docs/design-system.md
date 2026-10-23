@@ -167,11 +167,32 @@ Inter Variable is self-hosted (`@fontsource-variable/inter`) with `cv11` and `ss
 - `OfflineBanner` sits above everything when the browser is offline. Uploads pause and resume
   automatically.
 
+### File viewer and thumbnails
+
+Files are end-to-end encrypted, so everything is decrypted in the browser.
+
+- `lib/crypto/encryptedFile.ts` reads any byte range by fetching and decrypting only the 8–20 MB
+  parts that cover it (HTTP Range on `/nodes/<id>/content`).
+- `public/preview-sw.js` turns that into a normal streaming URL (`/__stream/<id>/<name>`) for
+  `<video>` and `<audio>`, so playback starts at once and seeking fetches only what it needs. The
+  worker holds no keys; it asks the page for bytes. Without a service worker, media up to 500 MB
+  is decrypted into memory first.
+- Thumbnails (`features/preview/thumbnails.ts`): images are scaled, videos give a frame at ~1 s,
+  PDFs render page one. They load when a card scrolls into view, two at a time, and are cached in
+  IndexedDB encrypted with a key derived from the vault key. Key requests for thumbnails use
+  `?purpose=thumbnail` so they don't appear in account activity; opening the viewer logs
+  "Opened a file".
+- The viewer (`features/preview/FilePreview.vue`) is always dark (`data-theme="dark"` scope). It
+  shows images (zoom, pan, pinch, swipe), video and audio, PDFs (pdf.js), Word `.docx`
+  (docx-preview), spreadsheets and CSV (SheetJS) and text or code. Anything else, or a file the
+  browser can't decode, gets a fallback with Download. Viewer libraries load only when needed.
+
 ### Keyboard
 
 - Global: ⌘/Ctrl K command palette, `/` search, `N` new folder, `U` upload, `?` shortcuts.
 - File list: arrows, Home / End, Space select, Shift + arrows to extend, ⌘/Ctrl A, Enter open,
   F2 rename, Shift+F10 item menu, Delete to trash, Esc clear.
+- File viewer: ← / → previous and next file, + / − / 0 zoom images, Esc close.
 - Every shortcut appears in the `?` dialog (`components/ShortcutsDialog.vue`). Add new ones there.
 
 ## Writing

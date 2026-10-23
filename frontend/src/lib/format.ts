@@ -50,3 +50,13 @@ export function splitFileName(name: string): { stem: string; ext: string } {
   if (dot <= 0 || dot === name.length - 1 || name.length - dot > 8) return { stem: name, ext: "" };
   return { stem: name.slice(0, dot), ext: name.slice(dot) };
 }
+
+/** 75 → "1:15", 3725 → "1:02:05". */
+export function formatDuration(seconds: number | null | undefined): string {
+  if (!seconds || !Number.isFinite(seconds)) return "0:00";
+  const s = Math.round(seconds);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = String(s % 60).padStart(2, "0");
+  return h ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`;
+}

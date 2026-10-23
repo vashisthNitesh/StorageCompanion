@@ -12,6 +12,7 @@ import { formatBytes, formatDateTime } from "../../lib/format";
 import { useFilesStore, type FileNode } from "../../stores/files";
 import { kindInfo, kindOf } from "./fileTypes";
 import { useFileDownload } from "./useFileDownload";
+import FileThumb from "../preview/FileThumb.vue";
 
 const open = defineModel<boolean>("open", { default: false });
 const props = defineProps<{ node: FileNode | null }>();
@@ -44,8 +45,8 @@ watch(
 <template>
   <UiDrawer v-model:open="open" :title="node?.name ?? ''" :description="node ? kindInfo(kindOf(node)).label : ''">
     <div v-if="node" class="space-y-6">
-      <div class="flex aspect-[16/9] items-center justify-center rounded-lg" :class="kindInfo(kindOf(node)).tint">
-        <component :is="kindInfo(kindOf(node)).icon" :size="48" :stroke-width="1.25" aria-hidden="true" />
+      <div class="aspect-[16/9] overflow-hidden rounded-lg">
+        <FileThumb :node="node" variant="card" />
       </div>
 
       <div class="flex items-start gap-2.5 rounded-lg border border-success/25 bg-success-soft p-3 text-sm text-success">

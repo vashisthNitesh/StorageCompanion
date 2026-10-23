@@ -16,6 +16,7 @@ import {
   UserPlus,
   Activity,
   MonitorX,
+  Eye,
 } from "lucide-vue-next";
 import UiCard from "../../components/ui/UiCard.vue";
 import UiButton from "../../components/ui/UiButton.vue";
@@ -47,6 +48,7 @@ const EVENTS: Record<string, { label: string; icon: Component; tone?: string }> 
   "subscription.canceled": { label: "Plan set not to renew", icon: CreditCard },
   "file.uploaded": { label: "Uploaded a file", icon: Upload },
   "file.downloaded": { label: "Downloaded a file", icon: Download },
+  "file.previewed": { label: "Opened a file", icon: Eye },
   "node.trashed": { label: "Moved an item to trash", icon: Trash2 },
   "node.restored": { label: "Restored an item", icon: RotateCcw },
   "node.deleted_permanently": { label: "Deleted an item forever", icon: Trash2 },

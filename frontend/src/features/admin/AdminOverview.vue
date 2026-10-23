@@ -84,6 +84,7 @@ const ACTIONS: Record<string, string> = {
   "user.registered_google": "created an account with Google",
   "file.uploaded": "uploaded a file",
   "file.downloaded": "downloaded a file",
+  "file.previewed": "opened a file",
   "subscription.activated": "activated a plan",
 };
 const describe = (action: string) => ACTIONS[action] || action.replace(/[._]/g, " ");

@@ -25,7 +25,7 @@ const groups = [
     title: "In a file list",
     items: [
       { keys: ["↑", "↓"], label: "Move between items" },
-      { keys: ["Enter"], label: "Open folder / download file" },
+      { keys: ["Enter"], label: "Open folder or preview file" },
       { keys: ["Space"], label: "Select item" },
       { keys: ["Shift", "↑↓"], label: "Extend selection" },
       { keys: [modKey, "A"], label: "Select all" },
@@ -33,6 +33,15 @@ const groups = [
       { keys: ["Shift", "F10"], label: "Open item menu" },
       { keys: ["Delete"], label: "Move to trash" },
       { keys: ["Esc"], label: "Clear selection" },
+    ],
+  },
+  {
+    title: "In the file viewer",
+    items: [
+      { keys: ["←", "→"], label: "Previous / next file" },
+      { keys: ["+", "−"], label: "Zoom images" },
+      { keys: ["0"], label: "Fit image to screen" },
+      { keys: ["Esc"], label: "Close" },
     ],
   },
 ];

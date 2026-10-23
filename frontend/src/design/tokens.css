@@ -46,7 +46,8 @@
   --dur-slow: 220ms;
 }
 
-:root[data-theme="dark"] {
+:root[data-theme="dark"],
+[data-theme="dark"] {
   color-scheme: dark;
 
   --bg: 10 13 20;

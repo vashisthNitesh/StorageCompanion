@@ -12,7 +12,7 @@ import UiProgressCircle from "../../components/ui/UiProgressCircle.vue";
 import type { MenuEntry } from "../../components/ui/menuTypes";
 import { formatBytes, formatDateTime, formatRelative } from "../../lib/format";
 import { useMediaQuery } from "../../composables/useMediaQuery";
-import { kindInfo, kindOf } from "./fileTypes";
+import FileThumb from "../preview/FileThumb.vue";
 import { validateName } from "./nameValidation";
 import FileName from "./FileName.vue";
 import { useFileDownload } from "./useFileDownload";
@@ -180,9 +180,7 @@ const ariaSort = (field: SortField) => (props.sort?.field === field ? (props.sor
             @update:model-value="emit('toggle', row.node)"
           />
           <div class="flex min-w-0 items-center gap-3">
-            <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded" :class="kindInfo(kindOf(row.node)).tint">
-              <component :is="kindInfo(kindOf(row.node)).icon" :size="18" :stroke-width="1.75" aria-hidden="true" />
-            </span>
+            <FileThumb :node="row.node" variant="row" />
             <div class="min-w-0 flex-1">
               <div v-if="renamingId === row.node.id" class="relative" @click.stop @dblclick.stop>
                 <input

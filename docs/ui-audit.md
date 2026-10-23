@@ -122,7 +122,7 @@ fields (storage, max file size, version history) plus what every plan really get
 - [ ] CGST/SGST vs IGST preview at checkout — the seller's state code isn't exposed to the frontend, so
       the summary shows "GST (18%) included" and the invoice shows the split.
 - [ ] Invoice PDF — the API returns a printable HTML invoice; the button downloads that.
-- [ ] Thumbnails — files are end-to-end encrypted and preview was removed by request; grid uses type tiles.
+- [x] Thumbnails and in-app preview — generated in the browser from the encrypted file (see design-system.md, "File viewer and thumbnails").
 - [ ] Device location — only the IP address is stored.
 - [ ] Payment status other than Paid (Failed / Refunded) — invoices are only created for paid orders.
 
