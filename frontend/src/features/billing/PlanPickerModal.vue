@@ -1,75 +1,76 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
+import { useRouter } from "vue-router";
 import UiModal from "../../components/ui/UiModal.vue";
-import UiSegmented from "../../components/ui/UiSegmented.vue";
 import UiAlert from "../../components/ui/UiAlert.vue";
 import UiButton from "../../components/ui/UiButton.vue";
-import PlanCards from "./PlanCards.vue";
-import CheckoutDialog from "./CheckoutDialog.vue";
-import { useBillingStore, type Plan } from "../../stores/billing";
+import PlanList from "./PlanList.vue";
+import IntervalToggle from "./IntervalToggle.vue";
+import { useBillingStore } from "../../stores/billing";
 import { useAuthStore } from "../../stores/auth";
 import { onAppEvent } from "../../lib/events";
 import { normalizeApiError } from "../../lib/errors";
-import { yearlySavingsPercent } from "./planCatalog";
+import { formatMoney } from "../../lib/format";
+import { priceFor, RECOMMENDED_CODE } from "./planCatalog";
 
+// Quick plan chooser opened from upload limits and banners. Payment itself happens on
+// the billing page: Razorpay must not open on top of a modal dialog.
+const router = useRouter();
 const billing = useBillingStore();
 const authStore = useAuthStore();
 const open = ref(false);
 const reason = ref("");
 const interval = ref<"monthly" | "yearly">("yearly");
-const checkoutOpen = ref(false);
-const chosen = ref<Plan | null>(null);
+const selected = ref("");
 
-const currentCode = computed(() => (authStore.user?.subscription?.has_active_subscription ? authStore.user.subscription.plan_code : null));
-const savings = computed(() => yearlySavingsPercent(billing.plans));
+const sub = computed(() => authStore.user?.subscription);
+const currentCode = computed(() => (sub.value?.has_active_subscription ? sub.value.plan_code : null));
+const selectedPlan = computed(() => billing.plans.find((p) => p.code === selected.value) ?? null);
+
+function goToCheckout(plan: string) {
+  open.value = false;
+  void router.push({ path: "/app/billing", query: { plan, interval: interval.value } });
+}
 
 let off: (() => void) | null = null;
 onMounted(() => {
   off = onAppEvent("plan-picker", (payload) => {
+    // "Extend" banners know the plan already.
+    if (payload?.planCode) return goToCheckout(payload.planCode);
     reason.value = payload?.reason ?? "";
-    void authStore.fetchAuthConfig();
-    // "Extend" banners jump straight to checkout for the current plan.
-    if (payload?.planCode) {
-      void billing.ensurePlans().then(() => {
-        const plan = billing.plans.find((p) => p.code === payload.planCode);
-        if (plan) select(plan);
-        else open.value = true;
-      });
-      return;
-    }
+    void billing.ensurePlans().then(() => {
+      if (!billing.plans.some((p) => p.code === selected.value)) selected.value = currentCode.value ?? RECOMMENDED_CODE;
+    });
     open.value = true;
-    void billing.ensurePlans();
   });
 });
 onUnmounted(() => off?.());
-
-function select(plan: Plan) {
-  chosen.value = plan;
-  open.value = false;
-  checkoutOpen.value = true;
-}
 </script>
 
 <template>
-  <UiModal v-model:open="open" title="Choose a plan" description="Prepaid, GST included. Plans don't renew automatically." size="xl">
-    <div class="space-y-5">
+  <UiModal v-model:open="open" title="Choose a plan" description="Prepaid, GST included. Plans don't renew automatically." size="lg">
+    <div class="space-y-4">
       <UiAlert v-if="reason" tone="info">{{ reason }}</UiAlert>
-      <div class="flex justify-center">
-        <UiSegmented
-          v-model="interval"
-          label="Billing period"
-          :options="[
-            { value: 'monthly', label: 'Monthly' },
-            { value: 'yearly', label: 'Yearly', badge: savings ? `Save ${savings}%` : undefined },
-          ]"
-        />
-      </div>
+      <IntervalToggle v-model="interval" />
       <UiAlert v-if="billing.plansError">
         {{ normalizeApiError(billing.plansError).message }}
         <template #action><UiButton size="sm" @click="billing.fetchPlans()">Retry</UiButton></template>
       </UiAlert>
-      <PlanCards :plans="billing.plans" :interval="interval" :current-code="currentCode" :loading="!billing.plansLoaded && !billing.plansError" @select="select" />
+      <PlanList
+        v-else
+        v-model="selected"
+        :plans="billing.plans"
+        :interval="interval"
+        :current-code="currentCode"
+        :used-bytes="authStore.user?.quota?.bytes_used"
+        :loading="!billing.plansLoaded"
+      />
     </div>
+    <template #footer>
+      <UiButton @click="open = false">Not now</UiButton>
+      <UiButton variant="primary" :disabled="!selectedPlan" @click="selectedPlan && goToCheckout(selectedPlan.code)">
+        {{ selectedPlan ? `Continue · ${formatMoney(priceFor(selectedPlan, interval))}` : "Continue" }}
+      </UiButton>
+    </template>
   </UiModal>
-  <CheckoutDialog v-model:open="checkoutOpen" v-model:interval="interval" :plan="chosen" />
 </template>

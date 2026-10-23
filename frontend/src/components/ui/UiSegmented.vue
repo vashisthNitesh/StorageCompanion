@@ -31,7 +31,7 @@ function onUpdate(v: unknown) {
       <ToggleGroupItem
         :value="o.value"
         :aria-label="o.hideLabel ? o.label : undefined"
-        class="inline-flex items-center gap-1.5 rounded-sm font-medium text-fg-muted transition-colors duration-fast hover:text-fg data-[state=on]:bg-surface data-[state=on]:text-fg data-[state=on]:shadow-xs"
+        class="inline-flex items-center gap-1.5 whitespace-nowrap rounded-sm font-medium text-fg-muted transition-colors duration-fast hover:text-fg data-[state=on]:bg-surface data-[state=on]:text-fg data-[state=on]:shadow-xs"
         :class="size === 'sm' ? 'h-7 px-2 text-sm' : 'h-8 px-3 text-base'"
       >
         <component :is="o.icon" v-if="o.icon" :size="16" :stroke-width="1.75" aria-hidden="true" />

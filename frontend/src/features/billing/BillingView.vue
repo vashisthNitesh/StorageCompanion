@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import { Download, Receipt, HardDrive, CloudOff } from "lucide-vue-next";
 import UiPageHeader from "../../components/ui/UiPageHeader.vue";
@@ -7,19 +7,19 @@ import UiCard from "../../components/ui/UiCard.vue";
 import UiButton from "../../components/ui/UiButton.vue";
 import UiBadge from "../../components/ui/UiBadge.vue";
 import UiProgress from "../../components/ui/UiProgress.vue";
-import UiSegmented from "../../components/ui/UiSegmented.vue";
 import UiSkeleton from "../../components/ui/UiSkeleton.vue";
 import UiEmptyState from "../../components/ui/UiEmptyState.vue";
 import UiAlert from "../../components/ui/UiAlert.vue";
-import PlanCards from "./PlanCards.vue";
+import PlanList from "./PlanList.vue";
 import CompareTable from "./CompareTable.vue";
-import CheckoutDialog from "./CheckoutDialog.vue";
+import CheckoutPanel from "./CheckoutPanel.vue";
+import IntervalToggle from "./IntervalToggle.vue";
 import { useAuthStore } from "../../stores/auth";
 import { useBillingStore, type Invoice, type Plan } from "../../stores/billing";
 import { normalizeApiError } from "../../lib/errors";
 import { reportError } from "../../lib/reportError";
 import { formatBytes, formatDate, formatMoney } from "../../lib/format";
-import { storageLabel, yearlySavingsPercent } from "./planCatalog";
+import { RECOMMENDED_CODE, storageLabel } from "./planCatalog";
 
 const route = useRoute();
 const authStore = useAuthStore();
@@ -29,8 +29,9 @@ const interval = ref<"monthly" | "yearly">("yearly");
 const loadingInvoices = ref(true);
 const invoicesError = ref<unknown>(null);
 const downloading = ref<string | null>(null);
-const checkout = ref<{ open: boolean; plan: Plan | null }>({ open: false, plan: null });
+const selectedCode = ref("");
 const pickerEl = ref<HTMLElement | null>(null);
+const checkoutEl = ref<HTMLElement | null>(null);
 
 const sub = computed(() => authStore.user?.subscription);
 const quota = computed(() => authStore.user?.quota);
@@ -40,14 +41,26 @@ const currentPlan = computed(() => billing.plans.find((p) => p.code === sub.valu
 const currentCode = computed(() => (hasPlan.value ? sub.value?.plan_code ?? null : null));
 const usedPct = computed(() => (quota.value?.bytes_limit ? Math.min(100, (quota.value.bytes_used / quota.value.bytes_limit) * 100) : 0));
 const daysLeft = computed(() => sub.value?.days_until_expiration ?? null);
-const savings = computed(() => yearlySavingsPercent(billing.plans));
+const selectedPlan = computed<Plan | null>(() => billing.plans.find((p) => p.code === selectedCode.value) ?? null);
 
-function choose(plan: Plan) {
-  checkout.value = { open: true, plan };
+/** Selects a plan and brings the order summary into view (it sits below the list on small screens). */
+async function choose(code: string) {
+  selectedCode.value = code;
+  await nextTick();
+  if (!window.matchMedia("(min-width: 1024px)").matches) checkoutEl.value?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 function extend() {
-  if (currentPlan.value) choose(currentPlan.value);
+  if (currentPlan.value) void choose(currentPlan.value.code);
 }
+
+// Arriving with ?plan=… (pricing page, plan picker, renewal banner) preselects that plan.
+function applyQuery() {
+  if (route.query.interval === "monthly" || route.query.interval === "yearly") interval.value = route.query.interval;
+  const wanted = typeof route.query.plan === "string" && billing.plans.some((p) => p.code === route.query.plan) ? route.query.plan : null;
+  if (wanted) void choose(wanted);
+  return !!wanted;
+}
+watch(() => route.query, () => billing.plansLoaded && applyQuery());
 function scrollToPlans() {
   pickerEl.value?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
@@ -86,9 +99,7 @@ onMounted(async () => {
   void loadInvoices();
   void authStore.fetchAuthConfig();
   await billing.ensurePlans();
-  // Arriving from the pricing page with ?plan=… goes straight to checkout.
-  const wanted = typeof route.query.plan === "string" ? billing.plans.find((p) => p.code === route.query.plan) : null;
-  if (wanted) choose(wanted);
+  if (!applyQuery()) selectedCode.value = currentCode.value ?? RECOMMENDED_CODE;
 });
 </script>
 
@@ -150,39 +161,35 @@ onMounted(async () => {
       <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h2 id="plans-heading" class="text-md font-semibold text-fg">{{ hasPlan ? "Change or extend your plan" : "Choose a plan" }}</h2>
-          <p class="mt-1 text-base text-fg-muted">Prices include GST. We'll ask for your state at checkout for the invoice.</p>
+          <p class="mt-1 max-w-2xl text-base text-fg-muted">Every plan is encrypted on your device, keeps original quality and has unmetered downloads. Prices include GST.</p>
         </div>
-        <UiSegmented
-          v-model="interval"
-          label="Billing period"
-          :options="[
-            { value: 'monthly', label: 'Monthly' },
-            { value: 'yearly', label: 'Yearly', badge: savings ? `Save ${savings}%` : undefined },
-          ]"
-        />
+        <IntervalToggle v-model="interval" class="shrink-0" />
       </div>
       <UiAlert v-if="billing.plansError" class="mt-5">
         {{ normalizeApiError(billing.plansError).message }}
         <template #action><UiButton size="sm" @click="billing.fetchPlans()">Retry</UiButton></template>
       </UiAlert>
-      <UiAlert v-else-if="!authStore.paymentsEnabled" tone="warning" class="mt-5">Online payments are unavailable right now. Please try again later.</UiAlert>
-      <div class="mt-5">
-        <PlanCards
-          :plans="billing.plans"
-          :interval="interval"
-          :current-code="currentCode"
-          :loading="!billing.plansLoaded && !billing.plansError"
-          :disabled="!authStore.paymentsEnabled"
-          disabled-reason="Online payments are unavailable right now"
-          @select="choose"
-        />
+      <div v-else class="mt-5 grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
+        <div>
+          <PlanList
+            v-model="selectedCode"
+            :plans="billing.plans"
+            :interval="interval"
+            :current-code="currentCode"
+            :used-bytes="quota?.bytes_used"
+            :loading="!billing.plansLoaded"
+          />
+          <details class="mt-5">
+            <summary class="inline-flex cursor-pointer select-none items-center gap-1.5 rounded text-base font-medium text-primary hover:underline">
+              Compare all features
+            </summary>
+            <div class="mt-4"><CompareTable :plans="billing.plans" :current-code="currentCode" /></div>
+          </details>
+        </div>
+        <div ref="checkoutEl" class="scroll-mt-6 lg:sticky lg:top-6">
+          <CheckoutPanel :interval="interval" :plan="selectedPlan" :used-bytes="quota?.bytes_used" />
+        </div>
       </div>
-      <details class="group mt-6">
-        <summary class="inline-flex cursor-pointer select-none items-center gap-1.5 rounded text-base font-medium text-primary hover:underline">
-          Compare all features
-        </summary>
-        <div class="mt-4"><CompareTable :plans="billing.plans" :current-code="currentCode" /></div>
-      </details>
     </section>
 
     <!-- Invoices -->
@@ -231,6 +238,5 @@ onMounted(async () => {
       </div>
     </section>
 
-    <CheckoutDialog v-model:open="checkout.open" v-model:interval="interval" :plan="checkout.plan" />
   </div>
 </template>

@@ -43,7 +43,8 @@ const googleError = ref("");
 
 function goNext() {
   const plan = typeof route.query.plan === "string" ? route.query.plan : "";
-  router.replace(plan ? { path: "/app/billing", query: { plan } } : "/app/files");
+  const interval = route.query.interval === "monthly" ? "monthly" : "yearly";
+  router.replace(plan ? { path: "/app/billing", query: { plan, interval } } : "/app/files");
 }
 
 async function submit() {

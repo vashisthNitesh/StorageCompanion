@@ -53,7 +53,7 @@ function onOpenChange(value: boolean) {
           cn(
             'fixed z-50 flex max-h-[92dvh] w-full flex-col border border-line bg-surface-raised shadow-xl focus:outline-none',
             'inset-x-0 bottom-0 rounded-t-xl data-[state=open]:animate-slide-up',
-            'sm:inset-x-auto sm:bottom-auto sm:left-1/2 sm:top-[12vh] sm:-translate-x-1/2 sm:rounded-xl sm:data-[state=open]:animate-scale-in',
+            'sm:inset-x-auto sm:bottom-auto sm:left-1/2 sm:top-[12vh] sm:max-h-[80dvh] sm:-translate-x-1/2 sm:rounded-xl sm:data-[state=open]:animate-scale-in',
             { sm: 'sm:max-w-sm', md: 'sm:max-w-md', lg: 'sm:max-w-xl', xl: 'sm:max-w-3xl' }[size]
           )
         "

@@ -1,0 +1,165 @@
+<script setup lang="ts">
+import { computed, ref, watch } from "vue";
+import { useRouter } from "vue-router";
+import { CheckCircle2, XCircle, ShieldCheck } from "lucide-vue-next";
+import UiButton from "../../components/ui/UiButton.vue";
+import UiFormField from "../../components/ui/UiFormField.vue";
+import UiSelect from "../../components/ui/UiSelect.vue";
+import UiAlert from "../../components/ui/UiAlert.vue";
+import UiSkeleton from "../../components/ui/UiSkeleton.vue";
+import { useAuthStore } from "../../stores/auth";
+import { useBillingStore, PaymentCancelled, PaymentFailed, type Plan } from "../../stores/billing";
+import { GST_STATES } from "../../lib/gstStates";
+import { formatBytes, formatDate, formatMoney } from "../../lib/format";
+import { normalizeApiError } from "../../lib/errors";
+import { actionFor, gstBreakdown, priceFor, storageLabel } from "./planCatalog";
+
+// Order summary and payment, shown inline next to the plan list. It is deliberately
+// not a dialog: Razorpay opens its own window, and a dialog underneath would trap it.
+const props = defineProps<{ plan: Plan | null; interval: "monthly" | "yearly"; usedBytes?: number }>();
+const interval = computed(() => props.interval);
+
+const router = useRouter();
+const authStore = useAuthStore();
+const billing = useBillingStore();
+
+type Phase = "idle" | "paying" | "verifying" | "success" | "failed";
+const phase = ref<Phase>("idle");
+const error = ref("");
+const stateError = ref("");
+const orderRef = ref("");
+const paidPlan = ref<Plan | null>(null);
+const paidUntil = ref("");
+const state = ref(readState());
+
+function readState() {
+  try {
+    return localStorage.getItem("sc_billing_state") || "";
+  } catch {
+    return "";
+  }
+}
+
+// A new choice starts a fresh order.
+watch(
+  () => props.plan?.code,
+  () => {
+    if (phase.value === "success" || phase.value === "failed") phase.value = "idle";
+    error.value = "";
+  }
+);
+
+const sub = computed(() => authStore.user?.subscription);
+const currentCode = computed(() => (sub.value?.has_active_subscription ? sub.value.plan_code : null));
+const action = computed(() => (props.plan ? actionFor(props.plan, currentCode.value, billing.plans) : "choose"));
+const total = computed(() => (props.plan ? priceFor(props.plan, interval.value) : 0));
+const breakdown = computed(() => gstBreakdown(total.value));
+const days = computed(() => (interval.value === "yearly" ? 365 : 30));
+const validUntil = computed(() => {
+  const now = Date.now();
+  const end = sub.value?.current_period_end ? new Date(sub.value.current_period_end).getTime() : 0;
+  const start = action.value === "extend" && end > now ? end : now;
+  return new Date(start + days.value * 86_400_000).toISOString();
+});
+const tooSmall = computed(() => !!props.plan && !!props.usedBytes && props.usedBytes > props.plan.storage_bytes);
+const busy = computed(() => phase.value === "paying" || phase.value === "verifying");
+const stateOptions = GST_STATES.map((s) => ({ value: s.code, label: s.name }));
+const heading = computed(() => ({ extend: "Extend your plan", upgrade: "Upgrade", switch: "Switch plan", choose: "Your order" })[action.value]);
+
+async function pay() {
+  if (!props.plan || busy.value) return;
+  if (!state.value) {
+    stateError.value = "Select your state so we can add the right GST to your invoice.";
+    return;
+  }
+  try {
+    localStorage.setItem("sc_billing_state", state.value);
+  } catch {}
+  phase.value = "paying";
+  error.value = "";
+  const plan = props.plan;
+  const until = validUntil.value;
+  try {
+    await billing.checkout(plan.code, interval.value, state.value, { onVerifying: () => (phase.value = "verifying") });
+    paidPlan.value = plan;
+    paidUntil.value = until;
+    phase.value = "success";
+  } catch (err) {
+    phase.value = "idle";
+    if (err instanceof PaymentCancelled) {
+      error.value = "Payment cancelled. You haven't been charged.";
+    } else if (err instanceof PaymentFailed) {
+      orderRef.value = err.orderId;
+      phase.value = "failed";
+    } else if (err instanceof Error && err.message === "razorpay_unavailable") {
+      error.value = "The payment window couldn't load. Turn off ad blockers for this site and try again.";
+    } else {
+      const n = normalizeApiError(err);
+      error.value = n.status === 503 ? "Online payments are unavailable right now. Please try again later." : n.message;
+    }
+  }
+}
+</script>
+
+<template>
+  <section class="rounded-lg border border-line bg-surface shadow-xs" aria-labelledby="checkout-heading" aria-live="polite">
+    <!-- Paid -->
+    <div v-if="phase === 'success'" class="p-5 text-center sm:p-6">
+      <CheckCircle2 :size="40" :stroke-width="1.5" class="mx-auto text-success" aria-hidden="true" />
+      <h2 id="checkout-heading" class="mt-3 text-md font-semibold text-fg">Payment complete</h2>
+      <p class="mt-1 text-base text-fg-muted">You're on {{ paidPlan?.name }} until {{ formatDate(paidUntil) }}. Your invoice is below.</p>
+      <UiButton class="mt-5" variant="primary" block @click="router.push('/app/files')">Start uploading</UiButton>
+    </div>
+
+    <!-- Declined -->
+    <div v-else-if="phase === 'failed'" class="p-5 text-center sm:p-6">
+      <XCircle :size="40" :stroke-width="1.5" class="mx-auto text-danger" aria-hidden="true" />
+      <h2 id="checkout-heading" class="mt-3 text-md font-semibold text-fg">Payment didn't go through</h2>
+      <p class="mt-1 text-base text-fg-muted">Your plan hasn't changed. Try again, or use a different payment method.</p>
+      <p v-if="orderRef" class="mt-3 text-sm text-fg-subtle">Reference: <span class="font-mono">{{ orderRef }}</span></p>
+      <UiButton class="mt-5" variant="primary" block @click="phase = 'idle'">Try again</UiButton>
+    </div>
+
+    <!-- Order summary -->
+    <form v-else novalidate class="p-5 sm:p-6" @submit.prevent="pay">
+      <h2 id="checkout-heading" class="text-md font-semibold text-fg">{{ heading }}</h2>
+
+      <div v-if="!plan" class="mt-4 space-y-3" aria-busy="true">
+        <UiSkeleton class="h-5 w-32" /><UiSkeleton class="h-4 w-full" /><UiSkeleton class="h-4 w-2/3" />
+      </div>
+      <template v-else>
+        <div class="mt-4 flex items-baseline justify-between gap-3">
+          <p class="font-medium text-fg">{{ plan.name }}</p>
+          <p class="tabular text-sm text-fg-muted">{{ storageLabel(plan.storage_bytes) }} · {{ interval === "yearly" ? "Yearly" : "Monthly" }}</p>
+        </div>
+
+        <dl class="tabular mt-5 space-y-2 text-base">
+          <div class="flex justify-between gap-3"><dt class="text-fg-muted">{{ interval === "yearly" ? "1 year" : "30 days" }}</dt><dd class="text-fg">{{ formatMoney(breakdown.base) }}</dd></div>
+          <div class="flex justify-between gap-3"><dt class="text-fg-muted">GST (18%)</dt><dd class="text-fg">{{ formatMoney(breakdown.gst) }}</dd></div>
+          <div class="flex justify-between gap-3 border-t border-line pt-3 text-md font-semibold"><dt class="text-fg">Total</dt><dd class="text-fg">{{ formatMoney(breakdown.total) }}</dd></div>
+          <div class="flex justify-between gap-3 text-sm"><dt class="text-fg-subtle">Valid until</dt><dd class="text-fg-muted">{{ formatDate(validUntil) }}</dd></div>
+        </dl>
+
+        <p v-if="action === 'extend'" class="mt-4 text-sm text-fg-muted">Adds {{ days }} days after your current plan ends.</p>
+        <UiAlert v-else-if="action === 'upgrade' || action === 'switch'" tone="info" class="mt-4">
+          Your new plan starts today. Time left on {{ sub?.plan_name }} isn't carried over.
+        </UiAlert>
+
+        <UiFormField class="mt-5" label="Your state" hint="For CGST/SGST or IGST on your invoice." :error="stateError" required>
+          <UiSelect v-model="state" :options="stateOptions" placeholder="Search for your state" @update:model-value="stateError = ''" />
+        </UiFormField>
+
+        <UiAlert v-if="tooSmall" tone="warning" class="mt-4">You're using {{ formatBytes(usedBytes) }}. Pick a plan with more space, or delete files first.</UiAlert>
+        <UiAlert v-else-if="!authStore.paymentsEnabled" tone="warning" class="mt-4">Online payments are unavailable right now. Please try again later.</UiAlert>
+        <UiAlert v-if="error" class="mt-4">{{ error }}</UiAlert>
+
+        <UiButton type="submit" class="mt-5" variant="primary" size="lg" block :loading="busy" :disabled="!authStore.paymentsEnabled || tooSmall">
+          {{ phase === "verifying" ? "Confirming payment…" : phase === "paying" ? "Opening Razorpay…" : `Pay ${formatMoney(total)}` }}
+        </UiButton>
+        <p class="mt-3 flex items-center justify-center gap-1.5 text-sm text-fg-subtle">
+          <ShieldCheck :size="14" aria-hidden="true" /> UPI, cards and net banking via Razorpay
+        </p>
+      </template>
+    </form>
+  </section>
+</template>

@@ -9,6 +9,9 @@ export const INCLUDED_IN_ALL = [
   "Search across all folders",
 ];
 
+/** Plan highlighted as the best fit for most people. */
+export const RECOMMENDED_CODE = "value";
+
 const AUDIENCE: Record<string, string> = {
   entry: "Documents, receipts and backups",
   smart: "Personal photo and video libraries",
@@ -36,13 +39,6 @@ export function yearlySavingsPercent(plans: Plan[]): number {
   return savings.length ? Math.round(Math.min(...savings) * 100) : 0;
 }
 
-/** Cumulative feature list: "Everything in <previous plan>, plus…". */
-export function planHighlights(plan: Plan, previous?: Plan): { lead?: string; items: string[] } {
-  const items = [`${storageLabel(plan.storage_bytes)} of storage`, `Files up to ${storageLabel(plan.max_file_size)} each`, `${plan.version_retention_days}-day version history`];
-  if (!previous) return { lead: "Includes:", items: [...items, ...INCLUDED_IN_ALL.slice(0, 2)] };
-  return { lead: `Everything in ${previous.name}, plus:`, items };
-}
-
 export type PlanAction = "extend" | "upgrade" | "switch" | "choose";
 
 export function actionFor(plan: Plan, currentCode: string | null | undefined, plans: Plan[]): PlanAction {
@@ -52,13 +48,6 @@ export function actionFor(plan: Plan, currentCode: string | null | undefined, pl
   if (!current) return "choose";
   return parseFloat(plan.price_monthly) > parseFloat(current.price_monthly) ? "upgrade" : "switch";
 }
-
-export const ACTION_LABEL: Record<PlanAction, string> = {
-  extend: "Extend plan",
-  upgrade: "Upgrade",
-  switch: "Switch",
-  choose: "Choose plan",
-};
 
 export const GST_RATE = 0.18;
 export function gstBreakdown(total: number) {

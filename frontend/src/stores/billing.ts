@@ -111,8 +111,15 @@ export const useBillingStore = defineStore("billing", () => {
   /**
    * Creates the server-side order, opens Razorpay and verifies the payment.
    * Throws PaymentCancelled / PaymentFailed / ApiError.
+   * Call it with no modal dialog open: a dialog's focus trap and pointer lock would
+   * make the Razorpay window unclickable.
    */
-  async function checkout(planCode: string, interval: "monthly" | "yearly", billingState: string): Promise<void> {
+  async function checkout(
+    planCode: string,
+    interval: "monthly" | "yearly",
+    billingState: string,
+    hooks: { onVerifying?: () => void } = {}
+  ): Promise<void> {
     const order = await apiRequest<{
       key_id: string;
       order_id: string;
@@ -141,6 +148,7 @@ export const useBillingStore = defineStore("billing", () => {
         theme: { color: "#2F5BEA" },
         handler: async (response: any) => {
           settled = true;
+          hooks.onVerifying?.();
           try {
             await apiRequest("/api/v1/subscription/verify", {
               method: "POST",
