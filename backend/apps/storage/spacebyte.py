@@ -206,9 +206,11 @@ class SpaceByteClient:
         size: int = 0,
         extension: str = "bin",
         part_count: int = 1,
+        sign_count: int | None = None,
     ) -> dict[str, Any]:
         """
-        Creates an S3 multipart upload session and batches presigned URLs for all parts.
+        Creates an S3 multipart upload session and presigns the first `sign_count` parts
+        (all parts when None). Later parts are signed on demand so their URLs are fresh.
         Conforms strictly to SpaceByte OpenAPI 3.0 specification:
         requires filename, mime, size, and extension.
         """
@@ -224,7 +226,8 @@ class SpaceByteClient:
         if not upload_id or not key:
             raise SpaceByteError("Invalid response from SpaceByte s3/multipart/create: missing uploadId or key")
 
-        part_numbers = list(range(1, max(1, part_count) + 1))
+        to_sign = max(1, part_count) if sign_count is None else max(1, min(part_count, sign_count))
+        part_numbers = list(range(1, to_sign + 1))
         sign_res = self._request(
             "POST",
             "s3/multipart/batch-sign-part-urls",
@@ -365,6 +368,22 @@ class SpaceByteClient:
     def move_entries(self, entry_ids: list[int], destination_id: int | None = None) -> dict:
         """Moves file entries to another folder in SpaceByte."""
         return self._request("POST", "file-entries/move", {"entryIds": entry_ids, "destinationId": destination_id})
+
+    def sign_part_urls(self, upload_id: str, key: str, part_numbers: list[int]) -> dict[int, str]:
+        """Presigns upload URLs for the given parts; returns {part_number: url}."""
+        res = self._request(
+            "POST",
+            "s3/multipart/batch-sign-part-urls",
+            {"uploadId": upload_id, "key": key, "partNumbers": part_numbers},
+        )
+        urls = {}
+        for item in res.get("urls", []):
+            if not isinstance(item, dict) or not item.get("url"):
+                continue
+            num = item.get("partNumber", item.get("part_number"))
+            if num is not None:
+                urls[int(num)] = item["url"]
+        return urls
 
     def get_download_url(self, hashes: str) -> str:
         """

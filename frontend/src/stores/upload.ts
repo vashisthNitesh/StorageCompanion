@@ -12,8 +12,15 @@ import { importFileKey, encryptChunkWithKey } from "../lib/crypto/content";
 import { uint8ArrayToHex } from "../lib/crypto/kdf";
 
 const MAX_PARALLEL_FILES = 2;
-const PARTS_PER_FILE = 3;
-const MAX_PART_ATTEMPTS = 6;
+const PARTS_PER_FILE = 4;
+/** A part that makes no progress for this long is aborted and sent again. */
+const STALL_MS = 60_000;
+/** After the last byte is sent, how long to wait for the server to confirm the part. */
+const CONFIRM_MS = 180_000;
+/** Server answers that mean "this will never work"; everything else is retried until cancelled. */
+const PERMANENT = new Set([400, 402, 403, 411, 413, 422]);
+/** A fresh session is opened at most this many times if the server lost the old one. */
+const MAX_SESSION_RESTARTS = 3;
 
 export type UploadStatus = "queued" | "encrypting" | "uploading" | "completing" | "completed" | "error" | "paused" | "cancelled";
 
@@ -88,27 +95,56 @@ function sendPart(
   return new Promise((resolve) => {
     const xhr = new XMLHttpRequest();
     abortSignal.xhr = xhr;
+    let lastActivity = Date.now();
+    let sent = false;
+    let stalled = false;
+    // Watchdog instead of a fixed timeout: slow connections are fine as long as bytes keep moving.
+    const watchdog = setInterval(() => {
+      if (Date.now() - lastActivity > (sent ? CONFIRM_MS : STALL_MS)) {
+        stalled = true;
+        xhr.abort();
+      }
+    }, 5000);
+    const finish = (result: PartResult) => {
+      clearInterval(watchdog);
+      resolve(result);
+    };
     xhr.open("POST", url, true);
-    xhr.timeout = 180_000;
     xhr.setRequestHeader("Content-Type", "application/octet-stream");
     if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
     xhr.withCredentials = true;
-    xhr.upload.onprogress = (e) => onProgress(e.loaded);
+    xhr.upload.onprogress = (e) => {
+      lastActivity = Date.now();
+      onProgress(e.loaded);
+    };
+    xhr.upload.onload = () => {
+      sent = true;
+      lastActivity = Date.now();
+    };
     xhr.onload = () => {
       let data: any;
       try {
         data = JSON.parse(xhr.responseText);
       } catch {}
-      resolve({ ok: xhr.status >= 200 && xhr.status < 300, status: xhr.status, data });
+      finish({ ok: xhr.status >= 200 && xhr.status < 300, status: xhr.status, data });
     };
-    xhr.onerror = () => resolve({ ok: false, status: 0 });
-    xhr.ontimeout = () => resolve({ ok: false, status: 408 });
-    xhr.onabort = () => resolve({ ok: false, status: -1 });
+    xhr.onerror = () => finish({ ok: false, status: 0 });
+    xhr.onabort = () => finish({ ok: false, status: stalled ? 408 : -1 });
     xhr.send(body);
   });
 }
 
+/** The server no longer has this upload session (expired or aborted); open a new one. */
+class SessionLost extends Error {}
+/** The person paused or cancelled; stop quietly. */
+class Stopped extends Error {}
+
+const isTransient = (err: unknown) =>
+  err instanceof ApiError && (err.status === 0 || err.status === 408 || err.status === 425 || err.status === 429 || err.status >= 500);
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** Exponential backoff with jitter: ~1s, 2s, 4s … capped at 30s. */
+const backoff = (attempt: number) => Math.min(30_000, 1000 * 2 ** Math.min(attempt - 1, 5)) * (0.75 + Math.random() * 0.5);
 const waitForOnline = () =>
   new Promise<void>((resolve) => {
     if (navigator.onLine) return resolve();
@@ -193,6 +229,37 @@ export const useUploadStore = defineStore("upload", () => {
     }
   }
 
+  const stopped = (item: ActiveUpload) => item.status === "paused" || item.status === "cancelled";
+
+  /** Waits `ms`, returning early (and throwing Stopped) if the upload is paused or cancelled. */
+  async function pauseAwareSleep(item: ActiveUpload, ms: number) {
+    const until = Date.now() + ms;
+    while (Date.now() < until) {
+      if (stopped(item)) throw new Stopped();
+      await sleep(Math.min(500, until - Date.now()));
+    }
+  }
+
+  /** Runs a request, retrying temporary failures (offline, timeouts, 429, 5xx) until it works or the upload is stopped. */
+  async function withRetry<T>(item: ActiveUpload, run: () => Promise<T>): Promise<T> {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await run();
+      } catch (err) {
+        if (stopped(item)) throw new Stopped();
+        if (!isTransient(err)) throw err;
+        if (!navigator.onLine) {
+          item.notice = "Waiting for connection…";
+          await waitForOnline();
+        } else {
+          item.notice = "Connection unstable. Retrying…";
+          await pauseAwareSleep(item, backoff(attempt));
+        }
+        item.notice = undefined;
+      }
+    }
+  }
+
   async function startSession(item: ActiveUpload) {
     if (!authStore.masterKey) throw new Error("vault_locked");
     item.status = "encrypting";
@@ -200,18 +267,151 @@ export const useUploadStore = defineStore("upload", () => {
     item.baseNonce = generateRandomBytes(12);
     item.wrappedFileKey = await wrapKey(authStore.masterKey, item.fileKey);
     const { ciphertextBase64, nonceHex } = await encryptName(authStore.masterKey, item.name);
-    const init = await apiRequest<{ upload_session_id: string; part_size: number; total_parts: number }>("/api/v1/uploads", {
-      method: "POST",
-      body: JSON.stringify({
-        parent_id: item.parentId,
-        node_id: item.nodeId,
-        encrypted_name: ciphertextBase64,
-        name_nonce: nonceHex,
-        size_bytes: item.file.size,
-      }),
-    });
+    const init = await withRetry(item, () =>
+      apiRequest<{ upload_session_id: string; part_size: number; total_parts: number }>("/api/v1/uploads", {
+        method: "POST",
+        body: JSON.stringify({
+          parent_id: item.parentId,
+          node_id: item.nodeId,
+          encrypted_name: ciphertextBase64,
+          name_nonce: nonceHex,
+          size_bytes: item.file.size,
+        }),
+      })
+    );
+    if (stopped(item)) throw new Stopped();
     item.session = { id: init.upload_session_id, partSize: init.part_size, totalParts: init.total_parts };
     item.doneParts = new Set();
+  }
+
+  /** Sends every remaining part, then completes the upload. */
+  async function transfer(item: ActiveUpload, controllers: { aborted: boolean; xhr?: XMLHttpRequest }[]) {
+    const isUploading = () => item.status === "uploading";
+    if (!item.session || !item.fileKey || !item.baseNonce) await startSession(item);
+    const { id: sessionId, partSize, totalParts } = item.session!;
+    const cryptoKey = await importFileKey(item.fileKey!);
+    item.status = "uploading";
+    item.errorMessage = undefined;
+
+    const inFlight = new Map<number, number>();
+    let committed = 0;
+    for (const n of item.doneParts) committed += Math.min(partSize, item.file.size - (n - 1) * partSize);
+    const samples: { t: number; bytes: number }[] = [];
+
+    const updateProgress = () => {
+      let flying = 0;
+      for (const v of inFlight.values()) flying += v;
+      const bytes = Math.min(item.file.size, committed + flying);
+      item.progress = Math.min(99, Math.round((bytes / item.file.size) * 100));
+      const now = Date.now();
+      samples.push({ t: now, bytes });
+      while (samples.length > 2 && now - samples[0].t > 5000) samples.shift();
+      const dt = (now - samples[0].t) / 1000;
+      if (dt > 0.5) {
+        item.speedMBs = Math.max(0, (bytes - samples[0].bytes) / 1048576 / dt);
+        item.etaSeconds = item.speedMBs > 0.01 ? Math.round((item.file.size - bytes) / 1048576 / item.speedMBs) : null;
+      }
+    };
+
+    const queue = Array.from({ length: totalParts }, (_, i) => i + 1).filter((n) => !item.doneParts.has(n));
+
+    const worker = async () => {
+      while (queue.length) {
+        if (!isUploading()) return;
+        const partNumber = queue.shift()!;
+        const start = (partNumber - 1) * partSize;
+        const plainLength = Math.min(partSize, item.file.size - start);
+        const encrypted = await encryptChunkWithKey(
+          cryptoKey,
+          new Uint8Array(await item.file.slice(start, start + plainLength).arrayBuffer()),
+          item.baseNonce!,
+          partNumber
+        );
+
+        // Retries until the part is stored, the upload is paused/cancelled, or the server
+        // gives a definitive "no". Waiting for the network doesn't count as an attempt.
+        for (let attempt = 1; ; ) {
+          if (!isUploading()) return;
+          if (!navigator.onLine) {
+            item.notice = "Waiting for connection…";
+            await waitForOnline();
+            item.notice = undefined;
+            continue;
+          }
+          const signal: { aborted: boolean; xhr?: XMLHttpRequest } = { aborted: false };
+          controllers.push(signal);
+          const res = await sendPart(
+            `/api/v1/uploads/${sessionId}/parts/${partNumber}`,
+            encrypted,
+            getAccessToken(),
+            (loaded) => {
+              inFlight.set(partNumber, Math.round((loaded / encrypted.length) * plainLength));
+              updateProgress();
+            },
+            signal
+          );
+          const at = controllers.indexOf(signal);
+          if (at >= 0) controllers.splice(at, 1);
+          inFlight.delete(partNumber);
+          updateProgress();
+          if (res.ok) break;
+          if (res.status === -1) return; // paused or cancelled
+          if (res.status === 401) {
+            if (!(await refreshAccessToken())) throw new ApiError("auth", 401, {}, "http", "/api/v1/uploads");
+            continue;
+          }
+          if (res.status === 404 || res.status === 409) throw new SessionLost();
+          if (PERMANENT.has(res.status)) throw new ApiError("upload", res.status, res.data ?? {}, "http", "/api/v1/uploads");
+          if (res.status === 0 && !navigator.onLine) continue;
+          item.notice = `Connection unstable. Retrying part ${partNumber}…`;
+          try {
+            await pauseAwareSleep(item, backoff(attempt++));
+          } catch {
+            return;
+          }
+          item.notice = undefined;
+        }
+
+        item.doneParts.add(partNumber);
+        committed += plainLength;
+        updateProgress();
+      }
+    };
+
+    // A session error in one lane stops the others, then propagates.
+    const lanes = Array.from({ length: Math.min(PARTS_PER_FILE, totalParts) }, worker);
+    const results = await Promise.allSettled(lanes);
+    const failure = results.find((r): r is PromiseRejectedResult => r.status === "rejected");
+    if (failure) {
+      for (const c of controllers) c.xhr?.abort();
+      throw failure.reason;
+    }
+    if (!isUploading()) return;
+
+    item.status = "completing";
+    item.etaSeconds = null;
+    // Completing is idempotent on the server, so temporary failures are retried.
+    const node = await withRetry(item, () =>
+      apiRequest<FileNode & { quota?: any }>(`/api/v1/uploads/${sessionId}/complete`, {
+        method: "POST",
+        body: JSON.stringify({ wrapped_file_key: item.wrappedFileKey, content_nonce: uint8ArrayToHex(item.baseNonce!) }),
+        timeoutMs: 180_000,
+      })
+    );
+    item.status = "completed";
+    item.progress = 100;
+    item.notice = undefined;
+    item.fileKey = undefined;
+    if (node) {
+      const { quota, ...rest } = node;
+      if (quota && authStore.user) authStore.user.quota = quota;
+      item.nodeId = rest.id;
+      filesStore.upsertUploaded({ ...rest, name: item.keepName ?? item.name });
+    }
+    setTimeout(() => {
+      uploads.value = uploads.value.filter((u) => u.id !== item.id);
+      if (!uploads.value.length) isTrayOpen.value = false;
+    }, 8000);
   }
 
   async function execute(item: ActiveUpload) {
@@ -221,129 +421,36 @@ export const useUploadStore = defineStore("upload", () => {
       pump();
       return;
     }
+    // Leave "queued" right away: pump() starts uploads synchronously and would otherwise
+    // pick the same item again before its first await (an endless loop on resume/retry).
+    item.status = item.session ? "uploading" : "encrypting";
     const controllers: { aborted: boolean; xhr?: XMLHttpRequest }[] = [];
     aborters.set(item.id, controllers);
-    const isUploading = () => item.status === "uploading";
 
     try {
-      if (!item.session || !item.fileKey || !item.baseNonce) await startSession(item);
-      const { id: sessionId, partSize, totalParts } = item.session!;
-      const cryptoKey = await importFileKey(item.fileKey!);
-      item.status = "uploading";
-      item.errorMessage = undefined;
-
-      const inFlight = new Map<number, number>();
-      let committed = 0;
-      for (const n of item.doneParts) committed += Math.min(partSize, item.file.size - (n - 1) * partSize);
-      const samples: { t: number; bytes: number }[] = [];
-
-      const updateProgress = () => {
-        let flying = 0;
-        for (const v of inFlight.values()) flying += v;
-        const bytes = Math.min(item.file.size, committed + flying);
-        item.progress = Math.min(99, Math.round((bytes / item.file.size) * 100));
-        const now = Date.now();
-        samples.push({ t: now, bytes });
-        while (samples.length > 2 && now - samples[0].t > 5000) samples.shift();
-        const dt = (now - samples[0].t) / 1000;
-        if (dt > 0.5) {
-          item.speedMBs = Math.max(0, (bytes - samples[0].bytes) / 1048576 / dt);
-          item.etaSeconds = item.speedMBs > 0.01 ? Math.round((item.file.size - bytes) / 1048576 / item.speedMBs) : null;
-        }
-      };
-
-      const queue = Array.from({ length: totalParts }, (_, i) => i + 1).filter((n) => !item.doneParts.has(n));
-
-      const worker = async () => {
-        while (queue.length) {
-          if (!isUploading()) return;
-          const partNumber = queue.shift()!;
-          const start = (partNumber - 1) * partSize;
-          const plain = new Uint8Array(await item.file.slice(start, Math.min(item.file.size, start + partSize)).arrayBuffer());
-          const encrypted = await encryptChunkWithKey(cryptoKey, plain, item.baseNonce!, partNumber);
-
-          let attempt = 1;
-          for (;;) {
-            if (!isUploading()) return;
-            if (!navigator.onLine) {
-              // Waiting for the network doesn't use up retry attempts.
-              item.notice = "Waiting for connection…";
-              await waitForOnline();
-              item.notice = undefined;
-            }
-            const signal: { aborted: boolean; xhr?: XMLHttpRequest } = { aborted: false };
-            controllers.push(signal);
-            const res = await sendPart(
-              `/api/v1/uploads/${sessionId}/parts/${partNumber}`,
-              encrypted,
-              getAccessToken(),
-              (loaded) => {
-                inFlight.set(partNumber, Math.round((loaded / encrypted.length) * plain.length));
-                updateProgress();
-              },
-              signal
-            );
-            inFlight.delete(partNumber);
-            if (res.ok) break;
-            if (res.status === -1) return; // paused or cancelled
-            if (res.status === 401) {
-              if (!(await refreshAccessToken())) throw new ApiError("auth", 401, {}, "http", "/api/v1/uploads");
-              continue;
-            }
-            if ([400, 402, 403, 404, 413].includes(res.status)) throw new ApiError("upload", res.status, res.data ?? {}, "http", "/api/v1/uploads");
-            if (res.status === 0 && !navigator.onLine) continue;
-            attempt += 1;
-            if (attempt > MAX_PART_ATTEMPTS) throw new ApiError("upload", res.status, res.data ?? {}, res.status === 0 ? "network" : "http", "/api/v1/uploads");
-            item.notice = "Reconnecting…";
-            await sleep(Math.min(15_000, 1000 * 2 ** (attempt - 2)));
-            item.notice = undefined;
-          }
-
-          item.doneParts.add(partNumber);
-          committed += plain.length;
-          updateProgress();
-        }
-      };
-
-      await Promise.all(Array.from({ length: Math.min(PARTS_PER_FILE, totalParts) }, worker));
-      if (!isUploading()) return;
-
-      item.status = "completing";
-      item.etaSeconds = null;
-      // Completing is idempotent on the server, so transient failures are retried.
-      let node: (FileNode & { quota?: any }) | undefined;
-      for (let attempt = 1; ; attempt++) {
+      for (let restarts = 0; ; restarts++) {
         try {
-          node = await apiRequest(`/api/v1/uploads/${sessionId}/complete`, {
-            method: "POST",
-            body: JSON.stringify({ wrapped_file_key: item.wrappedFileKey, content_nonce: uint8ArrayToHex(item.baseNonce!) }),
-            timeoutMs: 120_000,
-          });
+          await transfer(item, controllers);
           break;
-        } catch (err: any) {
-          const transient = !err?.status || err.status >= 500;
-          if (!transient || attempt >= 4) throw err;
-          await sleep(1500 * attempt);
+        } catch (err) {
+          // The server lost the session (expired or aborted): start over with a new one.
+          if (!(err instanceof SessionLost) || restarts >= MAX_SESSION_RESTARTS || stopped(item)) throw err;
+          item.session = undefined;
+          item.doneParts = new Set();
+          item.progress = 0;
+          item.notice = "Restarting upload…";
         }
       }
-      item.status = "completed";
-      item.progress = 100;
-      item.fileKey = undefined;
-      if (node) {
-        const { quota, ...rest } = node;
-        if (quota && authStore.user) authStore.user.quota = quota;
-        item.nodeId = rest.id;
-        filesStore.upsertUploaded({ ...rest, name: item.keepName ?? item.name });
-      }
-      setTimeout(() => {
-        uploads.value = uploads.value.filter((u) => u.id !== item.id);
-        if (!uploads.value.length) isTrayOpen.value = false;
-      }, 8000);
     } catch (err) {
-      if (item.status !== "paused" && item.status !== "cancelled") {
+      if (!(err instanceof Stopped) && !stopped(item)) {
         item.status = "error";
         item.notice = undefined;
-        item.errorMessage = err instanceof Error && err.message === "vault_locked" ? "Unlock your files, then retry." : describeFailure(err);
+        item.errorMessage =
+          err instanceof Error && err.message === "vault_locked"
+            ? "Unlock your files, then retry."
+            : err instanceof SessionLost
+              ? "The upload session expired. Retry to start it again."
+              : describeFailure(err);
       }
     } finally {
       aborters.delete(item.id);

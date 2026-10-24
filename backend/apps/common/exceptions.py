@@ -65,3 +65,13 @@ class UpstreamStorageError(APIException):
     }
     default_code = "upstream_storage_error"
 
+
+
+class IncompletePartError(APIException):
+    """The browser stopped sending a part before all its bytes arrived. Safe to retry."""
+    status_code = status.HTTP_408_REQUEST_TIMEOUT
+    default_detail = {
+        "error": "incomplete_part",
+        "message": "The connection dropped while sending this part. It will be sent again.",
+        "code": "INCOMPLETE_PART",
+    }

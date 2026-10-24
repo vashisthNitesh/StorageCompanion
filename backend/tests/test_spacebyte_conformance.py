@@ -1,3 +1,4 @@
+import io
 """SpaceByte OpenAPI conformance + large-file/purge behaviour (mock client, no network)."""
 from datetime import timedelta
 
@@ -79,8 +80,8 @@ def test_init_upload_uses_20mb_parts_and_persists_part_size(subscribed_user, set
     assert info["part_size"] == 20 * 1024 * 1024
     assert info["total_parts"] == 2
     upload = Upload.objects.get(id=info["upload_session_id"])
-    relay_upload_part(upload, 1, b"\0" * (20 * 1024 * 1024 + 16))
-    relay_upload_part(upload, 2, b"\0" * (5 * 1024 * 1024 + 16))
+    for n, size_n in ((1, 20 * 1024 * 1024 + 16), (2, 5 * 1024 * 1024 + 16)):
+        relay_upload_part(upload, n, io.BytesIO(b"\0" * size_n), size_n)
     node = complete_multipart_upload(
         info["upload_session_id"],
         subscribed_user,

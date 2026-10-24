@@ -1,5 +1,7 @@
 import logging
 import math
+import threading
+import time
 import uuid
 from datetime import timedelta
 
@@ -10,7 +12,7 @@ from django.utils import timezone
 
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 
-from apps.common.exceptions import QuotaExceededException, SubscriptionRequiredException, UpstreamStorageError
+from apps.common.exceptions import IncompletePartError, QuotaExceededException, SubscriptionRequiredException, UpstreamStorageError
 from apps.storage.models import Node, FileVersion, Upload, StorageQuota
 from apps.storage.spacebyte import SpaceByteError, get_spacebyte_client
 from apps.audit.models import AuditLog
@@ -225,6 +227,9 @@ def init_multipart_upload(
             size=size_bytes + num_parts * GCM_TAG_BYTES,
             extension="bin",
             part_count=num_parts,
+            # Signing thousands of URLs up front is slow and they would expire before
+            # the later parts are sent; the rest are signed just in time (_part_url).
+            sign_count=PART_SIGN_BATCH,
         )
     except SpaceByteError as e:
         logger.error("SpaceByte init multipart failed: %s", e)
@@ -406,70 +411,131 @@ def abort_multipart_upload(upload_id: str, user):
         upload.save(update_fields=["status"])
 
 
-http_pool = urllib3.PoolManager(
-    maxsize=10,
-    timeout=urllib3.Timeout(connect=10.0, read=120.0),
-    retries=urllib3.Retry(total=2, backoff_factor=0.5, allowed_methods=None),
+# Part uploads stream straight through to storage, so a body can't be re-sent here;
+# only connection failures (before any byte is read) are retried. The browser retries
+# everything else.
+upload_pool = urllib3.PoolManager(
+    maxsize=32,
+    blocksize=256 * 1024,
+    timeout=urllib3.Timeout(connect=10.0, read=180.0),
+    retries=urllib3.Retry(total=2, connect=2, read=0, status=0, other=0, redirect=0, backoff_factor=0.5),
 )
 
+# Presigned part URLs are signed in small batches just before use and reused for a few
+# minutes, well inside the provider's expiry.
+PART_SIGN_BATCH = 8
+PART_URL_FRESH_SECONDS = 300
+_part_urls: dict[tuple[str, int], tuple[str, float]] = {}
+_part_urls_lock = threading.Lock()
 
-def _presigned_part_url(upload: Upload, part_number: int) -> str | None:
-    for p in upload.parts if isinstance(upload.parts, list) else []:
-        if isinstance(p, dict) and p.get("part_number") == part_number:
-            return p.get("url")
+
+def _part_url(upload: Upload, part_number: int) -> str | None:
+    key = (str(upload.id), part_number)
+    now = time.monotonic()
+    with _part_urls_lock:
+        hit = _part_urls.get(key)
+    if hit and now - hit[1] < PART_URL_FRESH_SECONDS:
+        return hit[0]
+    # URLs signed when the session opened are still fresh for the first few minutes.
+    if not hit and (timezone.now() - upload.created_at).total_seconds() < PART_URL_FRESH_SECONDS:
+        for p in upload.parts if isinstance(upload.parts, list) else []:
+            if isinstance(p, dict) and p.get("part_number") == part_number and p.get("url"):
+                return p["url"]
+
+    total = part_count_for(upload.expected_size_bytes, upload.part_size)
+    numbers = list(range(part_number, min(total, part_number + PART_SIGN_BATCH - 1) + 1))
     try:
-        sign_res = get_spacebyte_client()._request(
-            "POST",
-            "s3/multipart/batch-sign-part-urls",
-            {"uploadId": upload.spacebyte_upload_id, "key": upload.spacebyte_key, "partNumbers": [part_number]},
-        )
-        urls = sign_res.get("urls", [])
-        if urls and isinstance(urls[0], dict):
-            return urls[0].get("url")
+        signed = get_spacebyte_client().sign_part_urls(upload.spacebyte_upload_id, upload.spacebyte_key, numbers)
     except Exception as e:
-        logger.warning("Failed to get SpaceByte presigned part URL: %s", e)
-    return None
+        logger.warning("Could not sign part URLs %s-%s for upload %s: %s", numbers[0], numbers[-1], upload.id, e)
+        return None
+    stamp = time.monotonic()
+    with _part_urls_lock:
+        for n, url in signed.items():
+            _part_urls[(str(upload.id), n)] = (url, stamp)
+        # Drop stale entries so the cache stays small on a long-running server.
+        if len(_part_urls) > 4096:
+            for k in [k for k, (_, t) in _part_urls.items() if stamp - t > PART_URL_FRESH_SECONDS]:
+                del _part_urls[k]
+    return signed.get(part_number)
 
 
-def relay_upload_part(upload: Upload, part_number: int, chunk_bytes: bytes) -> str:
+def _forget_part_url(upload: Upload, part_number: int):
+    with _part_urls_lock:
+        _part_urls.pop((str(upload.id), part_number), None)
+
+
+class _PartStream:
+    """File-like view of the incoming request body that counts bytes as storage reads them."""
+
+    def __init__(self, source, length: int):
+        self.source = source
+        self.remaining = length
+
+    def read(self, size: int = -1) -> bytes:
+        if self.remaining <= 0:
+            return b""
+        size = self.remaining if size is None or size < 0 else min(size, self.remaining)
+        chunk = self.source.read(min(size, 1024 * 1024))
+        if not chunk:
+            # The browser went away mid-part; abort the upstream PUT rather than send short.
+            raise IncompletePartError()
+        self.remaining -= len(chunk)
+        return chunk
+
+
+def relay_upload_part(upload: Upload, part_number: int, body, content_length: int) -> str:
     """
-    Validates an encrypted part against the declared file size, sends it to SpaceByte and
-    records its ETag and size on the upload session.
+    Streams one encrypted part from the browser to storage as it arrives (no buffering),
+    after checking its declared length against the file size, and records its ETag.
+    `body` is a readable stream of exactly `content_length` bytes.
     """
     total_parts = part_count_for(upload.expected_size_bytes, upload.part_size)
     if part_number < 1 or part_number > total_parts:
         raise ValidationError(f"Part number must be between 1 and {total_parts}.")
     expected = expected_encrypted_part_size(upload, part_number)
-    if len(chunk_bytes) != expected:
-        raise ValidationError(f"Part {part_number} must be exactly {expected} bytes (got {len(chunk_bytes)}).")
+    if content_length != expected:
+        raise ValidationError(f"Part {part_number} must be exactly {expected} bytes (got {content_length}).")
 
-    presigned_url = _presigned_part_url(upload, part_number)
-    if not presigned_url:
+    url = _part_url(upload, part_number)
+    if not url:
         raise upstream_error(f"Could not prepare storage for part {part_number}. Please retry.")
 
-    is_dev_mock = "mockSign=valid" in presigned_url and settings.DEBUG
-    if is_dev_mock:
+    stream = _PartStream(body, expected)
+    if "mockSign=valid" in url and settings.DEBUG:
+        while stream.read(1024 * 1024):
+            pass
         etag = f'"{part_number}"'
     else:
         try:
-            resp = http_pool.request(
+            resp = upload_pool.request(
                 "PUT",
-                presigned_url,
-                body=chunk_bytes,
-                headers={"Content-Type": "application/octet-stream"},
+                url,
+                body=stream,
+                headers={"Content-Type": "application/octet-stream", "Content-Length": str(expected)},
+                chunked=False,
             )
+        except IncompletePartError:
+            raise
         except Exception as e:
-            logger.error("Relay upload failed for part %s: %s", part_number, e)
+            if isinstance(getattr(e, "reason", None), IncompletePartError) or isinstance(e.__cause__, IncompletePartError):
+                raise IncompletePartError() from e
+            _forget_part_url(upload, part_number)
+            logger.error("Relay upload failed for part %s of upload %s: %s", part_number, upload.id, e)
             raise upstream_error(f"Could not send part {part_number} to storage. Please retry.") from e
         if resp.status not in (200, 201, 204):
-            logger.error("Upstream returned HTTP %s for part %s: %s", resp.status, part_number, resp.data[:200])
+            # Expired or rejected URL: sign a fresh one on the next attempt.
+            _forget_part_url(upload, part_number)
+            logger.error("Upstream returned HTTP %s for part %s of upload %s: %s", resp.status, part_number, upload.id, resp.data[:200])
             raise upstream_error(f"Storage rejected part {part_number} (HTTP {resp.status}). Please retry.")
         etag = (resp.headers.get("ETag") or "").strip()
+    if stream.remaining:
+        raise IncompletePartError()
 
     with transaction.atomic():
         locked = Upload.objects.select_for_update().get(id=upload.id)
         received = dict(locked.received_parts or {})
-        received[str(part_number)] = {"etag": etag, "size": len(chunk_bytes)}
+        received[str(part_number)] = {"etag": etag, "size": expected}
         locked.received_parts = received
         locked.save(update_fields=["received_parts"])
     return etag

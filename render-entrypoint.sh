@@ -18,11 +18,12 @@ python manage.py seed_plans
 python manage.py create_master_admin
 
 # 4. Gunicorn with threaded WSGI workers. Django views are synchronous, so threads let a
-#    slow storage transfer run without blocking every other request.
+#    slow storage transfer run without blocking every other request. Each in-flight upload
+#    part holds one thread while it streams to storage, so leave plenty for everything else.
 gunicorn config.wsgi:application \
   --bind 127.0.0.1:8000 \
   --workers "${WEB_CONCURRENCY:-1}" \
-  --threads "${GUNICORN_THREADS:-8}" \
+  --threads "${GUNICORN_THREADS:-24}" \
   --worker-class gthread \
   --timeout 300 \
   --keep-alive 65 \

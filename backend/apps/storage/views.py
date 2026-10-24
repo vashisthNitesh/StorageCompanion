@@ -2,7 +2,6 @@ import logging
 from django.http import StreamingHttpResponse
 from django.utils import timezone
 from rest_framework import status, permissions, generics
-from rest_framework.parsers import BaseParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.exceptions import NotFound, ValidationError
@@ -36,13 +35,6 @@ from apps.audit.models import AuditLog
 
 
 logger = logging.getLogger(__name__)
-
-
-class BinaryParser(BaseParser):
-    media_type = "application/octet-stream"
-
-    def parse(self, stream, media_type=None, parser_context=None):
-        return stream.read()
 
 
 class NodeListView(generics.ListCreateAPIView):
@@ -360,21 +352,28 @@ class UploadAbortView(APIView):
 
 
 class UploadPartRelayView(APIView):
+    """
+    Receives one encrypted part and streams it to storage while it arrives. The body is
+    read straight from the request stream (never parsed into memory), so large parts
+    don't use server memory and the upload to storage overlaps the browser's upload.
+    """
     permission_classes = [permissions.IsAuthenticated]
-    parser_classes = [BinaryParser]
 
     def post(self, request, upload_id, part_number):
         upload = Upload.objects.filter(id=upload_id, user=request.user).first()
         if not upload:
             raise NotFound("Upload session not found.")
         if upload.status != Upload.STATUS_UPLOADING:
-            return Response({"error": "Upload session is not active."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": "Upload session is not active.", "code": "upload_inactive"}, status=status.HTTP_409_CONFLICT)
 
-        chunk_bytes = request.data if isinstance(request.data, (bytes, bytearray)) else request.body
-        if not chunk_bytes:
-            return Response({"error": "No chunk data received."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            length = int(request.META.get("CONTENT_LENGTH") or 0)
+        except ValueError:
+            length = 0
+        if length <= 0:
+            return Response({"error": "No chunk data received."}, status=status.HTTP_411_LENGTH_REQUIRED)
 
-        etag = relay_upload_part(upload, int(part_number), bytes(chunk_bytes))
+        etag = relay_upload_part(upload, int(part_number), request._request, length)
         return Response({
             "status": "success",
             "part_number": int(part_number),
