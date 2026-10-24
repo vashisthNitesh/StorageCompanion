@@ -56,6 +56,14 @@ export function kindInfo(kind: FileKind): KindInfo {
   return KINDS[kind];
 }
 
+/** Just the icon colour from a kind's tint (no background). */
+export function kindIconColor(kind: FileKind): string {
+  return KINDS[kind].tint
+    .split(" ")
+    .filter((c) => c.startsWith("text-") || c.startsWith("dark:text-"))
+    .join(" ");
+}
+
 export type FilterKey = "all" | "folders" | "documents" | "images" | "videos" | "archives";
 
 export const FILTERS: { key: FilterKey; label: string; kinds: FileKind[] }[] = [

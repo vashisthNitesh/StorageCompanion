@@ -65,8 +65,13 @@ Inter Variable is self-hosted (`@fontsource-variable/inter`) with `cv11` and `ss
 
 ### Spacing, radius, elevation, motion
 
-- Spacing is Tailwind's 4 px scale. Page gutters are 16 / 24 / 32 px (`px-4 sm:px-6 lg:px-8`) and
-  content is capped at 1200 px.
+- Spacing is Tailwind's 4 px scale. In the app, pages use the full width beside the sidebar with
+  16 / 24 px gutters (`px-4 sm:px-6`) and a 16–20 px top margin; forms and settings cap their own
+  width (`max-w-4xl`, billing `max-w-6xl`). Marketing pages centre at `max-w-6xl`, sections
+  `py-16 sm:py-20`.
+- Motion: cards fade up on first paint (`animate-card-in`, staggered ≤ 300 ms), lift 2 px on hover,
+  and marketing sections reveal on scroll (`v-reveal`). All motion is off under
+  `prefers-reduced-motion`.
 - Radius: `rounded-sm` 4 px, `rounded` 6 px (controls), `rounded-lg` 10 px (cards, menus),
   `rounded-xl` 14 px (modals, panels).
 - Shadows: `shadow-xs` (cards, buttons), `shadow-sm`, `shadow-md` (menus, popovers), `shadow-xl`

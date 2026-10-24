@@ -27,7 +27,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="mx-auto max-w-3xl space-y-6">
+  <div class="max-w-4xl space-y-5">
     <UiPageHeader title="Security" :description="`Signed in as ${authStore.user?.email ?? ''}`" />
     <PasswordCard @changed="refreshAfterPasswordChange" />
     <TwoStepCard />

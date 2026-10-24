@@ -47,10 +47,10 @@ const sections = [
 <template>
   <div class="min-h-screen bg-canvas">
     <SiteHeader />
-    <main class="mx-auto max-w-3xl px-4 py-16 sm:px-6 sm:py-20">
+    <main class="mx-auto max-w-3xl px-4 py-12 sm:px-6 sm:py-16">
       <h1 class="text-4xl font-semibold tracking-tight text-fg">Terms & privacy</h1>
       <p class="mt-3 text-sm text-fg-subtle">Last updated October 2026</p>
-      <div class="mt-10 space-y-10">
+      <div class="mt-8 space-y-8">
         <section v-for="s in sections" :key="s.title">
           <h2 class="text-lg font-semibold text-fg">{{ s.title }}</h2>
           <p v-for="(p, i) in s.body" :key="i" class="mt-3 leading-relaxed text-fg-muted">{{ p }}</p>

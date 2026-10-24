@@ -35,11 +35,11 @@ const points = [
 <template>
   <div class="min-h-screen bg-canvas">
     <SiteHeader />
-    <main class="mx-auto max-w-3xl px-4 py-16 sm:px-6 sm:py-20">
+    <main class="mx-auto max-w-3xl px-4 py-12 sm:px-6 sm:py-16">
       <h1 class="text-4xl font-semibold tracking-tight text-fg">How we protect your files</h1>
       <p class="mt-4 text-lg text-fg-muted">SmartSpace is built so your files stay private, even from us.</p>
 
-      <ul class="mt-12 space-y-8">
+      <ul class="mt-10 space-y-6">
         <li v-for="p in points" :key="p.title" class="flex gap-4">
           <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary-soft text-primary"><component :is="p.icon" :size="20" :stroke-width="1.75" aria-hidden="true" /></span>
           <div>
@@ -49,7 +49,7 @@ const points = [
         </li>
       </ul>
 
-      <div class="mt-12 rounded-2xl border border-warning/30 bg-warning-soft p-6">
+      <div class="mt-10 rounded-2xl border border-warning/30 bg-warning-soft p-6">
         <h2 class="flex items-center gap-2 font-semibold text-fg"><AlertTriangle :size="20" class="text-warning" aria-hidden="true" /> Two things to know</h2>
         <ul class="mt-3 list-disc space-y-2 pl-5 text-base leading-relaxed text-fg">
           <li><strong>We can't reset your password.</strong> In an email account, your password is the only way to unlock your files. If you forget it, they can't be recovered.</li>

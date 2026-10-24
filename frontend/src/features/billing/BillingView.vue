@@ -104,7 +104,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="space-y-8">
+  <div class="max-w-6xl space-y-6">
     <UiPageHeader title="Plan & billing" description="Prepaid plans in INR, GST included. Plans don't renew automatically." />
 
     <!-- Current plan -->

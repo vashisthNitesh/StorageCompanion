@@ -185,8 +185,8 @@ async function signOut() {
         </template>
       </UiBanner>
 
-      <main id="main-content" ref="scrollEl" class="min-h-0 flex-1 overflow-y-auto scrollbar-thin" tabindex="-1">
-        <div class="mx-auto w-full max-w-[1200px] px-4 pb-24 pt-6 sm:px-6 sm:pt-8 lg:px-8">
+      <main id="main-content" ref="scrollEl" class="min-h-0 flex-1 overflow-y-auto scrollbar-thin focus:outline-none" tabindex="-1">
+        <div class="w-full px-4 pb-16 pt-4 sm:px-6 sm:pt-5">
           <div v-if="restoringGoogle" class="space-y-3" aria-busy="true">
             <UiSkeleton class="h-8 w-48" />
             <UiSkeleton class="h-11 w-full" />

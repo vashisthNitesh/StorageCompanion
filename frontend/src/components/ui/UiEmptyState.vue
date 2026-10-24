@@ -6,7 +6,7 @@ withDefaults(defineProps<{ icon: Component; title: string; description?: string;
 </script>
 
 <template>
-  <div class="flex flex-col items-center text-center" :class="compact ? 'px-4 py-10' : 'px-6 py-16'">
+  <div class="flex flex-col items-center text-center" :class="compact ? 'px-4 py-8' : 'px-6 py-12'">
     <span
       class="flex h-12 w-12 items-center justify-center rounded-xl ring-1 ring-inset"
       :class="{

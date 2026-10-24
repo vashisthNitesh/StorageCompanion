@@ -16,14 +16,14 @@ const rows: [string, boolean | string, boolean | string, boolean | string][] = [
 <template>
   <div class="min-h-screen bg-canvas">
     <SiteHeader />
-    <main class="mx-auto max-w-6xl px-4 py-16 sm:px-6 sm:py-20">
+    <main class="mx-auto max-w-6xl px-4 py-12 sm:px-6 sm:py-16">
       <div class="mx-auto max-w-2xl text-center">
         <h1 class="text-4xl font-semibold tracking-tight text-fg sm:text-5xl">Pricing</h1>
         <p class="mt-4 text-lg text-fg-muted">One price for storage. Downloads are always free.</p>
       </div>
-      <div class="mt-12"><PlanGrid compare /></div>
+      <div class="mt-10"><PlanGrid compare /></div>
 
-      <section class="mx-auto mt-20 max-w-4xl">
+      <section class="mx-auto mt-16 max-w-4xl">
         <h2 class="text-center text-2xl font-semibold tracking-tight text-fg">How SmartSpace compares</h2>
         <div class="relative mt-8 overflow-x-auto rounded-lg border border-line bg-surface shadow-xs">
           <table class="w-full min-w-[560px] text-left text-base">

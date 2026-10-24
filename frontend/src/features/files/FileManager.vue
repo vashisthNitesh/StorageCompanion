@@ -169,7 +169,9 @@ function onListKey(e: KeyboardEvent) {
   if (!list.length) return;
   const index = Math.max(0, list.findIndex((n) => n.id === focusedId.value));
   const grid = useGrid.value;
-  const step = grid ? Math.max(1, getComputedStyle(e.currentTarget as HTMLElement).gridTemplateColumns.split(" ").length) : 1;
+  // In the grid, up/down jump a row: count the columns of the group (folders or files) holding the focus.
+  const gridEl = grid ? document.getElementById(`row-${list[index]?.id}`)?.closest("[data-grid]") : null;
+  const step = gridEl ? Math.max(1, getComputedStyle(gridEl).gridTemplateColumns.split(" ").length) : 1;
   const move = (to: number) => {
     e.preventDefault();
     const next = list[Math.max(0, Math.min(list.length - 1, to))];
@@ -391,7 +393,7 @@ useShortcuts(() => [{ keys: "escape", handler: clearSelection }]);
         </template>
         <template v-else>
           <h1 class="sr-only">My files</h1>
-          <UiBreadcrumbs :items="crumbs" @navigate="files.navigateToCrumb" />
+          <UiBreadcrumbs class="-ml-1.5" :items="crumbs" @navigate="files.navigateToCrumb" />
         </template>
       </div>
       <div class="flex shrink-0 items-center gap-2">
@@ -404,7 +406,7 @@ useShortcuts(() => [{ keys: "escape", handler: clearSelection }]);
     </div>
 
     <!-- Toolbar -->
-    <div class="mt-5 flex flex-wrap items-center gap-2">
+    <div class="mt-4 flex flex-wrap items-center gap-2">
       <UiSelect v-model="filter" :options="typeOptions" aria-label="Filter by type" size="sm" :searchable="false" :block="false" trigger-class="min-w-[136px]" />
       <template v-if="!isRecent">
         <UiSelect
@@ -444,11 +446,10 @@ useShortcuts(() => [{ keys: "escape", handler: clearSelection }]);
     <div class="mt-4">
       <!-- Waiting for the vault / loading: skeleton of the real layout -->
       <div v-if="!authStore.masterKey || loading" aria-busy="true" aria-label="Loading files">
-        <div v-if="useGrid" class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-          <div v-for="i in 10" :key="i" class="rounded-lg border border-line bg-surface p-2">
-            <UiSkeleton class="aspect-[4/3] w-full" />
-            <UiSkeleton class="mt-3 h-3.5 w-3/4" />
-            <UiSkeleton class="mt-2 h-3 w-1/2" />
+        <div v-if="useGrid" class="grid grid-cols-2 gap-3 sm:grid-cols-[repeat(auto-fill,minmax(200px,1fr))]">
+          <div v-for="i in 12" :key="i" class="overflow-hidden rounded-xl border border-line bg-surface">
+            <UiSkeleton class="aspect-[4/3] w-full rounded-none" />
+            <div class="space-y-2 p-3"><UiSkeleton class="h-3.5 w-3/4" /><UiSkeleton class="h-3 w-1/2" /></div>
           </div>
         </div>
         <div v-else class="overflow-hidden rounded-lg border border-line bg-surface">

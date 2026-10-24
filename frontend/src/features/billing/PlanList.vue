@@ -45,7 +45,7 @@ const rows = computed(() =>
       :key="r.plan.code"
       :value="r.plan.code"
       :disabled="r.tooSmall"
-      class="group grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-3 rounded-lg border border-line bg-surface p-4 text-left transition-colors duration-fast hover:border-line-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-canvas disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:border-line data-[state=checked]:border-primary data-[state=checked]:bg-primary-soft/40 data-[state=checked]:ring-1 data-[state=checked]:ring-primary sm:p-5"
+      class="group grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-3 rounded-lg border border-line bg-surface p-4 text-left transition-colors duration-fast hover:border-line-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-canvas disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:border-line data-[state=checked]:border-primary data-[state=checked]:bg-primary-soft/40 data-[state=checked]:ring-1 data-[state=checked]:ring-primary"
     >
       <span class="mt-1 flex h-[18px] w-[18px] items-center justify-center rounded-full border-2 border-line-strong bg-surface group-data-[state=checked]:border-primary">
         <RadioGroupIndicator class="h-2 w-2 rounded-full bg-primary" />
