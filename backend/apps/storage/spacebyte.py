@@ -6,9 +6,19 @@ import urllib.parse
 import urllib.request
 import uuid
 from typing import Any
+
+import urllib3
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
+
+# API calls reuse kept-alive TLS connections instead of opening one per call (each new one costs
+# a TLS handshake: hundreds of milliseconds and noticeable CPU on a small instance). No automatic
+# retries (callers decide); redirects are still followed like urllib did.
+_api_pool = urllib3.PoolManager(
+    maxsize=16,
+    retries=urllib3.Retry(total=None, connect=0, read=0, redirect=3, status=0, other=0),
+)
 
 
 class NoAuthRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -92,48 +102,47 @@ class SpaceByteClient:
             if query_string:
                 url = f"{url}?{query_string}"
 
-        body_bytes = None
-        if data is not None:
-            body_bytes = json.dumps(data).encode("utf-8")
-
-        req = urllib.request.Request(
-            url,
-            data=body_bytes,
-            headers=self._headers(),
-            method=method.upper(),
-        )
-
+        body_bytes = json.dumps(data).encode("utf-8") if data is not None else None
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as response:
-                content = response.read().decode("utf-8")
-                return json.loads(content) if content else {}
-        except urllib.error.HTTPError as e:
-            raw_err = e.read().decode("utf-8", errors="ignore")
-            logger.error("SpaceByte API HTTPError [%s] %s: %s", e.code, url, raw_err[:300])
-            clean_message = f"SpaceByte HTTP Error {e.code}"
+            resp = _api_pool.request(
+                method.upper(),
+                url,
+                body=body_bytes,
+                headers=self._headers(),
+                timeout=urllib3.Timeout(connect=10.0, read=float(timeout)),
+            )
+        except urllib3.exceptions.HTTPError as e:
+            logger.error("SpaceByte API Connection Error: %s", str(e))
+            raise SpaceByteError(f"Failed to connect to SpaceByte: {str(e)}") from e
+
+        raw = resp.data.decode("utf-8", errors="ignore")
+        if resp.status >= 400:
+            logger.error("SpaceByte API HTTPError [%s] %s: %s", resp.status, url, raw[:300])
+            clean_message = f"SpaceByte HTTP Error {resp.status}"
             err_json = None
             try:
-                err_json = json.loads(raw_err)
+                err_json = json.loads(raw)
                 if isinstance(err_json, dict) and "message" in err_json:
                     clean_message = err_json["message"]
             except Exception:
-                if "<html" in raw_err.lower():
-                    if e.code == 403:
+                if "<html" in raw.lower():
+                    if resp.status == 403:
                         clean_message = "Upstream storage permission denied (HTTP 403): File is inaccessible or was uploaded under a different SpaceByte account."
-                    elif e.code == 404:
+                    elif resp.status == 404:
                         clean_message = "Upstream file not found on storage provider (HTTP 404)."
                     else:
-                        clean_message = f"SpaceByte upstream storage error (HTTP {e.code})."
+                        clean_message = f"SpaceByte upstream storage error (HTTP {resp.status})."
                 else:
-                    clean_message = f"SpaceByte HTTP Error {e.code}: {raw_err[:120].strip()}"
+                    clean_message = f"SpaceByte HTTP Error {resp.status}: {raw[:120].strip()}"
             raise SpaceByteError(
                 message=clean_message,
-                status_code=e.code,
+                status_code=resp.status,
                 response_body=err_json or {"message": clean_message},
-            ) from e
-        except Exception as e:
-            logger.error("SpaceByte API Connection Error: %s", str(e))
-            raise SpaceByteError(f"Failed to connect to SpaceByte: {str(e)}") from e
+            )
+        try:
+            return json.loads(raw) if raw else {}
+        except ValueError as e:
+            raise SpaceByteError("Invalid response from SpaceByte.", status_code=resp.status) from e
 
     def _mock_response(self, method: str, path: str, data: dict | None) -> dict:
         """Deterministic mock responses for test suites and offline local development."""

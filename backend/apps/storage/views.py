@@ -7,6 +7,7 @@ from rest_framework.views import APIView
 from rest_framework.exceptions import NotFound, ValidationError
 
 from apps.accounts.serializers import UserSerializer
+from apps.storage import transfers
 from apps.storage.models import Node, FileVersion, StorageQuota, Upload
 from apps.storage.serializers import (
     NodeSerializer,
@@ -253,6 +254,8 @@ class NodeContentView(APIView):
         if not node.spacebyte_hash:
             return Response({"error": "This file's content is not available."}, status=status.HTTP_404_NOT_FOUND)
 
+        if not transfers.acquire(transfers.DOWNLOAD):
+            return transfers.busy_response()
         sb_client = get_spacebyte_client()
         try:
             upstream_resp, resp_status, resp_headers = sb_client.download_stream(
@@ -261,6 +264,7 @@ class NodeContentView(APIView):
                 timeout=60,
             )
         except Exception as e:
+            transfers.release(transfers.DOWNLOAD)
             logger.warning("SpaceByte download stream failed for node %s: %s", node.id, e)
             if not sb_client.is_configured:
                 return Response(
@@ -275,23 +279,9 @@ class NodeContentView(APIView):
                 status=status.HTTP_502_BAD_GATEWAY,
             )
 
-        def _stream_generator(upstream_file, chunk_size=256 * 1024):
-            try:
-                while True:
-                    chunk = upstream_file.read(chunk_size)
-                    if not chunk:
-                        break
-                    yield chunk
-            finally:
-                close = getattr(upstream_file, "close", None)
-                if close:
-                    try:
-                        close()
-                    except Exception:
-                        pass
-
+        # The slot is held while the body streams and freed when the response closes.
         streaming_resp = StreamingHttpResponse(
-            _stream_generator(upstream_resp),
+            transfers.ReleasingStream(upstream_resp),
             status=resp_status,
             content_type="application/octet-stream",
         )
@@ -373,7 +363,12 @@ class UploadPartRelayView(APIView):
         if length <= 0:
             return Response({"error": "No chunk data received."}, status=status.HTTP_411_LENGTH_REQUIRED)
 
-        etag = relay_upload_part(upload, int(part_number), request._request, length)
+        if not transfers.acquire(transfers.UPLOAD):
+            return transfers.busy_response()
+        try:
+            etag = relay_upload_part(upload, int(part_number), request._request, length)
+        finally:
+            transfers.release(transfers.UPLOAD)
         return Response({
             "status": "success",
             "part_number": int(part_number),

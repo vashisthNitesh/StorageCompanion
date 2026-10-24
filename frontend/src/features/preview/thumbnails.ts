@@ -4,7 +4,6 @@
 // in memory and in IndexedDB, encrypted with a key derived from the vault key.
 
 import { useAuthStore } from "../../stores/auth";
-import { ApiError } from "../../lib/api";
 import { openEncryptedFile } from "../../lib/crypto/encryptedFile";
 import { createStreamUrl, ensureStreamWorker } from "../../lib/mediaStream";
 import { openPdf } from "../../lib/pdf";
@@ -232,7 +231,7 @@ async function load(node: ThumbNode, master: Uint8Array, key: string): Promise<T
       return { url: URL.createObjectURL(made.blob), duration };
     } catch (err) {
       if (err instanceof Undecodable) void idb("readwrite", (s) => s.put({ none: true } satisfies Stored, key));
-      else if (!(err instanceof ApiError)) memory.delete(key); // unexpected: allow a later retry
+      else memory.delete(key); // network, busy server, etc.: try again the next time it's shown
       return null;
     }
   });

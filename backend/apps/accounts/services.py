@@ -15,6 +15,8 @@ from django.contrib.auth.hashers import make_password, check_password
 from django.core.cache import cache
 from django.utils import timezone
 from rest_framework.exceptions import AuthenticationFailed, Throttled
+
+from apps.common import net
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, OutstandingToken
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -31,10 +33,7 @@ FAILED_AUTH_WINDOW_SECONDS = 15 * 60
 
 
 def get_client_ip(request):
-    x_forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
-    if x_forwarded_for:
-        return x_forwarded_for.split(",")[0].strip()
-    return request.META.get("REMOTE_ADDR")
+    return net.get_client_ip(request)
 
 
 # ---------------------------------------------------------------------------

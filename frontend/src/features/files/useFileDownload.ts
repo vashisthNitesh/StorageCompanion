@@ -1,6 +1,6 @@
 import { ref } from "vue";
 import { useAuthStore } from "../../stores/auth";
-import { apiRequest, apiFetch, errorFromResponse } from "../../lib/api";
+import { apiRequest, apiFetchRetrying, errorFromResponse } from "../../lib/api";
 import { unwrapKey } from "../../lib/crypto/keys";
 import { importFileKey, deriveChunkNonce } from "../../lib/crypto/content";
 import { hexToUint8Array } from "../../lib/crypto/kdf";
@@ -58,7 +58,7 @@ export function useFileDownload() {
         }
       }
 
-      const res = await apiFetch(info.download_url, { timeoutMs: 60_000 });
+      const res = await apiFetchRetrying(info.download_url, { timeoutMs: 60_000 });
       if (!res.ok) throw await errorFromResponse(res);
       if (!res.body) throw new DecryptError();
 

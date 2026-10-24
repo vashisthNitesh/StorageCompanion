@@ -23,7 +23,7 @@ python manage.py create_master_admin
 gunicorn config.wsgi:application \
   --bind 127.0.0.1:8000 \
   --workers "${WEB_CONCURRENCY:-1}" \
-  --threads "${GUNICORN_THREADS:-24}" \
+  --threads "${GUNICORN_THREADS:-32}" \
   --worker-class gthread \
   --timeout 300 \
   --keep-alive 65 \

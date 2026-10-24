@@ -7,6 +7,7 @@ from datetime import timedelta
 
 import urllib3
 from django.conf import settings
+from django.core.cache import cache
 from django.db import models, transaction
 from django.utils import timezone
 
@@ -29,16 +30,34 @@ def upstream_error(message: str) -> UpstreamStorageError:
     )
 
 
+POOL_USAGE_CACHE_SECONDS = 15
+
+
+def _pool_bytes_used() -> int:
+    """Total bytes stored by customers. Summing every quota on each upload grows with the number
+    of users, so the figure is cached briefly; the pool limit is a soft capacity guard."""
+    used = cache.get("storage-pool-used")
+    if used is None:
+        used = (
+            StorageQuota.objects.filter(user__is_staff=False, user__is_superuser=False)
+            .aggregate(total=models.Sum("bytes_used"))["total"]
+            or 0
+        )
+        cache.set("storage-pool-used", used, POOL_USAGE_CACHE_SECONDS)
+    return used
+
+
 def check_storage_pool_capacity(needed_bytes: int):
     """
-    Checks aggregate usage against the 1 TB SpaceByte testing pool.
+    Checks aggregate usage against the SpaceByte storage pool.
     Raises QuotaExceededException if the system storage pool is exhausted.
     """
-    stats = StorageQuota.get_global_pool_stats()
-    if stats["used_bytes"] + needed_bytes > stats["total_pool_bytes"]:
+    total_pool = settings.SPACEBYTE_STORAGE_POOL_LIMIT_BYTES
+    used = _pool_bytes_used()
+    if used + needed_bytes > total_pool:
         raise QuotaExceededException(
             bytes_needed=needed_bytes,
-            bytes_remaining=stats["remaining_bytes"],
+            bytes_remaining=max(0, total_pool - used),
             detail={
                 "error": "storage_pool_limit_exceeded",
                 "message": "The service is temporarily out of storage capacity. Please try again later.",
@@ -306,6 +325,10 @@ def complete_multipart_upload(
     stored_bytes = sum(expected_encrypted_part_size(upload, p["PartNumber"]) for p in relayed_parts)
     file_size = stored_bytes - len(relayed_parts) * GCM_TAG_BYTES
 
+    # Lock this person's quota row so two uploads finishing at the same moment can't both pass
+    # the check and together exceed the plan; the second waits for the first to commit.
+    StorageQuota.objects.get_or_create(user=user)
+    StorageQuota.objects.select_for_update().get(user=user)
     # Quota check again on completion with the verified size
     check_quota_available(user, file_size)
 

@@ -2,7 +2,7 @@
 // AES-GCM parts (part_size bytes of plaintext + a 16-byte tag), so any byte range
 // can be served by fetching and decrypting only the parts that cover it.
 
-import { apiFetch, apiRequest, errorFromResponse } from "../api";
+import { apiFetchRetrying, apiRequest, errorFromResponse } from "../api";
 import { unwrapKey } from "./keys";
 import { deriveChunkNonce, importFileKey } from "./content";
 import { hexToUint8Array } from "./kdf";
@@ -77,7 +77,7 @@ export async function openEncryptedFile(
 
   async function fetchWhole() {
     if (size > MAX_WHOLE_FETCH) throw new Error("range_unsupported");
-    const res = await apiFetch(info.download_url, { timeoutMs: 60_000 });
+    const res = await apiFetchRetrying(info.download_url, { timeoutMs: 60_000 });
     if (!res.ok) throw await errorFromResponse(res);
     const all = new Uint8Array(await res.arrayBuffer());
     for (let n = 1; n <= partCount; n++) {
@@ -97,7 +97,7 @@ export async function openEncryptedFile(
     const p = (async () => {
       const start = (n - 1) * encPart;
       const end = start + plainLength(n) + GCM_TAG - 1;
-      const res = await apiFetch(info.download_url, { headers: { Range: `bytes=${start}-${end}` }, timeoutMs: 60_000 });
+      const res = await apiFetchRetrying(info.download_url, { headers: { Range: `bytes=${start}-${end}` }, timeoutMs: 60_000 });
       if (res.status === 200) {
         // Storage ignored the range and sent everything.
         await res.body?.cancel();
@@ -133,7 +133,7 @@ export async function openEncryptedFile(
   }
 
   async function readAll(onProgress?: (fraction: number) => void): Promise<Blob> {
-    const res = await apiFetch(info.download_url, { timeoutMs: 60_000 });
+    const res = await apiFetchRetrying(info.download_url, { timeoutMs: 60_000 });
     if (!res.ok) throw await errorFromResponse(res);
     if (!res.body) throw new DecryptError();
     const reader = res.body.getReader();

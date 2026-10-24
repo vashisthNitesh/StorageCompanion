@@ -9,6 +9,10 @@ services:
     dockerfilePath: ./Dockerfile
     healthCheckPath: /api/v1/health
     envVars:
+      # Capacity (see docs/ARCHITECTURE.md, "Capacity"): set WEB_CONCURRENCY to about the number of
+      # CPUs on paid plans (each worker needs ~150–200 MB). GUNICORN_THREADS (default 32),
+      # UPLOAD_SLOTS / DOWNLOAD_SLOTS (default 12 each) and PASSWORD_HASH_MEMORY_MB (default 128)
+      # can be raised on larger instances.
       - key: ENVIRONMENT
         value: production
       - key: DJANGO_SETTINGS_MODULE

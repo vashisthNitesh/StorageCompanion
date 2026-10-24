@@ -83,6 +83,8 @@ interface PartResult {
   ok: boolean;
   status: number;
   data?: any;
+  /** Seconds the server asked us to wait before trying again (busy server). */
+  retryAfter?: number;
 }
 
 function sendPart(
@@ -126,7 +128,8 @@ function sendPart(
       try {
         data = JSON.parse(xhr.responseText);
       } catch {}
-      finish({ ok: xhr.status >= 200 && xhr.status < 300, status: xhr.status, data });
+      const retryAfter = Number(xhr.getResponseHeader("Retry-After")) || undefined;
+      finish({ ok: xhr.status >= 200 && xhr.status < 300, status: xhr.status, data, retryAfter });
     };
     xhr.onerror = () => finish({ ok: false, status: 0 });
     xhr.onabort = () => finish({ ok: false, status: stalled ? 408 : -1 });
@@ -363,9 +366,11 @@ export const useUploadStore = defineStore("upload", () => {
           if (res.status === 404 || res.status === 409) throw new SessionLost();
           if (PERMANENT.has(res.status)) throw new ApiError("upload", res.status, res.data ?? {}, "http", "/api/v1/uploads");
           if (res.status === 0 && !navigator.onLine) continue;
-          item.notice = `Connection unstable. Retrying part ${partNumber}…`;
+          // A busy server says when to come back; otherwise back off.
+          item.notice = res.status === 503 ? "Server busy. Waiting for a free slot…" : `Connection unstable. Retrying part ${partNumber}…`;
+          const wait = res.retryAfter ? res.retryAfter * 1000 * (0.8 + Math.random() * 0.4) : backoff(attempt++);
           try {
-            await pauseAwareSleep(item, backoff(attempt++));
+            await pauseAwareSleep(item, wait);
           } catch {
             return;
           }

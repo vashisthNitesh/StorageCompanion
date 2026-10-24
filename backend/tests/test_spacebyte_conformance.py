@@ -216,16 +216,13 @@ def test_spacebyte_html_error_sanitization(monkeypatch):
     assert exc_info.value.status_code == 403
 
     # Test _request HTML 404 handling
+    import urllib3
+    from apps.storage import spacebyte
+
     html_404_body = b"<!DOCTYPE html><html><head><title>Not Found</title></head></html>"
-    def fake_urlopen_404(*args, **kwargs):
-        raise urllib.error.HTTPError(
-            url="https://spacebyte.in/api/v1/test",
-            code=404,
-            msg="Not Found",
-            hdrs={},
-            fp=io.BytesIO(html_404_body),
-        )
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen_404)
+    monkeypatch.setattr(
+        spacebyte._api_pool, "request", lambda *a, **k: urllib3.HTTPResponse(body=html_404_body, status=404, preload_content=True)
+    )
     with pytest.raises(SpaceByteError) as exc_info_404:
         client._request("GET", "test")
     assert "Upstream file not found on storage provider (HTTP 404)" in str(exc_info_404.value)

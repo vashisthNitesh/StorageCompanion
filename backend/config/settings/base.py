@@ -31,6 +31,8 @@ env = environ.Env(
     BUSINESS_STATE_CODE=(str, ""),
     # Number of reverse proxies in front of Django (Render's edge + nginx) for client-IP throttling.
     NUM_PROXIES=(int, 0),
+    # Request header holding the real client IP (Cloudflare sets CF-Connecting-IP on Render).
+    CLIENT_IP_HEADER=(str, "HTTP_CF_CONNECTING_IP"),
 )
 
 # Read .env if present
@@ -111,22 +113,28 @@ db_host = DATABASES["default"].get("HOST", "")
 db_url = env.str("DATABASE_URL", default="")
 if "neon.tech" in db_host or "neon.tech" in db_url:
     DATABASES["default"].setdefault("OPTIONS", {})["sslmode"] = "require"
-    # Keep connections non-persistent or short-lived for Neon serverless pooler
-    DATABASES["default"]["CONN_MAX_AGE"] = env.int("CONN_MAX_AGE", default=0)
-else:
-    DATABASES["default"]["CONN_MAX_AGE"] = env.int("CONN_MAX_AGE", default=60)
+    # Neon's pooler (PgBouncer, transaction mode) can't keep server-side cursors between queries.
+    DATABASES["default"]["DISABLE_SERVER_SIDE_CURSORS"] = True
+# Reuse each thread's connection instead of a new TLS connection + login per request. Health
+# checks drop connections Neon closed while its compute was suspended before they're reused.
+DATABASES["default"]["CONN_MAX_AGE"] = env.int("CONN_MAX_AGE", default=60)
+DATABASES["default"]["CONN_HEALTH_CHECKS"] = True
 
 if DATABASES["default"]["ENGINE"].endswith("sqlite3"):
     # Local development: wait for concurrent upload writes instead of failing with "database is locked".
     DATABASES["default"].setdefault("OPTIONS", {})["timeout"] = 20
 
-# Password validation & Argon2id hasher
+# Password validation & Argon2id hasher (bounded memory; see apps/accounts/hashers.py)
 PASSWORD_HASHERS = [
-    "django.contrib.auth.hashers.Argon2PasswordHasher",
+    "apps.accounts.hashers.BoundedArgon2PasswordHasher",
     "django.contrib.auth.hashers.PBKDF2PasswordHasher",
     "django.contrib.auth.hashers.PBKDF2SHA1PasswordHasher",
     "django.contrib.auth.hashers.BCryptSHA256PasswordHasher",
 ]
+
+# Memory that password hashing may use at once per server process (new hashes need 19 MiB,
+# hashes made before the switch need 100 MiB until they're upgraded at the next sign-in).
+PASSWORD_HASH_MEMORY_MB = env.int("PASSWORD_HASH_MEMORY_MB", default=128)
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
@@ -134,6 +142,14 @@ AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
+
+CLIENT_IP_HEADER = env("CLIENT_IP_HEADER")
+
+# Upload parts and downloads running at once per server process (apps/storage/transfers.py),
+# each with its own limit, leaving 8 of gunicorn's threads for everything else.
+_TRANSFER_THREADS = max(4, env.int("GUNICORN_THREADS", default=32) - 8)
+UPLOAD_SLOTS = env.int("UPLOAD_SLOTS", default=_TRANSFER_THREADS // 2)
+DOWNLOAD_SLOTS = env.int("DOWNLOAD_SLOTS", default=_TRANSFER_THREADS - _TRANSFER_THREADS // 2)
 
 # Custom User Model
 AUTH_USER_MODEL = "accounts.User"
@@ -173,16 +189,20 @@ REST_FRAMEWORK = {
     "DEFAULT_PAGINATION_CLASS": "apps.common.pagination.StandardCursorPagination",
     "PAGE_SIZE": 50,
     "DEFAULT_THROTTLE_CLASSES": [
-        "rest_framework.throttling.AnonRateThrottle",
-        "rest_framework.throttling.UserRateThrottle",
+        "apps.common.throttles.AnonThrottle",
+        "apps.common.throttles.UserThrottle",
     ],
-    # Upload relay sends one request per 20 MB part, so the per-user budget is generous.
-    # Login, Google sign-in, refresh and MFA endpoints add a stricter "auth" scope on top.
+    # Many people can share one IP (mobile carrier NAT, offices), so per-IP limits are anti-flood
+    # backstops; the tight limits are per account (login_account) and per device (refresh).
+    # "user" is generous because every 20 MB upload part and thumbnail is a request.
     "DEFAULT_THROTTLE_RATES": {
-        "anon": "300/hour",
-        "user": "20000/day",
-        "auth": "10/minute",
-        "refresh": "60/minute",
+        "anon": "1000/hour",
+        "user": "100000/day",
+        "auth": "300/minute",
+        "register": "60/hour",
+        "login_account": "10/minute",
+        "refresh": "30/minute",
+        "refresh_ip": "600/minute",
     },
     "NUM_PROXIES": env("NUM_PROXIES") or None,
     "EXCEPTION_HANDLER": "apps.common.exceptions.custom_exception_handler",

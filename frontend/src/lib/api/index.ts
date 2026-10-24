@@ -134,6 +134,31 @@ export async function apiFetch(endpoint: string, options: ApiFetchOptions = {}):
   return response;
 }
 
+const RETRYABLE_STATUS = new Set([429, 502, 503, 504]);
+const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * apiFetch for file transfers: while the server is busy (429/503, honouring Retry-After) or
+ * briefly unreachable (502/504, network errors, timeouts) it waits and tries again, up to
+ * `attempts` times, before handing back the last response or error.
+ */
+export async function apiFetchRetrying(endpoint: string, options: ApiFetchOptions = {}, attempts = 8): Promise<Response> {
+  for (let attempt = 1; ; attempt++) {
+    let response: Response | null = null;
+    try {
+      response = await apiFetch(endpoint, options);
+    } catch (err) {
+      const transient = err instanceof ApiError && (err.reason === "network" || err.reason === "timeout");
+      if (!transient || attempt >= attempts || options.signal?.aborted) throw err;
+    }
+    if (response && (!RETRYABLE_STATUS.has(response.status) || attempt >= attempts)) return response;
+    const retryAfter = Number(response?.headers.get("Retry-After"));
+    await response?.body?.cancel().catch(() => {});
+    const wait = retryAfter > 0 ? retryAfter * 1000 : Math.min(15_000, 1000 * 2 ** (attempt - 1));
+    await pause(wait * (0.8 + Math.random() * 0.4));
+  }
+}
+
 /** Builds an ApiError from a failed response. Its message is NOT user copy; use normalizeApiError(). */
 export async function errorFromResponse(response: Response): Promise<ApiError> {
   let data: any = {};

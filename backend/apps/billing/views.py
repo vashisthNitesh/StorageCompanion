@@ -144,6 +144,7 @@ class InvoiceListView(generics.ListAPIView):
 class RazorpayWebhookView(APIView):
     permission_classes = [permissions.AllowAny]
     authentication_classes = []
+    throttle_classes = []  # signature-verified; Razorpay sends every payment's events from a few IPs
 
     def post(self, request):
         if not settings.RAZORPAY_WEBHOOK_SECRET:

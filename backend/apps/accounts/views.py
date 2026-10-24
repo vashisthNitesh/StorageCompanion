@@ -4,7 +4,7 @@ from django.contrib.auth import authenticate
 from rest_framework import status, permissions, generics
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.response import Response
-from rest_framework.throttling import ScopedRateThrottle
+from apps.common.throttles import LoginAccountThrottle, RefreshIPThrottle, RefreshSessionThrottle, ScopedIPThrottle
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.exceptions import TokenError
@@ -75,12 +75,13 @@ def resolve_login_email(identifier: str) -> str:
 
 
 class AuthThrottleMixin:
-    throttle_classes = [ScopedRateThrottle]
+    throttle_classes = [ScopedIPThrottle]
     throttle_scope = "auth"
 
 
 class RegisterView(AuthThrottleMixin, APIView):
     permission_classes = [permissions.AllowAny]
+    throttle_scope = "register"
 
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
@@ -115,6 +116,7 @@ class RegisterView(AuthThrottleMixin, APIView):
 
 class LoginView(AuthThrottleMixin, APIView):
     permission_classes = [permissions.AllowAny]
+    throttle_classes = [ScopedIPThrottle, LoginAccountThrottle]
 
     def post(self, request):
         serializer = LoginSerializer(data=request.data)
@@ -152,10 +154,11 @@ class LoginView(AuthThrottleMixin, APIView):
         return response
 
 
-class RefreshTokenView(AuthThrottleMixin, APIView):
+class RefreshTokenView(APIView):
     permission_classes = [permissions.AllowAny]
     authentication_classes = []
-    throttle_scope = "refresh"
+    # Per signed-in device, with a generous per-IP backstop (many devices can share one IP).
+    throttle_classes = [RefreshSessionThrottle, RefreshIPThrottle]
 
     def post(self, request):
         cookie_name = settings.SIMPLE_JWT["AUTH_COOKIE"]
@@ -439,6 +442,7 @@ class GoogleAuthView(AuthThrottleMixin, APIView):
 class AuthConfigView(APIView):
     permission_classes = [permissions.AllowAny]
     authentication_classes = []
+    throttle_classes = []  # static public configuration
 
     def get(self, request):
         return Response({

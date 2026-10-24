@@ -9,9 +9,7 @@ let honourRanges = true;
 const requested: string[] = [];
 let info: Record<string, unknown> = {};
 
-vi.mock("../../api", () => ({
-  apiRequest: vi.fn(async () => info),
-  apiFetch: vi.fn(async (_url: string, init: RequestInit = {}) => {
+const fakeFetch = vi.fn(async (_url: string, init: RequestInit = {}) => {
     const range = new Headers(init.headers).get("Range");
     requested.push(range ?? "full");
     if (range && honourRanges) {
@@ -19,7 +17,12 @@ vi.mock("../../api", () => ({
       return new Response(encrypted.slice(+a, +b + 1), { status: 206 });
     }
     return new Response(encrypted, { status: 200 });
-  }),
+});
+
+vi.mock("../../api", () => ({
+  apiRequest: vi.fn(async () => info),
+  apiFetch: fakeFetch,
+  apiFetchRetrying: fakeFetch,
   errorFromResponse: vi.fn(),
 }));
 
