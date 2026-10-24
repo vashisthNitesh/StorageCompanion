@@ -100,8 +100,8 @@ onMounted(load);
 </script>
 
 <template>
-  <UiCard title="Recent activity" description="Sign-ins, security changes and plan purchases on your account." :padded="false">
-    <div class="px-5 pb-5 pt-4 sm:px-6">
+  <UiCard id="activity" class="scroll-mt-6" :icon="Activity" icon-tone="neutral" title="Recent activity" description="Sign-ins, security changes, uploads and purchases." :padded="false">
+    <div class="px-5 pb-5 pt-4">
       <div v-if="loading" class="space-y-4" aria-busy="true">
         <div v-for="i in 4" :key="i" class="flex items-center gap-3"><UiSkeleton class="h-8 w-8 rounded-full" /><UiSkeleton class="h-3.5 w-48" /></div>
       </div>

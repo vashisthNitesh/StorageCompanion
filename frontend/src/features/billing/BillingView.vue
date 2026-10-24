@@ -6,7 +6,7 @@ import UiPageHeader from "../../components/ui/UiPageHeader.vue";
 import UiCard from "../../components/ui/UiCard.vue";
 import UiButton from "../../components/ui/UiButton.vue";
 import UiBadge from "../../components/ui/UiBadge.vue";
-import UiProgress from "../../components/ui/UiProgress.vue";
+import UiProgressCircle from "../../components/ui/UiProgressCircle.vue";
 import UiSkeleton from "../../components/ui/UiSkeleton.vue";
 import UiEmptyState from "../../components/ui/UiEmptyState.vue";
 import UiAlert from "../../components/ui/UiAlert.vue";
@@ -41,6 +41,12 @@ const currentPlan = computed(() => billing.plans.find((p) => p.code === sub.valu
 const currentCode = computed(() => (hasPlan.value ? sub.value?.plan_code ?? null : null));
 const usedPct = computed(() => (quota.value?.bytes_limit ? Math.min(100, (quota.value.bytes_used / quota.value.bytes_limit) * 100) : 0));
 const daysLeft = computed(() => sub.value?.days_until_expiration ?? null);
+const planStats = computed(() => [
+  { label: "Valid until", value: formatDate(sub.value?.current_period_end) },
+  { label: "Time left", value: daysLeft.value === null ? "—" : `${daysLeft.value} ${daysLeft.value === 1 ? "day" : "days"}` },
+  { label: "Storage", value: currentPlan.value ? storageLabel(currentPlan.value.storage_bytes) : "—" },
+  { label: "Largest file", value: currentPlan.value ? storageLabel(currentPlan.value.max_file_size) : "—" },
+]);
 const selectedPlan = computed<Plan | null>(() => billing.plans.find((p) => p.code === selectedCode.value) ?? null);
 
 /** Selects a plan and brings the order summary into view (it sits below the list on small screens). */
@@ -115,46 +121,57 @@ onMounted(async () => {
         <UiSkeleton class="h-4 w-64" />
       </div>
     </UiCard>
-    <UiCard v-else-if="sub?.plan_code">
-      <div class="flex flex-col gap-6 md:flex-row md:items-start md:justify-between">
-        <div class="min-w-0 flex-1">
-          <div class="flex flex-wrap items-center gap-2">
-            <h2 class="text-md font-semibold text-fg">{{ sub.plan_name }}</h2>
+    <section v-else-if="sub?.plan_code" class="relative overflow-hidden rounded-2xl border border-line bg-surface shadow-xs" aria-labelledby="current-plan">
+      <div class="pointer-events-none absolute -right-24 -top-24 h-72 w-72 rounded-full bg-primary/10 blur-3xl" aria-hidden="true" />
+      <div class="relative grid gap-6 p-5 sm:p-6 lg:grid-cols-[auto_minmax(0,1fr)_auto] lg:items-center lg:gap-8">
+        <!-- Usage ring -->
+        <div class="relative mx-auto h-32 w-32 shrink-0 lg:mx-0" :class="usedPct >= 95 ? 'text-danger' : usedPct >= 80 ? 'text-warning' : 'text-primary'">
+          <UiProgressCircle :value="Math.max(usedPct, 1.5)" :size="128" :stroke="10" label="Storage used" />
+          <div class="absolute inset-0 flex flex-col items-center justify-center text-center">
+            <span class="tabular text-2xl font-semibold text-fg">{{ usedPct < 1 ? "<1" : Math.round(usedPct) }}%</span>
+            <span class="text-xs text-fg-subtle">used</span>
+          </div>
+        </div>
+
+        <div class="min-w-0">
+          <p class="text-sm font-medium text-fg-subtle">Current plan</p>
+          <div class="mt-0.5 flex flex-wrap items-center gap-2">
+            <h2 id="current-plan" class="text-xl font-semibold tracking-tight text-fg">{{ sub.plan_name }}</h2>
             <UiBadge v-if="ended" tone="warning">Ended</UiBadge>
             <UiBadge v-else-if="daysLeft !== null && daysLeft <= 7" tone="warning">Ends soon</UiBadge>
             <UiBadge v-else tone="success" dot>Active</UiBadge>
           </div>
-          <div class="mt-4 max-w-md">
-            <UiProgress :value="usedPct" :tone="usedPct >= 95 ? 'danger' : usedPct >= 80 ? 'warning' : 'primary'" label="Storage used" />
-            <p class="tabular mt-2 text-base text-fg-muted">
-              {{ formatBytes(quota?.bytes_used) }} of {{ currentPlan ? storageLabel(currentPlan.storage_bytes) : formatBytes(quota?.bytes_limit, 0) }} used
-            </p>
-          </div>
-          <p class="tabular mt-3 text-base text-fg-muted">
-            <template v-if="ended">
-              Ended on {{ formatDate(sub.current_period_end) }}. Your files are kept until {{ formatDate(sub.grace_period_ends_at) }}; renew to upload again.
-            </template>
-            <template v-else>
-              Valid until <span class="font-medium text-fg">{{ formatDate(sub.current_period_end) }}</span>
-              <template v-if="daysLeft !== null"> · {{ daysLeft }} {{ daysLeft === 1 ? "day" : "days" }} left</template>
-            </template>
+          <p class="tabular mt-1 text-base text-fg-muted">
+            {{ formatBytes(quota?.bytes_used) }} of {{ currentPlan ? storageLabel(currentPlan.storage_bytes) : formatBytes(quota?.bytes_limit, 0) }} used
           </p>
+          <UiAlert v-if="ended" tone="warning" class="mt-3">
+            Ended on {{ formatDate(sub.current_period_end) }}. Your files are kept until {{ formatDate(sub.grace_period_ends_at) }}; renew to upload again.
+          </UiAlert>
+          <dl v-else class="tabular mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <div v-for="stat in planStats" :key="stat.label" class="rounded-lg border border-line bg-canvas/60 px-3 py-2.5">
+              <dt class="text-xs text-fg-subtle">{{ stat.label }}</dt>
+              <dd class="mt-0.5 truncate text-base font-semibold text-fg">{{ stat.value }}</dd>
+            </div>
+          </dl>
         </div>
-        <div class="flex shrink-0 gap-2">
+
+        <div class="grid grid-cols-2 gap-2 lg:w-40 lg:grid-cols-1">
           <UiButton variant="primary" :disabled="!currentPlan" @click="extend">{{ ended ? "Renew plan" : "Extend plan" }}</UiButton>
           <UiButton @click="scrollToPlans">Change plan</UiButton>
         </div>
       </div>
-    </UiCard>
-    <UiCard v-else>
-      <div class="flex flex-col gap-4 sm:flex-row sm:items-center">
-        <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-primary-soft text-primary"><HardDrive :size="20" :stroke-width="1.75" aria-hidden="true" /></span>
+    </section>
+    <section v-else class="relative overflow-hidden rounded-2xl border border-line bg-surface p-5 shadow-xs sm:p-6">
+      <div class="pointer-events-none absolute -right-24 -top-24 h-72 w-72 rounded-full bg-primary/10 blur-3xl" aria-hidden="true" />
+      <div class="relative flex flex-col gap-5 sm:flex-row sm:items-center">
+        <span class="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-primary text-primary-fg shadow-sm"><HardDrive :size="26" :stroke-width="1.75" aria-hidden="true" /></span>
         <div class="flex-1">
-          <h2 class="text-md font-semibold text-fg">No plan yet</h2>
-          <p class="text-base text-fg-muted">Pick a plan below to start uploading. Your files are encrypted on your device.</p>
+          <h2 class="text-xl font-semibold tracking-tight text-fg">Choose a plan to start uploading</h2>
+          <p class="mt-1 text-base text-fg-muted">Every plan is encrypted on your device, keeps original quality and has unmetered downloads.</p>
         </div>
+        <UiButton variant="primary" @click="scrollToPlans">See plans</UiButton>
       </div>
-    </UiCard>
+    </section>
 
     <!-- Plans -->
     <section ref="pickerEl" class="scroll-mt-6" aria-labelledby="plans-heading">
@@ -195,7 +212,7 @@ onMounted(async () => {
     <!-- Invoices -->
     <section aria-labelledby="invoices-heading">
       <h2 id="invoices-heading" class="text-md font-semibold text-fg">Invoices</h2>
-      <div class="mt-4 overflow-hidden rounded-lg border border-line bg-surface">
+      <div class="mt-3 overflow-hidden rounded-xl border border-line bg-surface shadow-xs">
         <div v-if="loadingInvoices" class="space-y-px" aria-busy="true">
           <div v-for="i in 3" :key="i" class="flex h-12 items-center gap-4 px-4"><UiSkeleton class="h-3.5 w-24" /><UiSkeleton class="h-3.5 w-32" /><UiSkeleton class="ml-auto h-3.5 w-16" /></div>
         </div>

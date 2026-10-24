@@ -64,8 +64,7 @@ async function submit() {
 </script>
 
 <template>
-  <UiCard id="password" title="Password" description="Your password also encrypts your files. Changing it doesn't re-upload anything.">
-    <template #actions><KeyRound :size="18" :stroke-width="1.75" class="hidden text-fg-subtle sm:block" aria-hidden="true" /></template>
+  <UiCard id="password" class="scroll-mt-6" :icon="KeyRound" title="Password" description="Your password also encrypts your files. Changing it doesn't re-upload anything.">
     <p v-if="isGoogleOnly" class="text-base text-fg-muted">
       You sign in with Google, so there's no SmartSpace password to change. Manage your Google account's security at
       <a href="https://myaccount.google.com/security" target="_blank" rel="noopener" class="font-medium text-primary hover:underline">myaccount.google.com</a>.

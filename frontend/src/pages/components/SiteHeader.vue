@@ -4,6 +4,7 @@ import { useRoute } from "vue-router";
 import { Menu, X } from "lucide-vue-next";
 import AppLogo from "../../components/AppLogo.vue";
 import UiButton from "../../components/ui/UiButton.vue";
+import ThemeToggle from "../../components/ThemeToggle.vue";
 import { useAuthStore } from "../../stores/auth";
 import { homeFor } from "../../router";
 
@@ -27,6 +28,7 @@ watch(() => route.fullPath, () => (open.value = false));
         <router-link v-for="l in links" :key="l.to" :to="l.to" class="hover:text-fg">{{ l.label }}</router-link>
       </nav>
       <div class="hidden items-center gap-2 md:flex">
+        <ThemeToggle />
         <UiButton v-if="authStore.isAuthenticated" variant="primary" :to="homeFor(authStore.isMasterAdmin)">
           {{ authStore.isMasterAdmin ? "Open admin console" : "Open my files" }}
         </UiButton>
@@ -35,16 +37,18 @@ watch(() => route.fullPath, () => (open.value = false));
           <UiButton variant="primary" to="/register">Get started</UiButton>
         </template>
       </div>
-      <UiButton
-        class="md:hidden"
-        variant="ghost"
-        icon-only
-        :icon="open ? X : Menu"
-        :aria-label="open ? 'Close menu' : 'Open menu'"
-        :aria-expanded="open"
-        aria-controls="mobile-nav"
-        @click="open = !open"
-      />
+      <div class="flex items-center gap-1 md:hidden">
+        <ThemeToggle />
+        <UiButton
+          variant="ghost"
+          icon-only
+          :icon="open ? X : Menu"
+          :aria-label="open ? 'Close menu' : 'Open menu'"
+          :aria-expanded="open"
+          aria-controls="mobile-nav"
+          @click="open = !open"
+        />
+      </div>
     </div>
     <div v-if="open" id="mobile-nav" class="border-t border-line bg-surface px-4 pb-5 pt-2 md:hidden">
       <nav class="flex flex-col" aria-label="Mobile">

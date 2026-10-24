@@ -1,16 +1,17 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { MoreHorizontal, Folder } from "lucide-vue-next";
+import { MoreHorizontal, Folder, Eye, Download } from "lucide-vue-next";
 import type { FileNode } from "../../stores/files";
 import UiCheckbox from "../../components/ui/UiCheckbox.vue";
 import UiButton from "../../components/ui/UiButton.vue";
 import UiDropdownMenu from "../../components/ui/UiDropdownMenu.vue";
 import UiContextMenu from "../../components/ui/UiContextMenu.vue";
 import UiProgressCircle from "../../components/ui/UiProgressCircle.vue";
+import UiTooltip from "../../components/ui/UiTooltip.vue";
 import type { MenuEntry } from "../../components/ui/menuTypes";
 import { formatBytes, formatRelative } from "../../lib/format";
 import FileThumb from "../preview/FileThumb.vue";
-import { kindIconColor, kindInfo, kindOf } from "./fileTypes";
+import { kindInfo, kindOf } from "./fileTypes";
 import { useFileDownload } from "./useFileDownload";
 
 const props = defineProps<{
@@ -31,7 +32,7 @@ const emit = defineEmits<{
 function selectForMenu(node: FileNode) {
   emit("click", node, new MouseEvent("click"));
 }
-const { isDownloading, progressOf } = useFileDownload();
+const { isDownloading, progressOf, downloadFile } = useFileDownload();
 
 // Folders sit in a compact row of tiles above the file cards, like most file managers.
 // Both groups share one listbox so keyboard navigation runs through every item.
@@ -39,7 +40,9 @@ const folders = computed(() => props.items.filter((n) => n.type === "folder"));
 const files = computed(() => props.items.filter((n) => n.type !== "folder"));
 /** Short stagger on first paint; capped so long folders don't wait. */
 const delay = (i: number) => ({ animationDelay: `${Math.min(i, 12) * 25}ms` });
-const GRID = "grid gap-3 grid-cols-2 sm:grid-cols-[repeat(auto-fill,minmax(200px,1fr))]";
+const QUICK =
+  "flex h-8 w-8 items-center justify-center rounded-full bg-surface/90 text-fg shadow-md ring-1 ring-black/5 backdrop-blur transition-colors hover:bg-surface hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary";
+const GRID = "grid gap-3 grid-cols-2 sm:grid-cols-[repeat(auto-fill,minmax(210px,1fr))] sm:gap-4";
 const FOLDER_GRID = "grid gap-2 grid-cols-1 min-[420px]:grid-cols-2 sm:grid-cols-[repeat(auto-fill,minmax(200px,1fr))] sm:gap-3";
 </script>
 
@@ -62,9 +65,9 @@ const FOLDER_GRID = "grid gap-2 grid-cols-1 min-[420px]:grid-cols-2 sm:grid-cols
             :id="`row-${node.id}`"
             role="option"
             :aria-selected="selected.has(node.id)"
-            class="group relative flex h-14 animate-card-in cursor-default select-none items-center gap-3 rounded-lg border bg-surface pl-3 pr-1 transition-[border-color,box-shadow,background-color] duration-fast"
+            class="group relative flex h-16 animate-card-in cursor-default select-none items-center gap-3 rounded-xl border bg-surface pl-2.5 pr-1 transition-[border-color,box-shadow,background-color,transform] duration-base ease-out hover:-translate-y-0.5"
             :class="[
-              selected.has(node.id) ? 'border-primary bg-primary-soft/60 ring-1 ring-primary' : 'border-line hover:border-line-strong hover:bg-canvas-subtle hover:shadow-sm',
+              selected.has(node.id) ? 'border-primary bg-primary-soft/60 ring-1 ring-primary' : 'border-line shadow-xs hover:border-line-strong hover:shadow-md',
               focusedId === node.id && !selected.has(node.id) ? 'border-line-strong' : '',
               highlightIds.has(node.id) ? 'animate-row-flash' : '',
             ]"
@@ -72,14 +75,14 @@ const FOLDER_GRID = "grid gap-2 grid-cols-1 min-[420px]:grid-cols-2 sm:grid-cols
             @click="emit('click', node, $event)"
             @dblclick="emit('open', node)"
           >
-            <span class="relative flex h-8 w-8 shrink-0 items-center justify-center">
+            <span class="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-amber-500/10 transition-colors group-hover:bg-amber-500/20">
               <Folder
-                :size="22"
+                :size="21"
                 :stroke-width="1.75"
                 class="text-amber-500 transition-opacity group-hover:opacity-0"
                 :class="{ 'opacity-0': selected.size > 0 }"
                 fill="currentColor"
-                fill-opacity="0.18"
+                fill-opacity="0.25"
                 aria-hidden="true"
               />
               <UiCheckbox
@@ -121,33 +124,52 @@ const FOLDER_GRID = "grid gap-2 grid-cols-1 min-[420px]:grid-cols-2 sm:grid-cols
             :id="`row-${node.id}`"
             role="option"
             :aria-selected="selected.has(node.id)"
-            class="group relative flex animate-card-in cursor-default select-none flex-col overflow-hidden rounded-xl border bg-surface transition-[border-color,box-shadow,transform] duration-base ease-out hover:-translate-y-0.5"
+            class="group relative flex animate-card-in cursor-default select-none flex-col rounded-2xl border bg-surface p-1.5 transition-[border-color,box-shadow,transform,background-color] duration-base ease-out hover:-translate-y-1"
             :class="[
-              selected.has(node.id) ? 'border-primary ring-2 ring-primary/70' : 'border-line hover:border-line-strong hover:shadow-md',
-              focusedId === node.id && !selected.has(node.id) ? 'border-line-strong shadow-sm' : '',
+              selected.has(node.id)
+                ? 'border-primary bg-primary-soft/40 shadow-md ring-2 ring-primary/60'
+                : 'border-line shadow-xs hover:border-line-strong hover:shadow-lg',
+              focusedId === node.id && !selected.has(node.id) ? 'border-line-strong shadow-md' : '',
               highlightIds.has(node.id) ? 'animate-row-flash' : '',
             ]"
             :style="delay(folders.length + i)"
             @click="emit('click', node, $event)"
             @dblclick="emit('open', node)"
           >
-            <div class="relative aspect-[4/3] overflow-hidden border-b border-line bg-canvas-subtle [&_img]:transition-transform [&_img]:duration-slow group-hover:[&_img]:scale-[1.04]">
+            <!-- Preview -->
+            <div class="relative aspect-[4/3] overflow-hidden rounded-xl bg-canvas-subtle [&_img]:transition-transform [&_img]:duration-slow [&_img]:ease-out group-hover:[&_img]:scale-[1.05]">
               <FileThumb :node="node" variant="card" />
-              <!-- Selection tint and checkbox -->
-              <span class="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/25 to-transparent to-40% opacity-0 transition-opacity group-hover:opacity-100" :class="{ 'opacity-100': selected.size > 0 }" aria-hidden="true" />
+              <span
+                class="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/30 via-transparent to-transparent opacity-0 transition-opacity duration-base group-hover:opacity-100"
+                :class="{ 'opacity-100': selected.has(node.id) }"
+                aria-hidden="true"
+              />
               <UiCheckbox
                 :model-value="selected.has(node.id)"
                 :aria-label="`Select ${node.name}`"
-                class="absolute left-2.5 top-2.5 rounded-sm bg-surface opacity-0 shadow-sm focus-within:opacity-100 group-hover:opacity-100"
+                class="absolute left-2 top-2 rounded-sm bg-surface opacity-0 shadow-sm transition-opacity focus-within:opacity-100 group-hover:opacity-100"
                 :class="{ '!opacity-100': selected.size > 0 }"
                 @update:model-value="emit('toggle', node)"
               />
+              <!-- Quick actions -->
+              <div class="absolute right-2 top-2 flex gap-1 opacity-0 transition-[opacity,transform] duration-base group-hover:translate-y-0 group-hover:opacity-100 max-md:hidden md:-translate-y-1 [&:has(:focus-visible)]:translate-y-0 [&:has(:focus-visible)]:opacity-100">
+                <UiTooltip content="Open">
+                  <button type="button" :class="QUICK" :aria-label="`Open ${node.name}`" @click.stop="emit('open', node)" @dblclick.stop><Eye :size="15" /></button>
+                </UiTooltip>
+                <UiTooltip content="Download">
+                  <button type="button" :class="QUICK" :aria-label="`Download ${node.name}`" @click.stop="downloadFile(node)" @dblclick.stop><Download :size="15" /></button>
+                </UiTooltip>
+              </div>
               <span v-if="isDownloading(node)" class="absolute bottom-2 right-2 rounded-full bg-surface p-1 text-primary shadow-sm" role="status" :aria-label="`Downloading ${progressOf(node)}%`">
                 <UiProgressCircle :value="progressOf(node)" :size="18" />
               </span>
             </div>
-            <div class="flex items-center gap-2 py-2 pl-3 pr-1">
-              <component :is="kindInfo(kindOf(node)).icon" :size="16" :stroke-width="1.75" class="shrink-0" :class="kindIconColor(kindOf(node))" aria-hidden="true" />
+
+            <!-- Details -->
+            <div class="flex items-center gap-2 pb-0.5 pl-1.5 pr-0.5 pt-2.5">
+              <span class="hidden h-7 w-7 shrink-0 items-center justify-center rounded-md sm:flex" :class="kindInfo(kindOf(node)).tint">
+                <component :is="kindInfo(kindOf(node)).icon" :size="15" :stroke-width="1.85" aria-hidden="true" />
+              </span>
               <div class="min-w-0 flex-1">
                 <p class="truncate text-base font-medium leading-5 text-fg">{{ node.name }}</p>
                 <p class="tabular truncate text-xs text-fg-subtle">{{ formatBytes(node.size_bytes) }} · {{ formatRelative(node.updated_at) }}</p>

@@ -135,19 +135,27 @@ async function disable() {
     disabling.value = false;
   }
 }
+defineExpose({ startSetup });
 </script>
 
 <template>
-  <UiCard id="two-step" title="Two-step verification" description="Ask for a code from an authenticator app (Google Authenticator, 1Password, Authy) every time you sign in.">
+  <UiCard
+    id="two-step"
+    class="scroll-mt-6"
+    :icon="enabled ? ShieldCheck : ShieldOff"
+    :icon-tone="enabled ? 'success' : 'warning'"
+    title="Two-step verification"
+    description="Ask for a code from an authenticator app (Google Authenticator, 1Password, Authy) every time you sign in."
+  >
     <template #actions>
       <UiBadge :tone="enabled ? 'success' : 'neutral'" :icon="enabled ? ShieldCheck : ShieldOff">{{ enabled ? "On" : "Off" }}</UiBadge>
     </template>
-    <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-      <p class="text-base text-fg-muted">
-        {{ enabled ? "You'll enter a 6-digit code after your password." : "Add a second step so a stolen password isn't enough to get in." }}
+    <div class="flex flex-col gap-3 rounded-lg border p-4 sm:flex-row sm:items-center sm:justify-between" :class="enabled ? 'border-success/25 bg-success-soft/50' : 'border-warning/30 bg-warning-soft/50'">
+      <p class="text-base" :class="enabled ? 'text-success' : 'text-warning'">
+        {{ enabled ? "On. You'll enter a 6-digit code after signing in." : "Off. A stolen password is enough to get into your account." }}
       </p>
-      <UiButton v-if="enabled" @click="disableOpen = true; disableError = ''; disableSecret = ''">Turn off</UiButton>
-      <UiButton v-else variant="primary" @click="startSetup">Set up</UiButton>
+      <UiButton v-if="enabled" class="shrink-0" @click="disableOpen = true; disableError = ''; disableSecret = ''">Turn off</UiButton>
+      <UiButton v-else variant="primary" class="shrink-0" @click="startSetup">Turn on</UiButton>
     </div>
   </UiCard>
 

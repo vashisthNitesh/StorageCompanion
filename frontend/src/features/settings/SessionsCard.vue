@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
-import { Laptop, Smartphone, LogOut } from "lucide-vue-next";
+import { computed, onMounted, ref } from "vue";
+import { Laptop, Smartphone, LogOut, MonitorSmartphone } from "lucide-vue-next";
 import UiCard from "../../components/ui/UiCard.vue";
 import UiBadge from "../../components/ui/UiBadge.vue";
 import UiButton from "../../components/ui/UiButton.vue";
@@ -71,25 +71,29 @@ async function revokeOthers() {
   if (ok) toast.success("Other devices were signed out.");
 }
 
+/** Long lists start collapsed; this device is always first. */
+const COLLAPSED = 5;
+const showAll = ref(false);
+const visible = computed(() => (showAll.value ? sessions.value : sessions.value.slice(0, COLLAPSED)));
 const isMobile = (label: string) => /iOS|Android/.test(label);
-defineExpose({ load });
+defineExpose({ load, sessions, loading });
 onMounted(load);
 </script>
 
 <template>
-  <UiCard title="Where you're signed in" description="Signing out a device takes effect immediately." :padded="false">
+  <UiCard id="devices" class="scroll-mt-6" :icon="MonitorSmartphone" title="Devices" description="Where your account is signed in right now." :padded="false">
     <template #actions>
-      <UiButton v-if="sessions.some((s) => !s.is_current)" size="sm" :icon="LogOut" @click="revokeOthers">Sign out all other devices</UiButton>
+      <UiButton v-if="sessions.some((s) => !s.is_current)" size="sm" :icon="LogOut" @click="revokeOthers">Sign out others</UiButton>
     </template>
     <div class="mt-4">
-      <div v-if="loading" class="space-y-3 px-5 pb-5 sm:px-6" aria-busy="true">
+      <div v-if="loading" class="space-y-3 px-5 pb-5" aria-busy="true">
         <UiSkeleton v-for="i in 2" :key="i" class="h-12 w-full" />
       </div>
-      <UiAlert v-else-if="error" class="mx-5 mb-5 sm:mx-6">
+      <UiAlert v-else-if="error" class="mx-5 mb-5">
         {{ error }} <template #action><UiButton size="sm" @click="load">Retry</UiButton></template>
       </UiAlert>
       <ul v-else class="divide-y divide-line border-t border-line">
-        <li v-for="s in sessions" :key="s.id" class="flex items-center gap-4 px-5 py-3.5 sm:px-6">
+        <li v-for="s in visible" :key="s.id" class="flex items-center gap-4 px-5 py-3">
           <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-canvas-subtle text-fg-muted">
             <Smartphone v-if="isMobile(s.device_label)" :size="18" :stroke-width="1.75" aria-hidden="true" />
             <Laptop v-else :size="18" :stroke-width="1.75" aria-hidden="true" />
@@ -107,6 +111,11 @@ onMounted(load);
           <UiButton v-if="!s.is_current" size="sm" variant="ghost" :loading="busy === s.id" @click="revoke(s)">Sign out</UiButton>
         </li>
       </ul>
+      <div v-if="!loading && !error && sessions.length > COLLAPSED" class="border-t border-line px-5 py-2.5">
+        <UiButton variant="ghost" size="sm" @click="showAll = !showAll">
+          {{ showAll ? "Show fewer" : `Show all ${sessions.length} devices` }}
+        </UiButton>
+      </div>
     </div>
   </UiCard>
 </template>

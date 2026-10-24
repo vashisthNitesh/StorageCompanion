@@ -6,6 +6,7 @@ import { formatDuration } from "../../lib/format";
 import { kindInfo, kindOf } from "../files/fileTypes";
 import { canThumbnail, getThumbnail, type Thumbnail } from "./thumbnails";
 import { previewKindOf } from "./previewTypes";
+import FileTypeArt from "./FileTypeArt.vue";
 
 // File icon that turns into a real thumbnail (image, video frame, PDF page) once it
 // scrolls into view and has been decrypted.
@@ -59,9 +60,10 @@ watch(
   <span
     ref="el"
     class="relative flex shrink-0 items-center justify-center overflow-hidden"
-    :class="[variant === 'card' ? 'h-full w-full' : 'h-8 w-8 rounded', shown ? 'bg-canvas-subtle' : kind.tint]"
+    :class="[variant === 'card' ? 'h-full w-full' : 'h-8 w-8 rounded', shown || variant === 'card' ? 'bg-canvas-subtle' : kind.tint]"
   >
-    <component :is="kind.icon" v-if="!shown" :size="variant === 'card' ? 36 : 18" :stroke-width="variant === 'card' ? 1.5 : 1.75" aria-hidden="true" />
+    <FileTypeArt v-if="!shown && variant === 'card'" :name="node.name" :kind="kindOf(node)" />
+    <component :is="kind.icon" v-else-if="!shown" :size="18" :stroke-width="1.75" aria-hidden="true" />
     <img
       v-if="thumb"
       :src="thumb.url"
