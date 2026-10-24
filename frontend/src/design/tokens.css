@@ -12,6 +12,9 @@
   --surface: 255 255 255;
   --surface-raised: 255 255 255;
   --surface-sunken: 246 248 251;
+  /* Neutral container for file and folder tiles (no border needed). */
+  --tile: 237 241 247;
+  --tile-hover: 228 233 242;
   --border: 226 232 240;
   --border-strong: 128 142 163;
   --text: 15 23 42;
@@ -55,6 +58,8 @@
   --surface: 17 22 32;
   --surface-raised: 25 31 44;
   --surface-sunken: 13 17 25;
+  --tile: 22 28 40;
+  --tile-hover: 30 37 52;
   --border: 37 45 60;
   --border-strong: 100 112 134;
   --text: 231 235 243;
@@ -93,6 +98,8 @@
     --surface: 17 22 32;
     --surface-raised: 25 31 44;
     --surface-sunken: 13 17 25;
+    --tile: 22 28 40;
+    --tile-hover: 30 37 52;
     --border: 37 45 60;
     --border-strong: 100 112 134;
     --text: 231 235 243;

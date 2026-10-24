@@ -172,6 +172,15 @@ Inter Variable is self-hosted (`@fontsource-variable/inter`) with `cv11` and `ss
 - `OfflineBanner` sits above everything when the browser is offline. Uploads pause and resume
   automatically.
 
+### File grid
+
+- Files and folders are neutral `bg-tile` tiles with no border; hover deepens to `tile-hover`,
+  selection is `primary-soft` with a thin primary ring, keyboard focus a 2 px ring.
+- A file tile is a header (type icon in its colour, which becomes the checkbox on hover or while
+  anything is selected; the name; a menu), an inset 4:3 preview, and a footer (type · size, date).
+- Files without a thumbnail show `FileGlyph`: a page with a folded corner, the type icon and a
+  solid badge with the extension. No gradients or decorative art behind previews.
+
 ### File viewer and thumbnails
 
 Files are end-to-end encrypted, so everything is decrypted in the browser.

@@ -45,7 +45,7 @@ watch(
 <template>
   <UiDrawer v-model:open="open" :title="node?.name ?? ''" :description="node ? kindInfo(kindOf(node)).label : ''">
     <div v-if="node" class="space-y-6">
-      <div class="aspect-[16/9] overflow-hidden rounded-lg">
+      <div class="aspect-[16/9] overflow-hidden rounded-lg bg-canvas-subtle">
         <FileThumb :node="node" variant="card" />
       </div>
 

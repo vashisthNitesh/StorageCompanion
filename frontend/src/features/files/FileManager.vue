@@ -446,10 +446,11 @@ useShortcuts(() => [{ keys: "escape", handler: clearSelection }]);
     <div class="mt-4">
       <!-- Waiting for the vault / loading: skeleton of the real layout -->
       <div v-if="!authStore.masterKey || loading" aria-busy="true" aria-label="Loading files">
-        <div v-if="useGrid" class="grid grid-cols-2 gap-3 sm:grid-cols-[repeat(auto-fill,minmax(200px,1fr))]">
-          <div v-for="i in 12" :key="i" class="overflow-hidden rounded-xl border border-line bg-surface">
-            <UiSkeleton class="aspect-[4/3] w-full rounded-none" />
-            <div class="space-y-2 p-3"><UiSkeleton class="h-3.5 w-3/4" /><UiSkeleton class="h-3 w-1/2" /></div>
+        <div v-if="useGrid" class="grid grid-cols-2 gap-3 sm:grid-cols-[repeat(auto-fill,minmax(210px,1fr))] sm:gap-4">
+          <div v-for="i in 12" :key="i" class="rounded-xl bg-tile px-1.5 pb-1.5">
+            <div class="flex h-11 items-center gap-2.5 pl-2"><UiSkeleton class="h-4 w-4" /><UiSkeleton class="h-3.5 w-2/3" /></div>
+            <UiSkeleton class="aspect-[4/3] w-full rounded-lg" />
+            <div class="flex justify-between px-1.5 pt-2.5"><UiSkeleton class="h-3 w-1/3" /><UiSkeleton class="h-3 w-1/5" /></div>
           </div>
         </div>
         <div v-else class="overflow-hidden rounded-lg border border-line bg-surface">

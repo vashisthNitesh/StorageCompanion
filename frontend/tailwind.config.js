@@ -36,6 +36,7 @@ export default {
         canvas: { DEFAULT: token("bg"), subtle: token("bg-subtle") },
         surface: { DEFAULT: token("surface"), raised: token("surface-raised"), sunken: token("surface-sunken") },
         line: { DEFAULT: token("border"), strong: token("border-strong") },
+        tile: { DEFAULT: token("tile"), hover: token("tile-hover") },
         fg: { DEFAULT: token("text"), muted: token("text-muted"), subtle: token("text-subtle") },
         overlay: token("overlay"),
         primary: {

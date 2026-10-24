@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Folder, Clock, Trash2, Upload, Lock, Play, FileText, Image as ImageIcon, Film, CheckCircle2, Search } from "lucide-vue-next";
+import { Folder, Clock, Trash2, Upload, Lock, Play, FileText, Image as ImageIcon, Film, Check, Search } from "lucide-vue-next";
 
 // Decorative product preview for the landing page (hidden from assistive tech).
 // "Photos" are CSS gradients so the page ships no image assets.
@@ -56,7 +56,7 @@ const ART: Record<string, string> = {
           </div>
 
           <div class="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
-            <span v-for="f in ['Ceremony', 'Reception', 'Haldi']" :key="f" class="flex items-center gap-2 rounded-lg border border-line bg-surface px-2.5 py-2 text-xs font-medium text-fg last:hidden sm:last:flex">
+            <span v-for="f in ['Ceremony', 'Reception', 'Haldi']" :key="f" class="flex items-center gap-2 rounded-lg bg-tile px-2.5 py-2 text-xs font-medium text-fg last:hidden sm:last:flex">
               <Folder :size="15" class="shrink-0 text-amber-500" fill="currentColor" fill-opacity="0.2" /> {{ f }}
             </span>
           </div>
@@ -65,31 +65,36 @@ const ART: Record<string, string> = {
             <div
               v-for="(f, i) in files"
               :key="f.name"
-              class="overflow-hidden rounded-xl border bg-surface shadow-xs"
-              :class="[i === 1 ? 'border-primary ring-2 ring-primary/60' : 'border-line', i > 3 ? 'hidden sm:block' : '']"
+              class="rounded-xl px-1 pb-1"
+              :class="[i === 1 ? 'bg-primary-soft ring-1 ring-primary/40' : 'bg-tile', i > 3 ? 'hidden sm:block' : '']"
             >
-              <div class="relative aspect-[4/3] overflow-hidden">
+              <div class="flex items-center gap-1.5 px-1 py-1.5">
+                <span v-if="i === 1" class="flex h-3 w-3 shrink-0 items-center justify-center rounded-[3px] bg-primary text-primary-fg"><Check :size="8" :stroke-width="3" /></span>
+                <component
+                  :is="f.kind === 'pdf' ? FileText : f.kind === 'video' ? Film : ImageIcon"
+                  v-else
+                  :size="12"
+                  class="shrink-0"
+                  :class="f.kind === 'pdf' ? 'text-red-600' : f.kind === 'video' ? 'text-violet-600' : 'text-emerald-600'"
+                />
+                <p class="truncate text-[11px] font-medium text-fg">{{ f.name }}</p>
+              </div>
+              <div class="relative aspect-[4/3] overflow-hidden rounded-md bg-surface-sunken">
                 <div v-if="f.kind !== 'pdf'" class="absolute inset-0" :style="{ background: ART[f.art!] }">
                   <!-- hills -->
                   <div class="absolute inset-x-0 bottom-0 h-1/2 bg-black/25 [clip-path:polygon(0_60%,22%_25%,40%_55%,62%_10%,82%_45%,100%_20%,100%_100%,0_100%)]" />
                 </div>
-                <div v-else class="absolute inset-0 flex justify-center bg-canvas-subtle pt-3">
+                <div v-else class="absolute inset-0 flex justify-center pt-2.5">
                   <div class="w-3/5 space-y-1.5 rounded-sm bg-white p-2 shadow-sm">
                     <div class="h-1.5 w-1/2 rounded bg-slate-300" />
                     <div v-for="n in 5" :key="n" class="h-1 rounded bg-slate-200" :class="n === 5 ? 'w-2/3' : ''" />
                   </div>
                 </div>
-                <span v-if="f.kind === 'video'" class="absolute bottom-1.5 left-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-white"><Play :size="9" fill="currentColor" class="ml-px" /></span>
-                <span v-if="f.kind === 'video'" class="absolute bottom-1.5 right-1.5 rounded bg-black/60 px-1 text-[10px] font-medium text-white">{{ f.duration }}</span>
-                <span v-if="i === 1" class="absolute left-1.5 top-1.5 flex h-4 w-4 items-center justify-center rounded-[4px] bg-primary text-primary-fg"><CheckCircle2 :size="10" /></span>
+                <span v-if="f.kind === 'video'" class="absolute bottom-1 left-1 flex items-center gap-0.5 rounded-full bg-black/55 py-px pl-1 pr-1.5 text-[9px] font-medium text-white">
+                  <Play :size="7" fill="currentColor" /> {{ f.duration }}
+                </span>
               </div>
-              <div class="flex items-center gap-1.5 px-2 py-1.5">
-                <component :is="f.kind === 'pdf' ? FileText : f.kind === 'video' ? Film : ImageIcon" :size="12" class="shrink-0" :class="f.kind === 'pdf' ? 'text-rose-500' : f.kind === 'video' ? 'text-violet-500' : 'text-emerald-600'" />
-                <div class="min-w-0">
-                  <p class="truncate text-[11px] font-medium text-fg">{{ f.name }}</p>
-                  <p class="text-[10px] text-fg-subtle">{{ f.meta }}</p>
-                </div>
-              </div>
+              <p class="px-1 pt-1 text-[10px] text-fg-subtle">{{ f.meta }}</p>
             </div>
           </div>
         </div>

@@ -6,7 +6,7 @@ import { formatDuration } from "../../lib/format";
 import { kindInfo, kindOf } from "../files/fileTypes";
 import { canThumbnail, getThumbnail, type Thumbnail } from "./thumbnails";
 import { previewKindOf } from "./previewTypes";
-import FileTypeArt from "./FileTypeArt.vue";
+import FileGlyph from "./FileGlyph.vue";
 
 // File icon that turns into a real thumbnail (image, video frame, PDF page) once it
 // scrolls into view and has been decrypted.
@@ -60,28 +60,30 @@ watch(
   <span
     ref="el"
     class="relative flex shrink-0 items-center justify-center overflow-hidden"
-    :class="[variant === 'card' ? 'h-full w-full' : 'h-8 w-8 rounded', shown || variant === 'card' ? 'bg-canvas-subtle' : kind.tint]"
+    :class="variant === 'card' ? 'h-full w-full' : ['h-8 w-8 rounded', shown ? 'bg-canvas-subtle' : kind.tint]"
   >
-    <FileTypeArt v-if="!shown && variant === 'card'" :name="node.name" :kind="kindOf(node)" />
+    <span v-if="!shown && variant === 'card'" class="flex h-[60%] max-h-32 items-center justify-center transition-transform duration-slow ease-out group-hover:scale-[1.04]">
+      <FileGlyph :name="node.name" :kind="kindOf(node)" />
+    </span>
     <component :is="kind.icon" v-else-if="!shown" :size="18" :stroke-width="1.75" aria-hidden="true" />
     <img
       v-if="thumb"
       :src="thumb.url"
       alt=""
       draggable="false"
-      class="absolute inset-0 h-full w-full object-cover transition-opacity duration-base"
-      :class="shown ? 'opacity-100' : 'opacity-0'"
+      class="absolute inset-0 h-full w-full object-cover transition-[opacity,transform] duration-slow ease-out"
+      :class="[shown ? 'opacity-100' : 'opacity-0', variant === 'card' ? 'group-hover:scale-[1.03]' : '']"
       @load="shown = true"
       @error="thumb = null"
     />
-    <template v-if="isVideo && shown && variant === 'card'">
-      <span class="absolute bottom-2 left-2 flex h-7 w-7 items-center justify-center rounded-full bg-black/60 text-white" aria-hidden="true">
-        <Play :size="13" fill="currentColor" class="ml-0.5" />
-      </span>
-      <span v-if="thumb?.duration" class="tabular absolute bottom-2 right-2 rounded bg-black/60 px-1.5 py-0.5 text-xs font-medium text-white">
-        {{ formatDuration(thumb.duration) }}
-      </span>
-    </template>
+    <span
+      v-if="isVideo && shown && variant === 'card'"
+      class="tabular absolute bottom-2 left-2 flex items-center gap-1 rounded-full bg-black/55 py-0.5 pl-1.5 pr-2 text-[11px] font-medium text-white backdrop-blur-sm"
+      aria-hidden="true"
+    >
+      <Play :size="10" fill="currentColor" />
+      {{ thumb?.duration ? formatDuration(thumb.duration) : "Video" }}
+    </span>
     <span v-else-if="isVideo && shown" class="absolute inset-0 flex items-center justify-center bg-black/25 text-white" aria-hidden="true">
       <Play :size="12" fill="currentColor" />
     </span>
