@@ -13,6 +13,8 @@ import { uint8ArrayToHex } from "../lib/crypto/kdf";
 
 const MAX_PARALLEL_FILES = 2;
 const PARTS_PER_FILE = 4;
+/** On pause, parts already uploading get this long to finish before they're dropped. */
+const PAUSE_GRACE_MS = 10_000;
 /** A part that makes no progress for this long is aborted and sent again. */
 const STALL_MS = 60_000;
 /** After the last byte is sent, how long to wait for the server to confirm the part. */
@@ -68,6 +70,8 @@ export interface ActiveUpload {
   baseNonce?: Uint8Array;
   wrappedFileKey?: string;
   doneParts: Set<number>;
+  /** Bumped on resume so workers from before a pause stop picking up new parts. */
+  generation: number;
 }
 
 export interface UploadRequest {
@@ -289,7 +293,8 @@ export const useUploadStore = defineStore("upload", () => {
 
   /** Sends every remaining part, then completes the upload. */
   async function transfer(item: ActiveUpload, controllers: { aborted: boolean; xhr?: XMLHttpRequest }[]) {
-    const isUploading = () => item.status === "uploading";
+    const generation = item.generation;
+    const isUploading = () => item.status === "uploading" && item.generation === generation;
     if (!item.session || !item.fileKey || !item.baseNonce) await startSession(item);
     const { id: sessionId, partSize, totalParts } = item.session!;
     const cryptoKey = await importFileKey(item.fileKey!);
@@ -458,7 +463,9 @@ export const useUploadStore = defineStore("upload", () => {
               : describeFailure(err);
       }
     } finally {
-      aborters.delete(item.id);
+      // A resumed run may already have registered its own transfers under this id.
+      if (aborters.get(item.id) === controllers) aborters.delete(item.id);
+      if ((item.status as UploadStatus) === "paused") item.notice = undefined;
       pump();
     }
   }
@@ -485,6 +492,7 @@ export const useUploadStore = defineStore("upload", () => {
           nodeId: r.nodeId,
           keepName: r.keepName,
           doneParts: new Set(),
+          generation: 0,
         })
       );
     }
@@ -505,6 +513,10 @@ export const useUploadStore = defineStore("upload", () => {
     if (!item || (item.status !== "error" && item.status !== "paused")) return;
     const batch = batches.value.find((b) => b.id === item.batchId);
     if (batch) batch.notified = false;
+    // Take over from a pause that is still letting its last parts finish.
+    item.generation += 1;
+    stopTransfers(id);
+    item.notice = undefined;
     item.status = "queued";
     item.errorMessage = undefined;
     pump();
@@ -524,9 +536,14 @@ export const useUploadStore = defineStore("upload", () => {
   function pauseUpload(id: string) {
     const item = uploads.value.find((u) => u.id === id);
     if (item && (item.status === "uploading" || item.status === "queued")) {
+      // Stop starting new parts, but give parts already on their way a few seconds to finish so
+      // their progress is kept (a part can only be stored whole).
       item.status = "paused";
       item.etaSeconds = null;
-      stopTransfers(id);
+      if ((aborters.get(id) ?? []).length) {
+        item.notice = "Saving pieces in progress…";
+        setTimeout(() => item.status === "paused" && stopTransfers(id), PAUSE_GRACE_MS);
+      }
       pump();
     }
   }

@@ -142,5 +142,5 @@ def test_init_signs_only_the_first_batch(subscribed_user, settings, monkeypatch)
     monkeypatch.setattr(services, "get_spacebyte_client", lambda: Client())
     monkeypatch.setattr(services, "check_quota_available", lambda *a: None)
     services.init_multipart_upload(subscribed_user, encrypted_name="ZW5j", name_nonce="00", size_bytes=40 * 1024**3)
-    assert calls["part_count"] == 2048
+    assert calls["part_count"] == 5120  # 40 GiB in 8 MiB parts
     assert calls["sign_count"] == services.PART_SIGN_BATCH

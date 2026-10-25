@@ -44,7 +44,7 @@ const googleError = ref("");
 function goNext() {
   const plan = typeof route.query.plan === "string" ? route.query.plan : "";
   const interval = route.query.interval === "monthly" ? "monthly" : "yearly";
-  router.replace(plan ? { path: "/app/billing", query: { plan, interval } } : "/app/files");
+  router.replace(plan ? { name: "checkout", query: { plan, interval } } : "/app/files");
 }
 
 async function submit() {

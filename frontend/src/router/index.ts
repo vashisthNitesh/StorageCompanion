@@ -18,7 +18,9 @@ const routes: RouteRecordRaw[] = [
       { path: "files", name: "files", component: () => import("../features/files/FileManager.vue"), meta: { customer: true } },
       { path: "recent", name: "recent", component: () => import("../features/files/FileManager.vue"), meta: { customer: true, view: "recent" } },
       { path: "trash", name: "trash", component: () => import("../features/files/TrashView.vue"), meta: { customer: true } },
-      { path: "billing", name: "billing", component: () => import("../features/billing/BillingView.vue"), meta: { customer: true } },
+      { path: "billing", name: "billing", component: () => import("../features/billing/BillingDashboard.vue"), meta: { customer: true } },
+      { path: "billing/plans", name: "plans", component: () => import("../features/billing/PlansPage.vue"), meta: { customer: true } },
+      { path: "billing/checkout", name: "checkout", component: () => import("../features/billing/CheckoutPage.vue"), meta: { customer: true } },
       { path: "settings", name: "settings", component: () => import("../features/settings/SettingsView.vue") },
       {
         path: "admin",

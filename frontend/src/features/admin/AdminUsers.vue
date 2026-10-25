@@ -49,7 +49,7 @@ const billing = useBillingStore();
 const STATUS_OPTIONS = [
   { value: "", label: "All statuses" },
   { value: "active", label: "Active" },
-  { value: "extended", label: "Extended" },
+  { value: "extended", label: "Extended by admin" },
   { value: "expired", label: "Expired" },
   { value: "suspended", label: "Suspended" },
   { value: "purged", label: "Purged" },
@@ -99,7 +99,7 @@ function statusBadge(u: AdminUser): { tone: "success" | "info" | "warning" | "da
   if (!u.is_active) return { tone: "danger", text: "Suspended" };
   const s = u.plan.status;
   if (s === "active") return { tone: "success", text: "Active" };
-  if (s === "extended") return { tone: "info", text: "Extended" };
+  if (s === "extended") return { tone: "info", text: "Extended by admin" };
   if (isLapsed(u)) return { tone: "warning", text: `Expired · ${u.plan.retention_days_remaining}d left` };
   if (s === "purged") return { tone: "neutral", text: "Data purged" };
   return { tone: "neutral", text: "No plan" };
@@ -143,10 +143,29 @@ async function savePlan() {
 // --- Validity -------------------------------------------------------------------
 type ValidityAction = "extend" | "reduce" | "set_date";
 const VALIDITY_OPTIONS: { value: ValidityAction; label: string }[] = [
-  { value: "extend", label: "Extend" },
-  { value: "reduce", label: "Shorten" },
-  { value: "set_date", label: "Set date" },
+  { value: "extend", label: "Add free days" },
+  { value: "reduce", label: "Remove days" },
+  { value: "set_date", label: "Set end date" },
 ];
+const VALIDITY_HELP: Record<ValidityAction, string> = {
+  extend:
+    "Gives the customer extra days on their current plan without a payment. Days are added to the end date (or to today if the plan has already ended), and the customer shows as “Extended by admin”.",
+  reduce: "Shortens the current plan. If the new end date is in the past, uploads stop and files are kept for 90 days.",
+  set_date: "Sets an exact end date. A date in the past ends the plan: uploads stop and files are kept for 90 days.",
+};
+/** The end date the chosen change would produce, mirroring the server's rules. */
+const validityPreview = computed(() => {
+  const u = validityTarget.value;
+  if (!u) return null;
+  const v = validityForm.values;
+  const end = u.plan.current_period_end ? new Date(u.plan.current_period_end).getTime() : Date.now();
+  const days = Number(v.days);
+  let next: number | null = null;
+  if (v.action === "set_date") next = v.expiry_date ? new Date(`${v.expiry_date}T23:59:59`).getTime() : null;
+  else if (Number.isInteger(days) && days > 0) next = v.action === "extend" ? Math.max(end, Date.now()) + days * 86_400_000 : end - days * 86_400_000;
+  if (next === null) return null;
+  return { date: new Date(next).toISOString(), ends: next <= Date.now(), keptUntil: new Date(next + 90 * 86_400_000).toISOString() };
+});
 const validityTarget = ref<AdminUser | null>(null);
 const validityOpen = ref(false);
 const validityForm = useForm(
@@ -253,7 +272,7 @@ async function purge(u: AdminUser) {
 
 function menuFor(u: AdminUser): MenuEntry[] {
   const items: MenuEntry[] = [{ label: "Change plan", icon: CreditCard, onSelect: () => openPlan(u) }];
-  if (u.plan.code !== "none") items.push({ label: "Adjust validity", icon: CalendarClock, onSelect: () => openValidity(u) });
+  if (u.plan.code !== "none") items.push({ label: "Change plan dates…", icon: CalendarClock, onSelect: () => openValidity(u) });
   items.push(
     { separator: true },
     u.is_active
@@ -361,24 +380,24 @@ onMounted(() => {
 
     <UiModal
       v-model:open="validityOpen"
-      title="Adjust validity"
+      title="Change plan dates"
       :description="validityTarget ? `${validityTarget.email} · currently until ${formatDate(validityTarget.plan.current_period_end)}` : undefined"
       size="sm"
       :dismissible="!validityForm.submitting.value"
     >
       <form :ref="(el) => (validityForm.formEl.value = el as HTMLFormElement)" novalidate class="space-y-4" @submit.prevent="saveValidity">
         <UiSegmented v-model="validityForm.values.action" :options="VALIDITY_OPTIONS" label="Change" />
-        <UiFormField v-if="validityForm.values.action !== 'set_date'" label="Days" :error="validityForm.errors.days">
+        <p class="text-sm text-fg-muted">{{ VALIDITY_HELP[validityForm.values.action] }}</p>
+        <UiFormField v-if="validityForm.values.action !== 'set_date'" :label="validityForm.values.action === 'extend' ? 'Days to add' : 'Days to remove'" :error="validityForm.errors.days">
           <UiInput v-model="validityForm.values.days" inputmode="numeric" @blur="validityForm.blur('days')" />
         </UiFormField>
-        <UiFormField
-          v-else
-          label="New end date"
-          hint="A date in the past expires the plan and starts the 90-day retention period."
-          :error="validityForm.errors.expiry_date"
-        >
+        <UiFormField v-else label="New end date" :error="validityForm.errors.expiry_date">
           <UiInput v-model="validityForm.values.expiry_date" type="date" @blur="validityForm.blur('expiry_date')" />
         </UiFormField>
+        <div v-if="validityPreview" class="rounded-lg border p-3 text-sm" :class="validityPreview.ends ? 'border-warning/30 bg-warning-soft text-warning' : 'border-line bg-canvas-subtle text-fg'" aria-live="polite">
+          <p>New end date: <strong class="font-semibold">{{ formatDate(validityPreview.date) }}</strong></p>
+          <p v-if="validityPreview.ends" class="mt-0.5">This ends the plan now. Files are kept until {{ formatDate(validityPreview.keptUntil) }}.</p>
+        </div>
         <UiAlert v-if="validityForm.formError.value">{{ validityForm.formError.value }}</UiAlert>
         <button type="submit" class="hidden" tabindex="-1" aria-hidden="true" />
       </form>

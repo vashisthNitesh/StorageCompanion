@@ -143,6 +143,7 @@ watch(
                     <template v-else-if="row.item.status === 'uploading'">
                       {{ row.item.notice ?? `${row.item.progress}% of ${formatBytes(row.item.size)}` }}<template v-if="!row.item.notice && row.item.speedMBs"> · {{ speed(row.item.speedMBs) }}</template><template v-if="!row.item.notice && row.item.etaSeconds != null"> · {{ eta(row.item.etaSeconds) }}</template>
                     </template>
+                    <template v-else-if="row.item.status === 'paused'">Paused · {{ row.item.notice ?? `${row.item.progress}% saved · resumes from here` }}</template>
                     <template v-else>{{ STAGE_LABEL[row.item.status] }} · {{ formatBytes(row.item.size) }}</template>
                   </p>
                 </div>

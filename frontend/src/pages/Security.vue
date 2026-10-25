@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { KeyRound, Lock, Server, ShieldCheck, Smartphone, AlertTriangle } from "lucide-vue-next";
+import { KeyRound, Lock, Server, ShieldCheck, Smartphone } from "lucide-vue-next";
 import SiteHeader from "./components/SiteHeader.vue";
 import SiteFooter from "./components/SiteFooter.vue";
 
@@ -49,16 +49,6 @@ const points = [
         </li>
       </ul>
 
-      <div class="mt-10 rounded-2xl border border-warning/30 bg-warning-soft p-6">
-        <h2 class="flex items-center gap-2 font-semibold text-fg"><AlertTriangle :size="20" class="text-warning" aria-hidden="true" /> Two things to know</h2>
-        <ul class="mt-3 list-disc space-y-2 pl-5 text-base leading-relaxed text-fg">
-          <li><strong>We can't reset your password.</strong> In an email account, your password is the only way to unlock your files. If you forget it, they can't be recovered.</li>
-          <li>
-            <strong>Google sign-in trades some privacy for convenience.</strong> Accounts created with Google don't have a separate password, so their vault key is derived on our
-            servers. Files are still encrypted at rest, but for the strongest privacy create your account with email and a password.
-          </li>
-        </ul>
-      </div>
     </main>
     <SiteFooter />
   </div>

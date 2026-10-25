@@ -64,7 +64,8 @@ const actions = computed<Item[]>(() => {
       { id: "n-files", group: "Go to", label: "My files", icon: Folder, run: go("/app/files") },
       { id: "n-recent", group: "Go to", label: "Recent", icon: Clock, run: go("/app/recent") },
       { id: "n-trash", group: "Go to", label: "Trash", icon: Trash2, run: go("/app/trash") },
-      { id: "n-billing", group: "Go to", label: "Plan & billing", icon: CreditCard, run: go("/app/billing") }
+      { id: "n-billing", group: "Go to", label: "Plan & billing", icon: CreditCard, run: go("/app/billing") },
+      { id: "n-plans", group: "Go to", label: "Change plan", icon: CreditCard, run: go("/app/billing/plans") }
     );
   }
   list.push(

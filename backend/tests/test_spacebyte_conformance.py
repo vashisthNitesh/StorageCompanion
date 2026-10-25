@@ -68,19 +68,19 @@ def test_create_file_entry_uses_basename_and_string_delete_payload(monkeypatch):
 
 
 @pytest.mark.django_db
-def test_init_upload_uses_20mb_parts_and_persists_part_size(subscribed_user, settings):
+def test_init_upload_uses_8mib_parts_and_persists_part_size(subscribed_user, settings):
     settings.SPACEBYTE_ACCESS_TOKEN = ""  # offline development mock
-    size = 25 * 1024 * 1024  # > 20 MiB → 2 parts
+    size = 20 * 1024 * 1024  # 8 + 8 + 4 MiB → 3 parts
     info = init_multipart_upload(
         subscribed_user,
         encrypted_name="ZW5j",
         name_nonce="aabbccddeeff001122334455",
         size_bytes=size,
     )
-    assert info["part_size"] == 20 * 1024 * 1024
-    assert info["total_parts"] == 2
+    assert info["part_size"] == 8 * 1024 * 1024
+    assert info["total_parts"] == 3
     upload = Upload.objects.get(id=info["upload_session_id"])
-    for n, size_n in ((1, 20 * 1024 * 1024 + 16), (2, 5 * 1024 * 1024 + 16)):
+    for n, size_n in ((1, 8 * 1024 * 1024 + 16), (2, 8 * 1024 * 1024 + 16), (3, 4 * 1024 * 1024 + 16)):
         relay_upload_part(upload, n, io.BytesIO(b"\0" * size_n), size_n)
     node = complete_multipart_upload(
         info["upload_session_id"],
@@ -89,8 +89,18 @@ def test_init_upload_uses_20mb_parts_and_persists_part_size(subscribed_user, set
         content_nonce="00112233445566778899aabb",
     )
     ver = FileVersion.objects.get(node=node)
-    assert ver.part_size == 20 * 1024 * 1024
+    assert ver.part_size == 8 * 1024 * 1024
     assert node.size_bytes == size
+
+
+def test_part_size_grows_only_for_huge_files():
+    from apps.storage.services import MAX_PARTS, part_count_for, part_size_for
+
+    assert part_size_for(1) == 8 * 1024 * 1024
+    assert part_size_for(70 * 1024**3) == 8 * 1024 * 1024
+    huge = 100 * 1024**3
+    assert part_size_for(huge) > 8 * 1024 * 1024
+    assert part_count_for(huge, part_size_for(huge)) <= MAX_PARTS
 
 
 @pytest.mark.django_db

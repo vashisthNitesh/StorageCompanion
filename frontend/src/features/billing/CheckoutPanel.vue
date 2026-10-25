@@ -14,8 +14,8 @@ import { formatBytes, formatDate, formatMoney } from "../../lib/format";
 import { normalizeApiError } from "../../lib/errors";
 import { actionFor, gstBreakdown, priceFor, storageLabel } from "./planCatalog";
 
-// Order summary and payment, shown inline next to the plan list. It is deliberately
-// not a dialog: Razorpay opens its own window, and a dialog underneath would trap it.
+// Order summary and payment on the checkout page. It is deliberately not a dialog:
+// Razorpay opens its own window, and a dialog underneath would trap it.
 const props = defineProps<{ plan: Plan | null; interval: "monthly" | "yearly"; usedBytes?: number }>();
 const interval = computed(() => props.interval);
 
@@ -64,7 +64,7 @@ const validUntil = computed(() => {
 const tooSmall = computed(() => !!props.plan && !!props.usedBytes && props.usedBytes > props.plan.storage_bytes);
 const busy = computed(() => phase.value === "paying" || phase.value === "verifying");
 const stateOptions = GST_STATES.map((s) => ({ value: s.code, label: s.name }));
-const heading = computed(() => ({ extend: "Extend your plan", upgrade: "Upgrade", switch: "Switch plan", choose: "Your order" })[action.value]);
+const heading = "Order summary";
 
 async function pay() {
   if (!props.plan || busy.value) return;
@@ -102,13 +102,14 @@ async function pay() {
 </script>
 
 <template>
-  <section class="rounded-lg border border-line bg-surface shadow-xs" aria-labelledby="checkout-heading" aria-live="polite">
+  <section class="rounded-2xl border border-line bg-surface shadow-xs" aria-labelledby="checkout-heading" aria-live="polite">
     <!-- Paid -->
     <div v-if="phase === 'success'" class="p-5 text-center sm:p-6">
       <CheckCircle2 :size="40" :stroke-width="1.5" class="mx-auto text-success" aria-hidden="true" />
       <h2 id="checkout-heading" class="mt-3 text-md font-semibold text-fg">Payment complete</h2>
-      <p class="mt-1 text-base text-fg-muted">You're on {{ paidPlan?.name }} until {{ formatDate(paidUntil) }}. Your invoice is below.</p>
+      <p class="mt-1 text-base text-fg-muted">You're on {{ paidPlan?.name }} until {{ formatDate(paidUntil) }}. Your invoice is in Plan & billing.</p>
       <UiButton class="mt-5" variant="primary" block @click="router.push('/app/files')">Start uploading</UiButton>
+      <UiButton class="mt-2" variant="ghost" block @click="router.push('/app/billing')">Back to Plan & billing</UiButton>
     </div>
 
     <!-- Declined -->
@@ -139,11 +140,6 @@ async function pay() {
           <div class="flex justify-between gap-3 border-t border-line pt-3 text-md font-semibold"><dt class="text-fg">Total</dt><dd class="text-fg">{{ formatMoney(breakdown.total) }}</dd></div>
           <div class="flex justify-between gap-3 text-sm"><dt class="text-fg-subtle">Valid until</dt><dd class="text-fg-muted">{{ formatDate(validUntil) }}</dd></div>
         </dl>
-
-        <p v-if="action === 'extend'" class="mt-4 text-sm text-fg-muted">Adds {{ days }} days after your current plan ends.</p>
-        <UiAlert v-else-if="action === 'upgrade' || action === 'switch'" tone="info" class="mt-4">
-          Your new plan starts today. Time left on {{ sub?.plan_name }} isn't carried over.
-        </UiAlert>
 
         <UiFormField class="mt-5" label="Your state" hint="For CGST/SGST or IGST on your invoice." :error="stateError" required>
           <UiSelect v-model="state" :options="stateOptions" placeholder="Search for your state" @update:model-value="stateError = ''" />

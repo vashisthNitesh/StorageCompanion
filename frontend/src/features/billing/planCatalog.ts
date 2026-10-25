@@ -54,3 +54,29 @@ export function gstBreakdown(total: number) {
   const base = Math.round((total / (1 + GST_RATE)) * 100) / 100;
   return { base, gst: Math.round((total - base) * 100) / 100, total };
 }
+
+/** What a plan card lists: its own limits first, then what every plan gets. */
+export function planFeatures(plan: Plan): string[] {
+  return [
+    `${storageLabel(plan.storage_bytes)} of encrypted storage`,
+    `Files up to ${storageLabel(plan.max_file_size)} each`,
+    `${plan.version_retention_days}-day version history`,
+    "Unmetered downloads",
+    "Preview photos, videos and documents",
+  ];
+}
+
+/** Price per month for display: yearly plans are shown as their monthly equivalent. */
+export function monthlyEquivalent(plan: Plan, interval: "monthly" | "yearly"): number {
+  return interval === "yearly" ? Math.round(priceFor(plan, "yearly") / 12) : priceFor(plan, "monthly");
+}
+
+/** Button label on a plan card, relative to the person's current plan. */
+export function ctaLabel(plan: Plan, action: PlanAction): string {
+  return { extend: "Add more time", upgrade: "Upgrade", switch: `Switch to ${plan.name}`, choose: `Get ${plan.name}` }[action];
+}
+
+/** Heading for checkout. */
+export function checkoutHeading(plan: Plan, action: PlanAction): string {
+  return { extend: `Add time to ${plan.name}`, upgrade: `Upgrade to ${plan.name}`, switch: `Switch to ${plan.name}`, choose: `Get ${plan.name}` }[action];
+}

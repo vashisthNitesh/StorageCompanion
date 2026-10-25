@@ -203,6 +203,20 @@ def move_node(node: Node, user, parent_id) -> Node:
     return node
 
 
+PART_SIZE = 8 * 1024 * 1024
+MAX_PARTS = 9_500  # S3-compatible storage allows 10,000 parts per upload; keep a margin.
+
+
+def part_size_for(size_bytes: int) -> int:
+    """
+    Plaintext bytes per upload part (persisted on FileVersion for decryption). Parts are 8 MiB, so
+    pausing or a dropped connection only re-sends the few parts that were in flight and previews
+    fetch less before they start; very large files use bigger parts to stay under the part limit.
+    """
+    mib = 1024 * 1024
+    return max(PART_SIZE, math.ceil(size_bytes / MAX_PARTS / mib) * mib)
+
+
 def part_count_for(size_bytes: int, part_size: int) -> int:
     return max(1, math.ceil(size_bytes / part_size))
 
@@ -234,8 +248,7 @@ def init_multipart_upload(
     if node_id and not Node.objects.filter(id=node_id, owner=user, type=Node.TYPE_FILE, deleted_at__isnull=True).exists():
         raise NotFound("File not found.")
 
-    # SpaceByte docs recommend 20 MB parts. Persist part_size on FileVersion for decrypt.
-    part_size = 32 * 1024 * 1024 if size_bytes > 50 * 1024 * 1024 * 1024 else 20 * 1024 * 1024
+    part_size = part_size_for(size_bytes)
     num_parts = part_count_for(size_bytes, part_size)
 
     sb_client = get_spacebyte_client()

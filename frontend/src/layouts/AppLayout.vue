@@ -9,7 +9,6 @@ import UiButton from "../components/ui/UiButton.vue";
 import UiSkeleton from "../components/ui/UiSkeleton.vue";
 import CommandPalette from "../components/CommandPalette.vue";
 import ShortcutsDialog from "../components/ShortcutsDialog.vue";
-import PlanPickerModal from "../features/billing/PlanPickerModal.vue";
 import VaultUnlockModal from "../features/auth/VaultUnlockModal.vue";
 import ConflictDialog from "../features/files/ConflictDialog.vue";
 import { useAuthStore } from "../stores/auth";
@@ -102,6 +101,12 @@ onMounted(async () => {
     onAppEvent("upload-folder", () => uploader.ensureCanUpload() && folderInput.value?.click()),
     onAppEvent("new-folder", () => {
       if (!route.path.startsWith("/app/files")) router.push("/app/files");
+    }),
+    // "Choose a plan" prompts (upload limits, banners) open the plans page, or checkout directly
+    // when the plan is already known (e.g. "Renew" on the expiry banner).
+    onAppEvent("plan-picker", (payload) => {
+      if (payload?.planCode) void router.push({ name: "checkout", query: { plan: payload.planCode } });
+      else void router.push({ name: "plans", query: payload?.reason ? { reason: payload.reason } : {} });
     })
   );
   if (isCustomer.value && !authStore.isVaultUnlocked && authStore.user?.has_google && !authStore.hasPasswordVault) {
@@ -199,7 +204,6 @@ async function signOut() {
 
     <CommandPalette @sign-out="signOut" />
     <ShortcutsDialog />
-    <PlanPickerModal />
     <VaultUnlockModal :open="needsUnlock" @sign-out="signOut" />
     <ConflictDialog />
   </div>

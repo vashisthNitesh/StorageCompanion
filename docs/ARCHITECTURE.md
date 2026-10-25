@@ -27,8 +27,9 @@ SpaceByte is the only storage backend. Without `SPACEBYTE_ACCESS_TOKEN` the clie
 responses in `DEBUG` (local development and tests) and fails loudly in production.
 
 ### Uploads
-1. `POST /api/v1/uploads` opens a SpaceByte multipart upload (20 MB plaintext parts, 32 MB above
-   50 GB) and presigns the first 8 parts.
+1. `POST /api/v1/uploads` opens a SpaceByte multipart upload (8 MiB plaintext parts, larger only
+   when a file would otherwise need more than 9,500 parts) and presigns the first 8 parts. Small
+   parts mean a pause or dropped connection only re-sends the few parts in flight.
 2. The browser encrypts each part and `POST`s it to `/api/v1/uploads/<id>/parts/<n>`, four parts
    at a time per file. The server checks the declared length against the file size and streams
    the body to the part's presigned URL as it arrives (nothing is buffered in memory). Part URLs
