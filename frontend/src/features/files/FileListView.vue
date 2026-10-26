@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, onMounted, ref, watch, type Ref } from "vue";
 import { useVirtualizer } from "@tanstack/vue-virtual";
-import { MoreHorizontal, Download, ArrowUp, ArrowDown } from "lucide-vue-next";
+import { MoreHorizontal, Download, ArrowUp, ArrowDown, Share2 } from "lucide-vue-next";
 import type { FileNode, SearchResult, SortDir, SortField } from "../../stores/files";
 import UiCheckbox from "../../components/ui/UiCheckbox.vue";
 import UiButton from "../../components/ui/UiButton.vue";
@@ -37,6 +37,7 @@ const emit = defineEmits<{
   renameCancel: [];
   sort: [field: SortField];
   keydown: [e: KeyboardEvent];
+  share: [node: FileNode];
 }>();
 /** Right-clicking an unselected item selects it first, like a desktop file manager. */
 function selectForMenu(node: FileNode) {
@@ -126,7 +127,7 @@ const ariaSort = (field: SortField) => (props.sort?.field === field ? (props.sor
     <!-- Sticky column header -->
     <div
       class="sticky top-0 z-10 grid h-10 items-center gap-3 border-b border-line bg-surface-sunken/95 px-3 text-sm font-medium text-fg-muted backdrop-blur"
-      :class="isWide ? 'grid-cols-[24px_minmax(0,1fr)_140px_96px_76px]' : 'grid-cols-[24px_minmax(0,1fr)_40px]'"
+      :class="isWide ? 'grid-cols-[24px_minmax(0,1fr)_140px_96px_108px]' : 'grid-cols-[24px_minmax(0,1fr)_40px]'"
       role="presentation"
     >
       <UiCheckbox :model-value="allState" aria-label="Select all" @update:model-value="emit('toggleAll')" />
@@ -162,7 +163,7 @@ const ariaSort = (field: SortField) => (props.sort?.field === field ? (props.sor
           :aria-selected="selected.has(row.node.id)"
           class="group grid cursor-default select-none items-center gap-3 border-b border-line px-3 last:border-b-0"
           :class="[
-            isWide ? 'grid-cols-[24px_minmax(0,1fr)_140px_96px_76px]' : 'grid-cols-[24px_minmax(0,1fr)_40px]',
+            isWide ? 'grid-cols-[24px_minmax(0,1fr)_140px_96px_108px]' : 'grid-cols-[24px_minmax(0,1fr)_40px]',
             selected.has(row.node.id) ? 'bg-primary-soft/70' : 'hover:bg-canvas-subtle',
             focusedId === row.node.id ? 'shadow-[inset_2px_0_0_rgb(var(--primary))]' : '',
             highlightIds.has(row.node.id) ? 'animate-row-flash' : '',
@@ -221,7 +222,17 @@ const ariaSort = (field: SortField) => (props.sort?.field === field ? (props.sor
               <UiProgressCircle :value="progressOf(row.node)" :size="18" />
             </span>
             <UiButton
-              v-else-if="row.node.type === 'file' && isWide"
+              v-if="row.node.type === 'file' && isWide"
+              variant="ghost"
+              size="sm"
+              icon-only
+              :icon="Share2"
+              :aria-label="`Share ${row.node.name}`"
+              class="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 group-aria-selected:opacity-100"
+              @click.stop="emit('share', row.node)"
+            />
+            <UiButton
+              v-if="!isDownloading(row.node) && row.node.type === 'file' && isWide"
               variant="ghost"
               size="sm"
               icon-only

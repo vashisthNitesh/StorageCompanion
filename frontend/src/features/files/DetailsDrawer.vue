@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { Download, LockKeyhole } from "lucide-vue-next";
+import { Download, LockKeyhole, Share2 } from "lucide-vue-next";
 import UiDrawer from "../../components/ui/UiDrawer.vue";
 import UiButton from "../../components/ui/UiButton.vue";
 import UiSkeleton from "../../components/ui/UiSkeleton.vue";
@@ -16,6 +16,7 @@ import FileThumb from "../preview/FileThumb.vue";
 
 const open = defineModel<boolean>("open", { default: false });
 const props = defineProps<{ node: FileNode | null }>();
+const emit = defineEmits<{ share: [node: FileNode] }>();
 const files = useFilesStore();
 const { downloadFile, isDownloading, progressOf } = useFileDownload();
 
@@ -88,7 +89,10 @@ watch(
       </section>
     </div>
     <template v-if="node?.type === 'file'" #footer>
-      <UiButton variant="primary" block :icon="Download" :loading="isDownloading(node)" @click="downloadFile(node)">Download</UiButton>
+      <div class="grid grid-cols-2 gap-2">
+        <UiButton :icon="Share2" @click="emit('share', node)">Share</UiButton>
+        <UiButton variant="primary" :icon="Download" :loading="isDownloading(node)" @click="downloadFile(node)">Download</UiButton>
+      </div>
     </template>
   </UiDrawer>
 </template>

@@ -5,6 +5,8 @@ const routes: RouteRecordRaw[] = [
   { path: "/", name: "landing", component: () => import("../pages/Landing.vue") },
   { path: "/pricing", name: "pricing", component: () => import("../pages/Pricing.vue") },
   { path: "/security", name: "security", component: () => import("../pages/Security.vue") },
+  // Public shared-file page; the decryption key is in the URL fragment.
+  { path: "/s/:token", name: "shared-file", component: () => import("../features/sharing/SharedFileView.vue") },
   { path: "/about", name: "about", component: () => import("../pages/About.vue") },
   { path: "/legal", name: "legal", component: () => import("../pages/Legal.vue") },
   { path: "/login", name: "login", component: () => import("../features/auth/LoginView.vue"), meta: { guestOnly: true } },

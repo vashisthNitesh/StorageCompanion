@@ -23,6 +23,7 @@ import {
   Clock,
   CloudOff,
   Eye,
+  Share2,
 } from "lucide-vue-next";
 import UiBreadcrumbs from "../../components/ui/UiBreadcrumbs.vue";
 import UiButton from "../../components/ui/UiButton.vue";
@@ -48,6 +49,7 @@ import MoveDialog from "./MoveDialog.vue";
 import DetailsDrawer from "./DetailsDrawer.vue";
 import BulkBar from "./BulkBar.vue";
 import FilePreview from "../preview/FilePreview.vue";
+import ShareDialog from "../sharing/ShareDialog.vue";
 
 const route = useRoute();
 const files = useFilesStore();
@@ -236,6 +238,10 @@ function onListKey(e: KeyboardEvent) {
 const nameDialog = ref<{ open: boolean; mode: "create" | "rename"; node?: FileNode }>({ open: false, mode: "create" });
 const moveDialog = ref<{ open: boolean; nodes: FileNode[] }>({ open: false, nodes: [] });
 const details = ref<{ open: boolean; node: FileNode | null }>({ open: false, node: null });
+const shareDialog = ref<{ open: boolean; node: FileNode | null }>({ open: false, node: null });
+function share(node: FileNode) {
+  if (node.type === "file") shareDialog.value = { open: true, node };
+}
 const preview = ref({ open: false, index: 0 });
 /** Files in the current listing, in display order: what previous / next steps through. */
 const previewItems = computed(() => items.value.filter((n) => n.type === "file"));
@@ -300,7 +306,10 @@ function menuFor(node: FileNode): MenuEntry[] {
         ? { label: "Open", icon: FolderOpen, shortcut: "↵", onSelect: () => open(node) }
         : { label: "Open", icon: Eye, shortcut: "↵", onSelect: () => open(node) }
     );
-    if (node.type === "file") entries.push({ label: "Download", icon: Download, onSelect: () => void actions.download([node]) });
+    if (node.type === "file") {
+      entries.push({ label: "Download", icon: Download, onSelect: () => void actions.download([node]) });
+      entries.push({ label: "Share", icon: Share2, onSelect: () => share(node) });
+    }
   } else if (targets.some((n) => n.type === "file")) {
     const count = targets.filter((n) => n.type === "file").length;
     entries.push({ label: `Download ${count} ${count === 1 ? "file" : "files"}`, icon: Download, onSelect: () => void actions.download(targets) });
@@ -520,6 +529,7 @@ useShortcuts(() => [{ keys: "escape", handler: clearSelection }]);
         @click="onItemClick"
         @toggle="toggle"
         @toggle-all="toggleAll"
+        @share="share"
         @open="open"
         @rename-commit="commitRename"
         @rename-cancel="renamingId = null"
@@ -557,7 +567,8 @@ useShortcuts(() => [{ keys: "escape", handler: clearSelection }]);
       :submit="submitName"
     />
     <MoveDialog v-model:open="moveDialog.open" :nodes="moveDialog.nodes" @move="moveTo" />
-    <DetailsDrawer v-model:open="details.open" :node="details.node" />
-    <FilePreview v-model:open="preview.open" v-model:index="preview.index" :items="previewItems" @details="(n) => (details = { open: true, node: n })" />
+    <DetailsDrawer v-model:open="details.open" :node="details.node" @share="share" />
+    <FilePreview v-model:open="preview.open" v-model:index="preview.index" :items="previewItems" @details="(n) => (details = { open: true, node: n })" @share="share" />
+    <ShareDialog v-model:open="shareDialog.open" :node="shareDialog.node" />
   </div>
 </template>

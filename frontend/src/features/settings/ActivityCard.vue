@@ -17,6 +17,8 @@ import {
   Activity,
   MonitorX,
   Eye,
+  LifeBuoy,
+  Link2,
 } from "lucide-vue-next";
 import UiCard from "../../components/ui/UiCard.vue";
 import UiButton from "../../components/ui/UiButton.vue";
@@ -41,6 +43,14 @@ const EVENTS: Record<string, { label: string; icon: Component; tone?: string }> 
   "user.registered": { label: "Account created", icon: UserPlus },
   "user.registered_google": { label: "Account created with Google", icon: UserPlus },
   "user.password_changed": { label: "Password changed", icon: KeyRound, tone: "text-warning" },
+  "user.password_reset": { label: "Password reset with recovery key", icon: KeyRound, tone: "text-warning" },
+  "user.password_reset_vault_replaced": { label: "Password reset without recovery key", icon: KeyRound, tone: "text-danger" },
+  "auth.upgraded_to_auth_key": { label: "Sign-in upgraded: password no longer sent", icon: ShieldCheck, tone: "text-success" },
+  "vault.recovery_key_created": { label: "New recovery key created", icon: LifeBuoy, tone: "text-success" },
+  "vault.recovery_key_confirmed": { label: "Recovery key saved", icon: LifeBuoy, tone: "text-success" },
+  "share.created": { label: "Share link created", icon: Link2 },
+  "share.revoked": { label: "Share link turned off", icon: Link2 },
+  "share.opened": { label: "Shared file opened", icon: Link2 },
   "mfa.enabled": { label: "Two-step verification turned on", icon: ShieldCheck, tone: "text-success" },
   "mfa.disabled": { label: "Two-step verification turned off", icon: ShieldOff, tone: "text-warning" },
   "session.revoked": { label: "Signed out a device", icon: MonitorX },

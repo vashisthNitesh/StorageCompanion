@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, shallowRef, watch } from "vue";
 import { DialogRoot, DialogPortal, DialogContent, DialogTitle, DialogDescription } from "reka-ui";
-import { ChevronLeft, ChevronRight, Download, X, Info } from "lucide-vue-next";
+import { ChevronLeft, ChevronRight, Download, X, Info, Share2 } from "lucide-vue-next";
 import UiButton from "../../components/ui/UiButton.vue";
 import UiProgress from "../../components/ui/UiProgress.vue";
 import { useAuthStore } from "../../stores/auth";
@@ -25,7 +25,7 @@ import type { ViewProblem } from "./views/types";
 const open = defineModel<boolean>("open", { default: false });
 const index = defineModel<number>("index", { default: 0 });
 const props = defineProps<{ items: FileNode[] }>();
-const emit = defineEmits<{ details: [node: FileNode] }>();
+const emit = defineEmits<{ details: [node: FileNode]; share: [node: FileNode] }>();
 
 const authStore = useAuthStore();
 const { downloadFile, isDownloading, progressOf } = useFileDownload();
@@ -115,6 +115,7 @@ const ext = computed(() => (node.value ? extensionOf(node.value.name).toUpperCas
             </div>
             <span v-if="items.length > 1" class="tabular hidden px-2 text-sm text-fg-muted sm:inline" aria-live="polite">{{ index + 1 }} / {{ items.length }}</span>
             <UiButton variant="ghost" icon-only :icon="Info" aria-label="Details" class="hidden text-fg sm:inline-flex" @click="emit('details', node)" />
+            <UiButton variant="ghost" icon-only :icon="Share2" aria-label="Share" class="text-fg" @click="emit('share', node)" />
             <UiButton variant="secondary" :icon="Download" :loading="isDownloading(node)" class="hidden sm:inline-flex" @click="downloadFile(node)">
               {{ isDownloading(node) ? `${progressOf(node)}%` : "Download" }}
             </UiButton>

@@ -73,6 +73,7 @@ INSTALLED_APPS = [
     "apps.storage",
     "apps.billing",
     "apps.audit",
+    "apps.links",
 ]
 
 MIDDLEWARE = [
@@ -212,6 +213,8 @@ REST_FRAMEWORK = {
         "password_reset": "20/hour",
         "password_reset_email": "3/hour",
         "password_reset_token": "60/hour",
+        "share_public": "300/hour",
+        "share_content": "3000/hour",
         "refresh": "30/minute",
         "refresh_ip": "600/minute",
     },

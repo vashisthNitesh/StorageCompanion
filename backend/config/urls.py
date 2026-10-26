@@ -14,6 +14,7 @@ urlpatterns = [
     path("api/v1/admin/", include("apps.accounts.admin_urls")),
     path("api/v1/", include("apps.storage.urls")),
     path("api/v1/", include("apps.billing.urls")),
+    path("api/v1/", include("apps.links.urls")),
     path("api/v1/audit-logs/", include("apps.audit.urls")),
 
     # SPA catch-all fallback for Vue Router (when served directly through Django / WhiteNoise)

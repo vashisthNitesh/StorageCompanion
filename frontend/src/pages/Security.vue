@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { KeyRound, LifeBuoy, Lock, Server, ShieldCheck, Smartphone } from "lucide-vue-next";
+import { KeyRound, LifeBuoy, Link2, Lock, Server, ShieldCheck, Smartphone } from "lucide-vue-next";
 import SiteHeader from "./components/SiteHeader.vue";
 import SiteFooter from "./components/SiteFooter.vue";
 
@@ -18,6 +18,11 @@ const points = [
     icon: Lock,
     title: "Files are encrypted before upload",
     text: "Each file gets its own key and is encrypted with AES-256-GCM in 20 MB pieces before it leaves your device. File and folder names are encrypted too.",
+  },
+  {
+    icon: Link2,
+    title: "Links we can't open",
+    text: "When you share a file, your browser makes a new key for the link and puts it after the # in the address, which browsers never send to servers. Add a password, an expiry or a download limit, and turn the link off at any time.",
   },
   {
     icon: Server,

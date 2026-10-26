@@ -69,3 +69,16 @@ Login, Google sign-in, registration, MFA and password changes share a 10/minute 
 ## Admin (`/admin/`, staff only)
 `kpis/`, `pool/`, `users/`, `users/create/`, `users/{id}/upgrade-plan/`, `users/{id}/toggle-status/`,
 `users/{id}/validity/`, `users/{id}/purge-data/`, `files/`, `process-lifecycle/`.
+
+## Share links
+
+The browser wraps the file key with a random link key that only exists in the URL fragment (`/s/<token>#<key>`); an optional password adds a second key derived with Argon2id in the browser. The server stores wrapped blobs only.
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/nodes/{id}/shares` | Owner's links for a file (not revoked). |
+| POST | `/nodes/{id}/shares` | `{expires_in: 1h\|1d\|7d\|30d\|never, max_downloads?, allow_download, version_no, wrapped_key, encrypted_name, name_nonce, owner_wrapped_link_key, password?: {salt, kdf_params, auth_hash}}`. Owner only. |
+| DELETE | `/shares/{id}` | Revoke (owner only). Takes effect for downloads in progress too. |
+| GET | `/s/{token}` | Public. Size, expiry, opens left; the wrapped key and name unless password protected. Doesn't count. Errors carry `code`: `SHARE_NOT_FOUND`, `SHARE_EXPIRED`, `SHARE_REVOKED`, `SHARE_LIMIT_REACHED`, `SHARE_UNAVAILABLE`. |
+| POST | `/s/{token}/open` | Public. `{password_proof?}`. Checks expiry, revocation and the limit under a row lock, counts one open and returns a 6-hour content grant. Wrong passwords: `403 SHARE_WRONG_PASSWORD`, 10 per link per 15 minutes. |
+| GET | `/s/{token}/content` | Public, `X-Share-Grant` header. Encrypted bytes with Range support. |

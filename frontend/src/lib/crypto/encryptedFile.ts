@@ -50,10 +50,21 @@ export async function openEncryptedFile(
   } catch {
     throw new DecryptError();
   }
-  const baseNonce = hexToUint8Array(info.content_nonce);
   // Thumbnails give up quickly (they're retried the next time they're shown) so one failing
   // file can't hold up the thumbnail queue; previews and downloads wait out a busy server.
-  const attempts = purpose === "thumbnail" ? 2 : 8;
+  return encryptedFileFrom(info, key, { attempts: purpose === "thumbnail" ? 2 : 8 });
+}
+
+/**
+ * Reader over encrypted content at `info.download_url`, decrypted with `key`. `headers` go with
+ * every content request (a shared link sends its access grant this way).
+ */
+export function encryptedFileFrom(
+  info: Omit<DownloadInfo, "wrapped_file_key">,
+  key: CryptoKey,
+  { attempts = 8, headers = {} as Record<string, string> } = {}
+): EncryptedFile {
+  const baseNonce = hexToUint8Array(info.content_nonce);
   const size = info.size_bytes;
   const partSize = info.part_size || 8 * 1024 * 1024;
   const encPart = partSize + GCM_TAG;
@@ -80,7 +91,7 @@ export async function openEncryptedFile(
 
   async function fetchWhole() {
     if (size > MAX_WHOLE_FETCH) throw new Error("range_unsupported");
-    const res = await apiFetchRetrying(info.download_url, { timeoutMs: 60_000 }, attempts);
+    const res = await apiFetchRetrying(info.download_url, { headers, timeoutMs: 60_000 }, attempts);
     if (!res.ok) throw await errorFromResponse(res);
     const all = new Uint8Array(await res.arrayBuffer());
     for (let n = 1; n <= partCount; n++) {
@@ -100,7 +111,7 @@ export async function openEncryptedFile(
     const p = (async () => {
       const start = (n - 1) * encPart;
       const end = start + plainLength(n) + GCM_TAG - 1;
-      const res = await apiFetchRetrying(info.download_url, { headers: { Range: `bytes=${start}-${end}` }, timeoutMs: 60_000 }, attempts);
+      const res = await apiFetchRetrying(info.download_url, { headers: { ...headers, Range: `bytes=${start}-${end}` }, timeoutMs: 60_000 }, attempts);
       if (res.status === 200) {
         // Storage ignored the range and sent everything.
         await res.body?.cancel();
@@ -136,7 +147,7 @@ export async function openEncryptedFile(
   }
 
   async function readAll(onProgress?: (fraction: number) => void): Promise<Blob> {
-    const res = await apiFetchRetrying(info.download_url, { timeoutMs: 60_000 }, attempts);
+    const res = await apiFetchRetrying(info.download_url, { headers, timeoutMs: 60_000 }, attempts);
     if (!res.ok) throw await errorFromResponse(res);
     if (!res.body) throw new DecryptError();
     const reader = res.body.getReader();

@@ -219,10 +219,11 @@ class NodeDownloadView(APIView):
 
         download_info = get_download_info(node=node, user=request.user, version_no=parse_version(request))
 
-        # The browser also fetches keys to draw thumbnails and open the in-app viewer.
-        # Thumbnails aren't something the person did, so they aren't logged.
+        # The browser also fetches keys to draw thumbnails, open the in-app viewer and create
+        # share links. Thumbnails aren't something the person did, and sharing is logged when
+        # the link is created, so neither is logged here.
         purpose = request.query_params.get("purpose", "download")
-        if purpose != "thumbnail":
+        if purpose not in ("thumbnail", "share"):
             AuditLog.objects.create(
                 user=request.user,
                 action="file.previewed" if purpose == "preview" else "file.downloaded",
@@ -230,6 +231,54 @@ class NodeDownloadView(APIView):
                 target_id=str(node.id),
             )
         return Response(download_info)
+
+
+def stream_node_content(node: Node, range_header: str | None):
+    """
+    Streams a file's encrypted bytes from SpaceByte (with HTTP range support). Callers check
+    access first; the browser decrypts, so the server never sees plaintext.
+    """
+    if not node.spacebyte_hash:
+        return Response({"error": "This file's content is not available."}, status=status.HTTP_404_NOT_FOUND)
+
+    if not transfers.acquire(transfers.DOWNLOAD):
+        return transfers.busy_response()
+    sb_client = get_spacebyte_client()
+    try:
+        upstream_resp, resp_status, resp_headers = sb_client.download_stream(
+            node.spacebyte_hash,
+            range_header=range_header,
+            timeout=60,
+        )
+    except Exception as e:
+        transfers.release(transfers.DOWNLOAD)
+        logger.warning("SpaceByte download stream failed for node %s: %s", node.id, e)
+        if not sb_client.is_configured:
+            return Response(
+                {"error": "File storage is not configured on the server.", "code": "spacebyte_not_configured"},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+        upstream_status = getattr(e, "status_code", None)
+        if upstream_status == 404:
+            return Response({"error": "This file was not found in storage."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(
+            {"error": "Could not download this file from storage. Please try again."},
+            status=status.HTTP_502_BAD_GATEWAY,
+        )
+
+    # The slot is held while the body streams and freed when the response closes.
+    streaming_resp = StreamingHttpResponse(
+        transfers.ReleasingStream(upstream_resp),
+        status=resp_status,
+        content_type="application/octet-stream",
+    )
+    if resp_headers.get("Content-Length"):
+        streaming_resp["Content-Length"] = resp_headers["Content-Length"]
+    if resp_headers.get("Content-Range"):
+        streaming_resp["Content-Range"] = resp_headers["Content-Range"]
+    streaming_resp["Accept-Ranges"] = resp_headers.get("Accept-Ranges", "bytes")
+    streaming_resp["Cache-Control"] = "no-store"
+    return streaming_resp
 
 
 class NodeContentView(APIView):
@@ -251,47 +300,7 @@ class NodeContentView(APIView):
         version = versions.filter(version_no=version_no).first() if version_no else versions.order_by("-version_no").first()
         if not version:
             raise NotFound("File version not found.")
-        if not node.spacebyte_hash:
-            return Response({"error": "This file's content is not available."}, status=status.HTTP_404_NOT_FOUND)
-
-        if not transfers.acquire(transfers.DOWNLOAD):
-            return transfers.busy_response()
-        sb_client = get_spacebyte_client()
-        try:
-            upstream_resp, resp_status, resp_headers = sb_client.download_stream(
-                node.spacebyte_hash,
-                range_header=request.META.get("HTTP_RANGE"),
-                timeout=60,
-            )
-        except Exception as e:
-            transfers.release(transfers.DOWNLOAD)
-            logger.warning("SpaceByte download stream failed for node %s: %s", node.id, e)
-            if not sb_client.is_configured:
-                return Response(
-                    {"error": "File storage is not configured on the server.", "code": "spacebyte_not_configured"},
-                    status=status.HTTP_502_BAD_GATEWAY,
-                )
-            upstream_status = getattr(e, "status_code", None)
-            if upstream_status == 404:
-                return Response({"error": "This file was not found in storage."}, status=status.HTTP_404_NOT_FOUND)
-            return Response(
-                {"error": "Could not download this file from storage. Please try again."},
-                status=status.HTTP_502_BAD_GATEWAY,
-            )
-
-        # The slot is held while the body streams and freed when the response closes.
-        streaming_resp = StreamingHttpResponse(
-            transfers.ReleasingStream(upstream_resp),
-            status=resp_status,
-            content_type="application/octet-stream",
-        )
-        if resp_headers.get("Content-Length"):
-            streaming_resp["Content-Length"] = resp_headers["Content-Length"]
-        if resp_headers.get("Content-Range"):
-            streaming_resp["Content-Range"] = resp_headers["Content-Range"]
-        streaming_resp["Accept-Ranges"] = resp_headers.get("Accept-Ranges", "bytes")
-        streaming_resp["Cache-Control"] = "no-store"
-        return streaming_resp
+        return stream_node_content(node, request.META.get("HTTP_RANGE"))
 
 
 class UploadInitView(APIView):
