@@ -10,6 +10,8 @@ const routes: RouteRecordRaw[] = [
   { path: "/login", name: "login", component: () => import("../features/auth/LoginView.vue"), meta: { guestOnly: true } },
   { path: "/register", name: "register", component: () => import("../features/auth/RegisterView.vue"), meta: { guestOnly: true } },
   { path: "/forgot-password", name: "forgot-password", component: () => import("../features/auth/ForgotPasswordView.vue"), meta: { guestOnly: true } },
+  // Not guest-only: a reset link must work even in a browser that's still signed in.
+  { path: "/reset-password", name: "reset-password", component: () => import("../features/auth/ResetPasswordView.vue") },
   {
     path: "/app",
     component: () => import("../layouts/AppLayout.vue"),

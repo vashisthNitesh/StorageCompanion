@@ -46,8 +46,25 @@ class User(AbstractBaseUser, PermissionsMixin, BaseModel):
     # X25519 private key wrapped with user's Master Key
     wrapped_private_key = models.TextField(blank=True, default="")
     
-    # Master key wrapped with the 24-word recovery phrase
+    # Master key wrapped with the recovery key (generated and shown once in the browser)
     recovery_wrapped_master_key = models.TextField(blank=True, default="")
+    # SHA-256 of a proof derived from the recovery key; lets a reset show the key is known
+    # without the server ever seeing the key itself.
+    recovery_auth_hash = models.CharField(max_length=64, blank=True, default="")
+    # Set once the user confirmed they saved the recovery key. Accounts without it are
+    # asked to create one (keys made before this existed were never shown to anyone).
+    recovery_key_confirmed_at = models.DateTimeField(null=True, blank=True)
+
+    # How the sign-in secret is formed. "auth_key": the browser sends a key derived from the
+    # vault key (the server never sees the password). "password": the plain password, used by
+    # staff and by older accounts until their next sign-in upgrades them.
+    AUTH_SCHEME_PASSWORD = "password"
+    AUTH_SCHEME_AUTH_KEY = "auth_key"
+    auth_scheme = models.CharField(
+        max_length=16,
+        choices=[(AUTH_SCHEME_PASSWORD, "Password"), (AUTH_SCHEME_AUTH_KEY, "Derived auth key")],
+        default=AUTH_SCHEME_PASSWORD,
+    )
     
     # Google account subject ("sub" claim) once the user has signed in with Google
     google_sub = models.CharField(max_length=255, null=True, blank=True, unique=True)
@@ -73,6 +90,10 @@ class User(AbstractBaseUser, PermissionsMixin, BaseModel):
 
     def __str__(self):
         return self.email
+
+    @property
+    def has_recovery_key(self) -> bool:
+        return bool(self.recovery_key_confirmed_at and self.recovery_auth_hash and self.recovery_wrapped_master_key)
 
 
 class MFADevice(TimeStampedModel):

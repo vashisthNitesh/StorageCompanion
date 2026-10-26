@@ -122,7 +122,7 @@ async function disable() {
   disabling.value = true;
   disableError.value = "";
   try {
-    const body = isGoogleOnly.value ? { code: disableSecret.value } : { password: disableSecret.value };
+    const body = isGoogleOnly.value ? { code: disableSecret.value } : await authStore.proofFor(disableSecret.value);
     await apiRequest("/api/v1/auth/mfa/disable", { method: "POST", body: JSON.stringify(body) });
     await authStore.fetchProfile();
     disableOpen.value = false;

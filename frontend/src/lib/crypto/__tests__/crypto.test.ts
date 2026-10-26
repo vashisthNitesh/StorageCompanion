@@ -21,9 +21,16 @@ import {
   decryptName,
 } from "../names";
 import {
-  generateRecoveryPhrase,
-  deriveRecoveryKey,
-} from "../recovery";
+  generateRecoveryKey,
+  parseRecoveryKey,
+  formatRecoveryKey,
+  recoveryWrappingKey,
+  recoveryProof,
+  recoveryProofHash,
+  InvalidRecoveryKey,
+} from "../recoveryKey";
+import { deriveAuthKey } from "../authKey";
+import { sha256Hex } from "../hkdf";
 
 describe("Pure Crypto Module", () => {
   it("generates random salt and hex conversions round-trip", () => {
@@ -92,13 +99,42 @@ describe("Pure Crypto Module", () => {
     expect(decrypted).toBe(originalName);
   });
 
-  it("generates 24-word recovery phrase and derives recovery key", async () => {
-    const phrase = generateRecoveryPhrase();
-    expect(phrase).toHaveLength(24);
+  it("formats a recovery key and parses it back, forgiving case, spacing and look-alikes", () => {
+    const { secret, display } = generateRecoveryKey();
+    expect(secret).toHaveLength(20);
+    expect(display).toMatch(/^([0-9A-HJKMNP-TV-Z]{4}-){7}[0-9A-HJKMNP-TV-Z]{4}$/);
+    expect(uint8ArrayToHex(parseRecoveryKey(display))).toBe(uint8ArrayToHex(secret));
+    expect(uint8ArrayToHex(parseRecoveryKey(` ${display.toLowerCase().replace(/-/g, " ")} `))).toBe(uint8ArrayToHex(secret));
 
-    const key1 = await deriveRecoveryKey(phrase);
-    const key2 = await deriveRecoveryKey(phrase.join(" "));
-    expect(key1).toHaveLength(32);
-    expect(uint8ArrayToHex(key1)).toBe(uint8ArrayToHex(key2));
+    const fixed = new Uint8Array(20).fill(0);
+    expect(formatRecoveryKey(fixed)).toBe("0000-0000-0000-0000-0000-0000-0000-0000");
+    expect(uint8ArrayToHex(parseRecoveryKey("OOOO-oooo-0000-0000-0000-0000-0000-0000"))).toBe(uint8ArrayToHex(fixed));
+    expect(() => parseRecoveryKey("ABCD-EFGH")).toThrow(InvalidRecoveryKey);
+    expect(() => parseRecoveryKey("UUUU-0000-0000-0000-0000-0000-0000-0000")).toThrow(InvalidRecoveryKey);
+  });
+
+  it("unwraps the master key with the recovery key and proves it with a hash", async () => {
+    const masterKey = generateMasterKey();
+    const { secret, display } = generateRecoveryKey();
+    const wrapped = await wrapKey(await recoveryWrappingKey(secret), masterKey);
+    const unwrapped = await unwrapKey(await recoveryWrappingKey(parseRecoveryKey(display)), wrapped);
+    expect(uint8ArrayToHex(unwrapped)).toBe(uint8ArrayToHex(masterKey));
+
+    const proof = await recoveryProof(secret);
+    expect(proof).toMatch(/^[0-9a-f]{64}$/);
+    expect(await recoveryProofHash(secret)).toBe(await sha256Hex(hexToUint8Array(proof)));
+    // The wrapping key and the proof are independent.
+    expect(uint8ArrayToHex(await recoveryWrappingKey(secret))).not.toBe(proof);
+
+    const other = generateRecoveryKey().secret;
+    await expect(unwrapKey(await recoveryWrappingKey(other), wrapped)).rejects.toThrow();
+  });
+
+  it("derives a stable auth key that differs from the KEK", async () => {
+    const kek = generateMasterKey();
+    const a = await deriveAuthKey(kek);
+    expect(a).toMatch(/^[0-9a-f]{64}$/);
+    expect(await deriveAuthKey(kek)).toBe(a);
+    expect(a).not.toBe(uint8ArrayToHex(kek));
   });
 });

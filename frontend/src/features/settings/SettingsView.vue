@@ -4,6 +4,7 @@ import { useRoute } from "vue-router";
 import UiPageHeader from "../../components/ui/UiPageHeader.vue";
 import { useAuthStore } from "../../stores/auth";
 import PasswordCard from "./PasswordCard.vue";
+import RecoveryKeyCard from "./RecoveryKeyCard.vue";
 import TwoStepCard from "./TwoStepCard.vue";
 import SessionsCard from "./SessionsCard.vue";
 import ActivityCard from "./ActivityCard.vue";
@@ -40,6 +41,7 @@ onMounted(async () => {
     <div class="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_420px]">
       <div class="space-y-5">
         <PasswordCard @changed="refreshAfterPasswordChange" />
+        <RecoveryKeyCard v-if="authStore.hasPasswordVault" />
         <TwoStepCard ref="twoStep" />
       </div>
       <div class="space-y-5">

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { KeyRound, Lock, Server, ShieldCheck, Smartphone } from "lucide-vue-next";
+import { KeyRound, LifeBuoy, Lock, Server, ShieldCheck, Smartphone } from "lucide-vue-next";
 import SiteHeader from "./components/SiteHeader.vue";
 import SiteFooter from "./components/SiteFooter.vue";
 
@@ -7,7 +7,12 @@ const points = [
   {
     icon: KeyRound,
     title: "Your key is made on your device",
-    text: "When you sign up with email, your browser creates a random 256-bit key for your vault and locks it with a key derived from your password using Argon2id. We only ever store the locked version.",
+    text: "When you sign up with email, your browser creates a random 256-bit key for your vault and locks it with a key derived from your password using Argon2id. We only ever store the locked version. Your password never leaves your device: to sign in, your browser sends a separate key derived from it.",
+  },
+  {
+    icon: LifeBuoy,
+    title: "A recovery key only you hold",
+    text: "At sign-up you get a recovery key that also unlocks your vault. If you forget your password, an emailed link plus your recovery key lets you choose a new one in your browser. We never see the key, so without it we can restore your account but not your files.",
   },
   {
     icon: Lock,

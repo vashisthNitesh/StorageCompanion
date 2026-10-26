@@ -10,6 +10,7 @@ import UiSkeleton from "../components/ui/UiSkeleton.vue";
 import CommandPalette from "../components/CommandPalette.vue";
 import ShortcutsDialog from "../components/ShortcutsDialog.vue";
 import VaultUnlockModal from "../features/auth/VaultUnlockModal.vue";
+import RecoveryKeyDialog from "../features/auth/RecoveryKeyDialog.vue";
 import ConflictDialog from "../features/files/ConflictDialog.vue";
 import { useAuthStore } from "../stores/auth";
 import { useFilesStore } from "../stores/files";
@@ -84,6 +85,34 @@ const banner = computed(() => {
 // --- Vault ----------------------------------------------------------------------
 const restoringGoogle = ref(false);
 const needsUnlock = computed(() => isCustomer.value && !authStore.isVaultUnlocked && authStore.hasPasswordVault && route.meta.customer === true);
+
+// Accounts without a saved recovery key are asked to make one once the vault is open.
+// "Remind me later" holds off for this browser session.
+const RECOVERY_SNOOZE_KEY = "sc_recovery_snoozed";
+function recoverySnoozed() {
+  try {
+    return sessionStorage.getItem(RECOVERY_SNOOZE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+const recoverySnooze = ref(recoverySnoozed());
+const recoveryOpen = ref(false);
+watch(
+  () => authStore.needsRecoveryKey && authStore.isVaultUnlocked && isCustomer.value && !recoverySnooze.value,
+  (show) => {
+    if (show) recoveryOpen.value = true;
+  },
+  { immediate: true }
+);
+function snoozeRecovery() {
+  recoverySnooze.value = true;
+  try {
+    sessionStorage.setItem(RECOVERY_SNOOZE_KEY, "1");
+  } catch {
+    // Private mode: the prompt comes back on the next page load.
+  }
+}
 
 // --- Uploads, shortcuts and sign out ------------------------------------------
 const fileInput = ref<HTMLInputElement | null>(null);
@@ -205,6 +234,7 @@ async function signOut() {
     <CommandPalette @sign-out="signOut" />
     <ShortcutsDialog />
     <VaultUnlockModal :open="needsUnlock" @sign-out="signOut" />
+    <RecoveryKeyDialog v-model:open="recoveryOpen" @later="snoozeRecovery" />
     <ConflictDialog />
   </div>
 </template>

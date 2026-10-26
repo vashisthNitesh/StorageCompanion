@@ -24,6 +24,8 @@ Values marked *secret* are `sync: false` in `render.yaml`: set them in the dashb
 | `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` | for payments, secret | Checkout is disabled until set. The old `rzp_test_sample` / `sample_*` placeholders are treated as unset. |
 | `RAZORPAY_WEBHOOK_SECRET` | for webhooks, secret | In Razorpay → Webhooks, point to `https://<your-domain>/api/v1/webhooks/razorpay`, subscribe to `payment.captured`, `order.paid` and `payment.failed`, and use the same secret. |
 | `BUSINESS_ADDRESS` | optional | Printed on invoices. Prices are final and invoices read “Inclusive of all taxes”. |
+| `PUBLIC_SITE_URL` | yes | Base of links in emails, e.g. `https://smartspacedata.com`. Never taken from the request. |
+| `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, `EMAIL_USE_TLS`, `DEFAULT_FROM_EMAIL` | for password reset, secret | SMTP for “Forgot password” emails. Without `EMAIL_HOST` no email is sent and users can't reset their password. |
 | `ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS` | yes | Set in `render.yaml`; add any custom domain. |
 | `WEB_CONCURRENCY`, `GUNICORN_THREADS` | optional | Default 1 worker × 8 threads (fits the free plan's memory). |
 

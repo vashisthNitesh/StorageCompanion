@@ -14,14 +14,20 @@ tokens in the URL are not accepted. Access tokens last 30 minutes and are bound 
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/auth/config` | `{google_client_id, payments_enabled}` |
-| POST | `/auth/register` | Email, password and client-generated wrapped keys. Sets the refresh cookie. |
-| POST | `/auth/login` | `{email, password, totp_code?}`. Returns `{mfa_required: true}` when a 2FA code is needed. 8 failed attempts lock the account for 15 minutes. |
+| POST | `/auth/prelogin` | `{email}` → `{scheme, kdf_salt, kdf_params}`. Unknown emails get a stable made-up salt. |
+| POST | `/auth/register` | `{email, auth_key, …wrapped keys, recovery_wrapped_master_key, recovery_auth_hash}`. The password is never sent: `auth_key` = HKDF(Argon2id(password, salt), "smartspace-auth-v1"). Sets the refresh cookie. |
+| POST | `/auth/login` | `{email, auth_key \| password, totp_code?}`. `auth_key` accounts never send the password; staff and older accounts send `password` (older customer accounts also send `auth_key` once and are upgraded). Returns `{mfa_required: true}` when a 2FA code is needed. 8 failed attempts lock the account for 15 minutes. |
 | POST | `/auth/google` | `{credential, totp_code?}` – Google ID token. Requires `GOOGLE_CLIENT_ID`, a verified Google email, and refuses to take over unverified password accounts. Returns `oauth_vault_hex` only for Google-created accounts. |
 | POST | `/auth/refresh` | Uses the HTTP-only refresh cookie; rotates it. |
 | POST | `/auth/logout` | Revokes the current session. |
 | GET | `/auth/me` | Current user, plan and quota. |
-| POST | `/auth/password` | Change password (and re-wrapped master key). Signs out other sessions. |
-| POST | `/auth/vault` | One-time vault creation for password accounts without one. |
+| POST | `/auth/password` | `{current_auth_key, new_auth_key, new_wrapped_master_key, new_kdf_salt, new_kdf_params}` (staff: `{current_password, new_password}`). Signs out other sessions. |
+| POST | `/auth/vault` | One-time vault creation for password accounts without one; also switches the account to `auth_key`. |
+| POST | `/auth/recovery-key/confirm` | Marks the recovery key created at sign-up as saved. |
+| PUT | `/auth/recovery-key` | `{auth_key, recovery_wrapped_master_key, recovery_auth_hash}` replaces the recovery key. |
+| POST | `/auth/password-reset` | `{email}` → emails a single-use link valid for 30 minutes (3 per address per hour). Same response whether or not the account exists. |
+| POST | `/auth/password-reset/check` | `{uid, token}` → `{email, has_recovery_key, recovery_wrapped_master_key, has_vault}`. |
+| POST | `/auth/password-reset/complete` | `{uid, token, mode: "recovery", recovery_auth, auth_key, wrapped_master_key, kdf_salt, kdf_params}` re-wraps the same vault key; `mode: "reset"` with `confirm_data_loss: true` and new vault keys replaces the vault (old files become unreadable). Signs out every session. |
 | GET | `/auth/vault/google-key` | Vault key for Google-created accounts (new browser tabs). |
 | POST | `/auth/mfa/enroll` · `/auth/mfa/verify` · `/auth/mfa/disable` | TOTP two-step verification. |
 | GET | `/auth/sessions` | Active sessions with `is_current`. |

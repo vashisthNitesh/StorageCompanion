@@ -1,11 +1,19 @@
 from rest_framework import serializers
 from apps.accounts.models import User, Session
 
+# 32-byte values the browser sends as lowercase hex (auth keys, recovery proofs and their hashes).
+HEX_256 = r"^[0-9a-f]{64}$"
+
+
+def hex_256(**kwargs):
+    return serializers.RegexField(HEX_256, error_messages={"invalid": "Invalid key."}, **kwargs)
+
 
 class UserSerializer(serializers.ModelSerializer):
     subscription = serializers.SerializerMethodField()
     quota = serializers.SerializerMethodField()
     has_google = serializers.SerializerMethodField()
+    has_recovery_key = serializers.BooleanField(read_only=True)
 
     def get_has_google(self, obj):
         return bool(obj.google_sub)
@@ -24,6 +32,9 @@ class UserSerializer(serializers.ModelSerializer):
             "public_key",
             "wrapped_private_key",
             "recovery_wrapped_master_key",
+            "has_recovery_key",
+            "recovery_key_confirmed_at",
+            "auth_scheme",
             "email_verified_at",
             "mfa_enabled",
             "has_google",
@@ -35,6 +46,8 @@ class UserSerializer(serializers.ModelSerializer):
             "id",
             "is_staff",
             "is_superuser",
+            "recovery_key_confirmed_at",
+            "auth_scheme",
             "email_verified_at",
             "mfa_enabled",
             "created_at",
@@ -113,8 +126,9 @@ class UserSerializer(serializers.ModelSerializer):
 
 
 class RegisterSerializer(serializers.Serializer):
+    """The browser sends a key derived from the password, never the password itself."""
     email = serializers.EmailField()
-    password = serializers.CharField(write_only=True, min_length=10)
+    auth_key = hex_256(write_only=True)
     full_name = serializers.CharField(required=False, allow_blank=True, default="")
     wrapped_master_key = serializers.CharField()
     kdf_salt = serializers.CharField()
@@ -122,6 +136,7 @@ class RegisterSerializer(serializers.Serializer):
     public_key = serializers.CharField()
     wrapped_private_key = serializers.CharField()
     recovery_wrapped_master_key = serializers.CharField()
+    recovery_auth_hash = hex_256()
 
     def validate_email(self, value):
         email = value.lower().strip()
@@ -132,7 +147,10 @@ class RegisterSerializer(serializers.Serializer):
 
 class LoginSerializer(serializers.Serializer):
     email = serializers.CharField()
-    password = serializers.CharField(write_only=True)
+    # Upgraded accounts send auth_key; staff and older accounts send password (plus auth_key
+    # once, which upgrades the account).
+    password = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    auth_key = hex_256(write_only=True, required=False)
     totp_code = serializers.CharField(required=False, allow_blank=True)
 
 
@@ -154,11 +172,16 @@ class SessionSerializer(serializers.ModelSerializer):
 
 
 class ChangePasswordSerializer(serializers.Serializer):
-    current_password = serializers.CharField(write_only=True)
-    new_password = serializers.CharField(write_only=True, min_length=10)
+    # Proof of the current secret: auth_key for upgraded accounts, password otherwise.
+    current_auth_key = hex_256(write_only=True, required=False)
+    current_password = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    # Vault accounts: the master key re-wrapped in the browser with the new password's KEK.
+    new_auth_key = hex_256(write_only=True, required=False)
     new_wrapped_master_key = serializers.CharField(required=False, allow_blank=True, default="")
     new_kdf_salt = serializers.CharField(required=False, allow_blank=True, default="")
     new_kdf_params = serializers.JSONField(required=False, default=dict)
+    # Accounts without a vault (staff) still set a plain password.
+    new_password = serializers.CharField(write_only=True, required=False, min_length=10)
 
 
 class GoogleAuthSerializer(serializers.Serializer):
@@ -174,3 +197,35 @@ class VaultSetupSerializer(serializers.Serializer):
     public_key = serializers.CharField()
     wrapped_private_key = serializers.CharField()
     recovery_wrapped_master_key = serializers.CharField()
+    recovery_auth_hash = hex_256()
+
+
+class RecoveryKeySerializer(serializers.Serializer):
+    recovery_wrapped_master_key = serializers.CharField()
+    recovery_auth_hash = hex_256()
+
+
+class PasswordResetCompleteSerializer(serializers.Serializer):
+    uid = serializers.CharField()
+    token = serializers.CharField()
+    # "recovery": the master key re-wrapped with the new password, proven with the recovery key.
+    # "reset": no recovery key; a brand-new vault replaces the old one (old files stay unreadable).
+    mode = serializers.ChoiceField(choices=["recovery", "reset"])
+    auth_key = hex_256(write_only=True)
+    wrapped_master_key = serializers.CharField()
+    kdf_salt = serializers.CharField()
+    kdf_params = serializers.JSONField()
+    recovery_auth = hex_256(write_only=True, required=False)
+    public_key = serializers.CharField(required=False)
+    wrapped_private_key = serializers.CharField(required=False)
+    confirm_data_loss = serializers.BooleanField(required=False, default=False)
+
+    def validate(self, attrs):
+        if attrs["mode"] == "recovery" and not attrs.get("recovery_auth"):
+            raise serializers.ValidationError("Enter your recovery key.")
+        if attrs["mode"] == "reset":
+            if not attrs.get("confirm_data_loss"):
+                raise serializers.ValidationError("Confirm that files uploaded before can't be decrypted.")
+            if not attrs.get("public_key") or not attrs.get("wrapped_private_key"):
+                raise serializers.ValidationError("Missing vault keys.")
+        return attrs

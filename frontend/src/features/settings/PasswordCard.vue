@@ -7,10 +7,7 @@ import UiPasswordInput from "../../components/ui/UiPasswordInput.vue";
 import UiButton from "../../components/ui/UiButton.vue";
 import UiAlert from "../../components/ui/UiAlert.vue";
 import { useAuthStore } from "../../stores/auth";
-import { apiRequest } from "../../lib/api";
 import { toast } from "../../lib/toast";
-import { deriveKEK, DEFAULT_KDF_PARAMS, generateRandomSalt } from "../../lib/crypto/kdf";
-import { wrapKey } from "../../lib/crypto/keys";
 import { rules, useForm } from "../../composables/useForm";
 import { passwordStrength } from "./passwordStrength";
 
@@ -35,25 +32,23 @@ const canSubmit = computed(() => !!form.values.current && strength.value.checks.
 const barTone = computed(() => ["bg-danger", "bg-danger", "bg-warning", "bg-success", "bg-success"][strength.value.score]);
 
 async function submit() {
-  if (authStore.user?.wrapped_master_key && !authStore.masterKey) {
-    form.formError.value = "Unlock your files first (open My files), then change your password.";
-    return;
-  }
+  // The browser checks the current password against the vault, re-wraps the vault key with the
+  // new one and sends only derived keys. Files don't need re-encrypting.
+  let wrongCurrent = false;
   const ok = await form.submit(async (v) => {
-    const payload: Record<string, unknown> = { current_password: v.current, new_password: v.next };
-    if (authStore.masterKey && authStore.user?.wrapped_master_key) {
-      // Re-wrap the vault key with the new password; files don't need re-encrypting.
-      const salt = generateRandomSalt(16);
-      payload.new_wrapped_master_key = await wrapKey(await deriveKEK(v.next, salt, DEFAULT_KDF_PARAMS), authStore.masterKey);
-      payload.new_kdf_salt = salt;
-      payload.new_kdf_params = DEFAULT_KDF_PARAMS;
+    try {
+      await authStore.changePassword(v.current, v.next);
+    } catch (err) {
+      wrongCurrent = (err as { field?: string })?.field === "current";
+      throw err;
     }
-    await apiRequest("/api/v1/auth/password", { method: "POST", body: JSON.stringify(payload) });
   });
-  if (ok) {
+  if (wrongCurrent) {
+    form.formError.value = "";
+    form.errors.current = "That's not your current password.";
+  } else if (ok) {
     form.reset();
     toast.success("Password updated. Other devices were signed out.");
-    await authStore.fetchProfile();
     emit("changed");
   } else if (/current password/i.test(form.formError.value)) {
     // The API reports a wrong current password as a general error; show it on the field.

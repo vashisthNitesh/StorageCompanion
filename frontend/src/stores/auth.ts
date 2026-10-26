@@ -16,7 +16,8 @@ import {
   hexToUint8Array,
 } from "../lib/crypto/kdf";
 import { generateMasterKey, generateUserKeypair, wrapKey, unwrapKey } from "../lib/crypto/keys";
-import { generateRecoveryPhrase, deriveRecoveryKey } from "../lib/crypto/recovery";
+import { deriveAuthKey } from "../lib/crypto/authKey";
+import { generateRecoveryKey, recoveryProofHash, recoveryWrappingKey } from "../lib/crypto/recoveryKey";
 import { toast } from "../lib/toast";
 import { COPY } from "../lib/errors";
 
@@ -32,6 +33,11 @@ export interface UserProfile {
   public_key: string;
   wrapped_private_key: string;
   recovery_wrapped_master_key: string;
+  /** A recovery key exists and the user confirmed saving it. */
+  has_recovery_key?: boolean;
+  recovery_key_confirmed_at?: string | null;
+  /** "auth_key": signs in with a key derived from the password; "password": staff and older accounts. */
+  auth_scheme?: "auth_key" | "password";
   mfa_enabled: boolean;
   has_google?: boolean;
   created_at?: string;
@@ -76,25 +82,50 @@ function loadMasterKeyFromSession(): Uint8Array | null {
   }
 }
 
-/** Generates a fresh vault (master key, sharing keypair, recovery wrap) protected by `password`. */
-async function createVaultMaterial(password: string) {
-  const recoveryKey = await deriveRecoveryKey(generateRecoveryPhrase());
+/** The key-encryption key for a password, and the auth key derived from it (sent instead of the password). */
+export async function passwordKeys(password: string, saltHex: string, params: unknown = DEFAULT_KDF_PARAMS) {
+  const kek = await deriveKEK(password, saltHex, params);
+  return { kek, authKey: await deriveAuthKey(kek) };
+}
+
+/** A new recovery key for `masterKey`: the text to show once, and what the server stores. */
+export async function createRecoveryMaterial(masterKey: Uint8Array) {
+  const { secret, display } = generateRecoveryKey();
+  return {
+    display,
+    payload: {
+      recovery_wrapped_master_key: await wrapKey(await recoveryWrappingKey(secret), masterKey),
+      recovery_auth_hash: await recoveryProofHash(secret),
+    },
+  };
+}
+
+/**
+ * Generates a fresh vault (master key, sharing keypair) protected by `password`, plus a recovery
+ * key unless `withRecovery` is false. Nothing secret leaves the browser unwrapped.
+ */
+export async function createVaultMaterial(password: string, { withRecovery = true } = {}) {
   const kdfSalt = generateRandomSalt(16);
-  const kek = await deriveKEK(password, kdfSalt, DEFAULT_KDF_PARAMS);
+  const { kek, authKey } = await passwordKeys(password, kdfSalt, DEFAULT_KDF_PARAMS);
   const masterKey = generateMasterKey();
   const keypair = await generateUserKeypair();
+  const recovery = withRecovery ? await createRecoveryMaterial(masterKey) : null;
   return {
     masterKey,
+    authKey,
+    recoveryKey: recovery?.display ?? null,
     payload: {
       wrapped_master_key: await wrapKey(kek, masterKey),
       kdf_salt: kdfSalt,
       kdf_params: DEFAULT_KDF_PARAMS,
       public_key: keypair.publicKeyBase64,
       wrapped_private_key: await wrapKey(masterKey, keypair.privateKeyBytes),
-      recovery_wrapped_master_key: await wrapKey(recoveryKey, masterKey),
+      ...(recovery?.payload ?? {}),
     },
   };
 }
+
+type Prelogin = { scheme: "auth_key" | "password"; kdf_salt: string; kdf_params: unknown };
 
 export const useAuthStore = defineStore("auth", () => {
   const user = ref<UserProfile | null>(null);
@@ -104,6 +135,10 @@ export const useAuthStore = defineStore("auth", () => {
   const googleClientId = ref("");
   const paymentsEnabled = ref(false);
   const authConfigLoaded = ref(false);
+  /** Recovery key made with the vault (sign-up or first vault setup), shown until the user confirms saving it. Memory only. */
+  const pendingRecoveryKey = ref<string | null>(null);
+  /** Proof of the password from this page's sign-in or unlock, so a recovery key can be made without asking again. Memory only. */
+  let recentProof: Record<string, string> | null = null;
 
   const isAuthenticated = computed(() => !!user.value && !!getAccessToken());
   const isVaultUnlocked = computed(() => !!masterKey.value);
@@ -117,10 +152,16 @@ export const useAuthStore = defineStore("auth", () => {
   const needsVaultSetup = computed(
     () => !!user.value && !isMasterAdmin.value && !user.value.wrapped_master_key && !user.value.has_google
   );
+  /** Password vaults without a saved recovery key are asked to make one. */
+  const needsRecoveryKey = computed(
+    () => !!user.value && !isMasterAdmin.value && !!user.value.wrapped_master_key && !user.value.has_recovery_key
+  );
 
   function clearSession() {
     user.value = null;
     masterKey.value = null;
+    pendingRecoveryKey.value = null;
+    recentProof = null;
     setAccessToken(null);
     saveMasterKeyToSession(null);
   }
@@ -144,33 +185,62 @@ export const useAuthStore = defineStore("auth", () => {
   async function register(email: string, password: string, fullName = "") {
     isLoading.value = true;
     try {
-      const { masterKey: newMasterKey, payload } = await createVaultMaterial(password);
+      const vault = await createVaultMaterial(password);
       const response = await apiRequest<{ user: UserProfile; access_token: string }>("/api/v1/auth/register", {
         method: "POST",
-        body: JSON.stringify({ email, password, full_name: fullName, ...payload }),
+        body: JSON.stringify({ email, auth_key: vault.authKey, full_name: fullName, ...vault.payload }),
       });
       setAccessToken(response.access_token);
       user.value = response.user;
-      setMasterKey(newMasterKey);
-      return { user: response.user };
+      setMasterKey(vault.masterKey);
+      recentProof = { auth_key: vault.authKey };
+      pendingRecoveryKey.value = vault.recoveryKey;
+      return { user: response.user, recoveryKey: vault.recoveryKey };
     } finally {
       isLoading.value = false;
     }
   }
 
-  async function unlockWithPassword(profile: UserProfile, password: string) {
-    const kek = await deriveKEK(password, profile.kdf_salt, profile.kdf_params || DEFAULT_KDF_PARAMS);
-    setMasterKey(await unwrapKey(kek, profile.wrapped_master_key));
+  /** Proof of `password` in the form this account signs in with. */
+  async function proofFor(password: string): Promise<Record<string, string>> {
+    const u = user.value;
+    if (u?.auth_scheme === "auth_key" && u.kdf_salt) {
+      return { auth_key: (await passwordKeys(password, u.kdf_salt, u.kdf_params || DEFAULT_KDF_PARAMS)).authKey };
+    }
+    return { password };
   }
+
+  async function unlockWithPassword(profile: UserProfile, password: string) {
+    const { kek, authKey } = await passwordKeys(password, profile.kdf_salt, profile.kdf_params || DEFAULT_KDF_PARAMS);
+    setMasterKey(await unwrapKey(kek, profile.wrapped_master_key));
+    recentProof = profile.auth_scheme === "auth_key" ? { auth_key: authKey } : { password };
+  }
+
+  // Argon2id takes about a second; reuse it when the same sign-in is retried with a 2FA code.
+  let lastDerivation: { email: string; password: string; salt: string; keys: { kek: Uint8Array; authKey: string } } | null = null;
 
   async function login(email: string, password: string, totpCode?: string): Promise<LoginResult> {
     isLoading.value = true;
     try {
+      const pre = await apiRequest<Prelogin>("/api/v1/auth/prelogin", { method: "POST", body: JSON.stringify({ email }) });
+      let keys: { kek: Uint8Array; authKey: string } | null = null;
+      if (pre.kdf_salt) {
+        const cached = lastDerivation;
+        keys =
+          cached && cached.email === email && cached.password === password && cached.salt === pre.kdf_salt
+            ? cached.keys
+            : await passwordKeys(password, pre.kdf_salt, pre.kdf_params || DEFAULT_KDF_PARAMS);
+        lastDerivation = { email, password, salt: pre.kdf_salt, keys };
+      }
+      // Upgraded accounts never send the password. Older accounts send it with the derived key
+      // once, and the server switches them over.
+      const secret = pre.scheme === "auth_key" ? { auth_key: keys?.authKey } : { password, auth_key: keys?.authKey };
       const response = await apiRequest<{ user: UserProfile; access_token: string; mfa_required?: boolean }>(
         "/api/v1/auth/login",
-        { method: "POST", body: JSON.stringify({ email, password, totp_code: totpCode || undefined }) }
+        { method: "POST", body: JSON.stringify({ email, ...secret, totp_code: totpCode || undefined }) }
       );
       if (response.mfa_required) return { mfaRequired: true };
+      lastDerivation = null;
 
       setAccessToken(response.access_token);
       user.value = response.user;
@@ -179,7 +249,9 @@ export const useAuthStore = defineStore("auth", () => {
       const isAdmin = profile.is_staff || profile.is_superuser;
       if (profile.wrapped_master_key && profile.kdf_salt) {
         try {
-          await unlockWithPassword(profile, password);
+          const kek = keys && profile.kdf_salt === pre.kdf_salt ? keys.kek : (await passwordKeys(password, profile.kdf_salt, profile.kdf_params)).kek;
+          setMasterKey(await unwrapKey(kek, profile.wrapped_master_key));
+          recentProof = profile.auth_scheme === "auth_key" ? { auth_key: keys?.authKey ?? "" } : { password };
         } catch {
           // Admin accounts do not use a vault; customers must be able to decrypt.
           if (!isAdmin) {
@@ -198,13 +270,81 @@ export const useAuthStore = defineStore("auth", () => {
   }
 
   async function setupVault(password: string) {
-    const { masterKey: newMasterKey, payload } = await createVaultMaterial(password);
+    const vault = await createVaultMaterial(password);
     const res = await apiRequest<{ user: UserProfile }>("/api/v1/auth/vault", {
       method: "POST",
-      body: JSON.stringify({ password, ...payload }),
+      body: JSON.stringify({ password, auth_key: vault.authKey, ...vault.payload }),
     });
     user.value = res.user;
-    setMasterKey(newMasterKey);
+    setMasterKey(vault.masterKey);
+    recentProof = { auth_key: vault.authKey };
+    pendingRecoveryKey.value = vault.recoveryKey;
+  }
+
+  /** Marks the recovery key made with the vault as saved. */
+  async function confirmRecoveryKey() {
+    const res = await apiRequest<{ user: UserProfile }>("/api/v1/auth/recovery-key/confirm", { method: "POST" });
+    user.value = res.user;
+    pendingRecoveryKey.value = null;
+  }
+
+  /** Whether making a new recovery key needs the password typed again. */
+  const recoveryNeedsPassword = () => !recentProof;
+
+  /**
+   * Makes a new recovery key for the unlocked vault. Nothing is saved until `save()` is called,
+   * after the user confirms they've stored the key.
+   */
+  async function prepareRecoveryKey() {
+    if (!masterKey.value) throw new Error("Unlock your files first.");
+    const material = await createRecoveryMaterial(masterKey.value);
+    return {
+      display: material.display,
+      save: async (password?: string) => {
+        const proof = password ? await proofFor(password) : recentProof;
+        if (!proof) throw new Error("Enter your password.");
+        const res = await apiRequest<{ user: UserProfile }>("/api/v1/auth/recovery-key", {
+          method: "PUT",
+          body: JSON.stringify({ ...proof, ...material.payload }),
+        });
+        user.value = res.user;
+        pendingRecoveryKey.value = null;
+        if (password) recentProof = proof;
+      },
+    };
+  }
+
+  /** Re-wraps the vault key with a new password; files don't need re-encrypting. */
+  async function changePassword(current: string, next: string) {
+    const u = user.value;
+    if (!u) throw new Error("Sign in first.");
+    let body: Record<string, unknown>;
+    if (u.wrapped_master_key) {
+      const { kek: currentKek, authKey: currentAuthKey } = await passwordKeys(current, u.kdf_salt, u.kdf_params || DEFAULT_KDF_PARAMS);
+      let key: Uint8Array;
+      try {
+        key = await unwrapKey(currentKek, u.wrapped_master_key);
+      } catch {
+        throw Object.assign(new Error("That's not your current password."), { field: "current" });
+      }
+      const salt = generateRandomSalt(16);
+      const { kek, authKey } = await passwordKeys(next, salt, DEFAULT_KDF_PARAMS);
+      body = {
+        ...(u.auth_scheme === "auth_key" ? { current_auth_key: currentAuthKey } : { current_password: current }),
+        new_auth_key: authKey,
+        new_wrapped_master_key: await wrapKey(kek, key),
+        new_kdf_salt: salt,
+        new_kdf_params: DEFAULT_KDF_PARAMS,
+      };
+      const res = await apiRequest<{ user: UserProfile }>("/api/v1/auth/password", { method: "POST", body: JSON.stringify(body) });
+      user.value = res.user;
+      setMasterKey(key);
+      recentProof = { auth_key: authKey };
+    } else {
+      body = { current_password: current, new_password: next };
+      const res = await apiRequest<{ user?: UserProfile }>("/api/v1/auth/password", { method: "POST", body: JSON.stringify(body) });
+      if (res.user) user.value = res.user;
+    }
   }
 
   async function fetchAuthConfig() {
@@ -336,6 +476,8 @@ export const useAuthStore = defineStore("auth", () => {
     canUpload,
     hasPasswordVault,
     needsVaultSetup,
+    needsRecoveryKey,
+    pendingRecoveryKey,
     register,
     login,
     loginWithGoogle,
@@ -343,6 +485,11 @@ export const useAuthStore = defineStore("auth", () => {
     unlockVault,
     restoreGoogleVault,
     setupVault,
+    confirmRecoveryKey,
+    prepareRecoveryKey,
+    recoveryNeedsPassword,
+    changePassword,
+    proofFor,
     fetchProfile,
     initAuth,
     logout,

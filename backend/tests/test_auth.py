@@ -9,9 +9,11 @@ from rest_framework.test import APIClient
 from apps.accounts.models import User, Session
 from tests.conftest import bearer_client_for
 
+AUTH_KEY = "a1" * 32  # what the browser derives from the password; the password itself is never sent
+
 REGISTER_PAYLOAD = {
     "email": "newuser@example.com",
-    "password": "SecurePassword2026!",
+    "auth_key": AUTH_KEY,
     "full_name": "New User",
     "wrapped_master_key": "wrapped_key_test_blob",
     "kdf_salt": "salt123456",
@@ -19,6 +21,7 @@ REGISTER_PAYLOAD = {
     "public_key": "x25519_pub_test",
     "wrapped_private_key": "wrapped_priv_test",
     "recovery_wrapped_master_key": "recovery_blob_test",
+    "recovery_auth_hash": "b2" * 32,
 }
 
 
@@ -52,11 +55,10 @@ def test_register_and_login_flow(api_client):
 
     user = User.objects.get(email="newuser@example.com")
     assert user.wrapped_master_key == "wrapped_key_test_blob"
-    assert user.check_password("SecurePassword2026!")
+    assert user.check_password(AUTH_KEY)
+    assert user.auth_scheme == "auth_key"
 
-    res2 = api_client.post(
-        "/api/v1/auth/login", {"email": "newuser@example.com", "password": "SecurePassword2026!"}, format="json"
-    )
+    res2 = api_client.post("/api/v1/auth/login", {"email": "newuser@example.com", "auth_key": AUTH_KEY}, format="json")
     assert res2.status_code == 200
     assert "access_token" in res2.data
     assert Session.objects.filter(user=user, revoked_at__isnull=True).count() == 2
@@ -214,12 +216,16 @@ def test_vault_setup_only_once_and_needs_password(subscribed_user):
         "public_key": "pk",
         "wrapped_private_key": "wpk",
         "recovery_wrapped_master_key": "rwmk",
+        "recovery_auth_hash": "c3" * 32,
+        "auth_key": "d4" * 32,
     }
     assert client.post("/api/v1/auth/vault", {**body, "password": "wrong"}, format="json").status_code == 400
     assert client.post("/api/v1/auth/vault", {**body, "password": "TestPassword123!"}, format="json").status_code == 200
     subscribed_user.refresh_from_db()
     assert subscribed_user.wrapped_master_key == "wmk"
-    again = client.post("/api/v1/auth/vault", {**body, "password": "TestPassword123!", "wrapped_master_key": "x"}, format="json")
+    # The password now signs in only through the derived key.
+    assert subscribed_user.auth_scheme == "auth_key" and subscribed_user.check_password("d4" * 32)
+    again = client.post("/api/v1/auth/vault", {**body, "auth_key": "d4" * 32, "wrapped_master_key": "x"}, format="json")
     assert again.status_code == 400
 
 

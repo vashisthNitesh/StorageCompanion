@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { ref } from "vue";
 import { useRouter, useRoute } from "vue-router";
-import { Check, X } from "lucide-vue-next";
 import { useAuthStore } from "../../stores/auth";
 import UiButton from "../../components/ui/UiButton.vue";
 import UiFormField from "../../components/ui/UiFormField.vue";
@@ -16,6 +15,8 @@ import AuthShell from "./AuthShell.vue";
 import OrDivider from "./OrDivider.vue";
 import MfaStep from "./MfaStep.vue";
 import GoogleSignInButton from "./GoogleSignInButton.vue";
+import RecoveryKeyPanel from "./RecoveryKeyPanel.vue";
+import PasswordRequirements from "./PasswordRequirements.vue";
 
 const router = useRouter();
 const route = useRoute();
@@ -32,10 +33,12 @@ const form = useForm(
   },
   { serverFieldMap: { full_name: "fullName" } }
 );
-const strength = computed(() => passwordStrength(form.values.password));
-// "Different from your current password" doesn't apply to a new account.
-const checks = computed(() => strength.value.checks.filter((c) => !/current/.test(c.label)));
-const barTone = computed(() => ["bg-danger", "bg-danger", "bg-warning", "bg-success", "bg-success"][strength.value.score]);
+
+// After the account is created, the recovery key is shown once before continuing.
+const recoveryKey = ref<string | null>(null);
+const recoverySaved = ref(false);
+const confirming = ref(false);
+const confirmError = ref("");
 
 const googleMfaCredential = ref<string | null>(null);
 const googleBusy = ref(false);
@@ -49,9 +52,23 @@ function goNext() {
 
 async function submit() {
   await form.submit(async (v) => {
-    await authStore.register(v.email.trim().toLowerCase(), v.password, v.fullName.trim());
-    goNext();
+    const res = await authStore.register(v.email.trim().toLowerCase(), v.password, v.fullName.trim());
+    if (res.recoveryKey) recoveryKey.value = res.recoveryKey;
+    else goNext();
   });
+}
+
+async function confirmRecovery() {
+  confirming.value = true;
+  confirmError.value = "";
+  try {
+    await authStore.confirmRecoveryKey();
+    goNext();
+  } catch (err) {
+    confirmError.value = normalizeApiError(err).message;
+  } finally {
+    confirming.value = false;
+  }
 }
 
 async function onGoogleCredential(credential: string) {
@@ -77,10 +94,22 @@ async function verifyGoogleMfa(code: string) {
 
 <template>
   <AuthShell
-    :title="googleMfaCredential ? 'Two-step verification' : 'Create your account'"
-    :subtitle="googleMfaCredential ? 'This Google account already uses two-step verification. Enter the code from your authenticator app.' : 'Pick a plan after you sign up. You can look around first.'"
+    :title="recoveryKey ? 'Save your recovery key' : googleMfaCredential ? 'Two-step verification' : 'Create your account'"
+    :subtitle="
+      recoveryKey
+        ? 'Your account is ready. One last step: keep this key safe.'
+        : googleMfaCredential
+          ? 'This Google account already uses two-step verification. Enter the code from your authenticator app.'
+          : 'Pick a plan after you sign up. You can look around first.'
+    "
   >
-    <MfaStep v-if="googleMfaCredential" :verify="verifyGoogleMfa" @cancel="googleMfaCredential = null" />
+    <form v-if="recoveryKey" class="space-y-4" novalidate @submit.prevent="confirmRecovery">
+      <RecoveryKeyPanel v-model:saved="recoverySaved" :recovery-key="recoveryKey" :email="authStore.user?.email" />
+      <UiAlert v-if="confirmError">{{ confirmError }}</UiAlert>
+      <UiButton type="submit" variant="primary" size="lg" block :disabled="!recoverySaved" :loading="confirming">Continue</UiButton>
+    </form>
+
+    <MfaStep v-else-if="googleMfaCredential" :verify="verifyGoogleMfa" @cancel="googleMfaCredential = null" />
 
     <template v-else>
       <GoogleSignInButton text="signup_with" :disabled="googleBusy || form.submitting.value" @credential="onGoogleCredential" />
@@ -99,26 +128,14 @@ async function verifyGoogleMfa(code: string) {
           <UiFormField label="Password" :error="form.errors.password">
             <UiPasswordInput v-model="form.values.password" autocomplete="new-password" @blur="form.blur('password')" />
           </UiFormField>
-          <div v-if="form.values.password" class="flex items-center gap-3" aria-live="polite">
-            <div class="flex flex-1 gap-1" aria-hidden="true">
-              <span v-for="i in 4" :key="i" class="h-1.5 flex-1 rounded-full" :class="i <= strength.score ? barTone : 'bg-line'" />
-            </div>
-            <span class="text-sm font-medium text-fg-muted">{{ strength.label }}</span>
-          </div>
-          <ul class="space-y-1.5" aria-label="Password requirements">
-            <li v-for="c in checks" :key="c.label" class="flex items-center gap-2 text-sm" :class="c.ok ? 'text-success' : 'text-fg-subtle'">
-              <Check v-if="c.ok" :size="14" :stroke-width="2.5" aria-hidden="true" />
-              <X v-else :size="14" :stroke-width="2.5" aria-hidden="true" />
-              {{ c.label }}<span class="sr-only">{{ c.ok ? " (met)" : " (not met)" }}</span>
-            </li>
-          </ul>
+          <PasswordRequirements :password="form.values.password" />
         </div>
         <div class="rounded-lg bg-warning-soft p-3">
           <UiCheckbox
             v-model="form.values.acknowledged"
             :invalid="!!form.errors.acknowledged"
-            label="I understand SmartSpace can't reset my password"
-            description="Your password encrypts your files. If you forget it, your files can't be recovered."
+            label="I understand my password encrypts my files"
+            description="If I forget it, I'll need the recovery key shown next to keep my files."
             @update:model-value="form.blur('acknowledged')"
           />
           <p v-if="form.errors.acknowledged" class="mt-2 pl-6 text-sm text-danger" role="alert">{{ form.errors.acknowledged }}</p>
@@ -132,7 +149,7 @@ async function verifyGoogleMfa(code: string) {
       </form>
     </template>
 
-    <template #footer>
+    <template v-if="!recoveryKey" #footer>
       Already have an account?
       <router-link to="/login" class="font-medium text-primary hover:underline">Sign in</router-link>
     </template>

@@ -24,9 +24,18 @@ env = environ.Env(
     # Secret used to derive vault keys for Google sign-in accounts. Defaults to SECRET_KEY;
     # set it explicitly before ever rotating SECRET_KEY or Google users lose their files.
     VAULT_KEY_SECRET=(str, ""),
-    # Seller details printed on invoices. Without a GSTIN the invoice is a plain receipt.
+    # Seller details printed on invoices.
     BUSINESS_NAME=(str, "SmartSpace"),
     BUSINESS_ADDRESS=(str, ""),
+    # Public address of the site, used in emailed links (never taken from the request's Host).
+    PUBLIC_SITE_URL=(str, ""),
+    # Outgoing email (password reset). Without EMAIL_HOST, email is not sent in production.
+    EMAIL_HOST=(str, ""),
+    EMAIL_PORT=(int, 587),
+    EMAIL_HOST_USER=(str, ""),
+    EMAIL_HOST_PASSWORD=(str, ""),
+    EMAIL_USE_TLS=(bool, True),
+    DEFAULT_FROM_EMAIL=(str, "SmartSpace <no-reply@smartspacedata.com>"),
     # Number of reverse proxies in front of Django (Render's edge + nginx) for client-IP throttling.
     NUM_PROXIES=(int, 0),
     # Request header holding the real client IP (Cloudflare sets CF-Connecting-IP on Render).
@@ -199,6 +208,10 @@ REST_FRAMEWORK = {
         "auth": "300/minute",
         "register": "60/hour",
         "login_account": "10/minute",
+        "prelogin": "120/minute",
+        "password_reset": "20/hour",
+        "password_reset_email": "3/hour",
+        "password_reset_token": "60/hour",
         "refresh": "30/minute",
         "refresh_ip": "600/minute",
     },
@@ -240,6 +253,22 @@ RAZORPAY_WEBHOOK_SECRET = "" if env("RAZORPAY_WEBHOOK_SECRET") in _PLACEHOLDER_S
 # Invoice seller details
 BUSINESS_NAME = env("BUSINESS_NAME")
 BUSINESS_ADDRESS = env("BUSINESS_ADDRESS")
+
+PUBLIC_SITE_URL = env("PUBLIC_SITE_URL")
+
+# Email
+EMAIL_HOST = env("EMAIL_HOST")
+EMAIL_PORT = env("EMAIL_PORT")
+EMAIL_HOST_USER = env("EMAIL_HOST_USER")
+EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD")
+EMAIL_USE_TLS = env("EMAIL_USE_TLS")
+DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL") or "SmartSpace <no-reply@smartspacedata.com>"
+EMAIL_BACKEND = (
+    "django.core.mail.backends.smtp.EmailBackend" if EMAIL_HOST else "django.core.mail.backends.dummy.EmailBackend"
+)
+EMAIL_TIMEOUT = 10
+# Password reset links work once and expire after 30 minutes.
+PASSWORD_RESET_TIMEOUT = 30 * 60
 
 # SpaceByte Cloud Storage Upstream Integration
 SPACEBYTE_BASE_URL = env("SPACEBYTE_BASE_URL")

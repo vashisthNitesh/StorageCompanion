@@ -1,10 +1,20 @@
 import pyotp
 from django.conf import settings
 from django.contrib.auth import authenticate
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import transaction
+from django.utils import timezone
 from rest_framework import status, permissions, generics
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.response import Response
-from apps.common.throttles import LoginAccountThrottle, RefreshIPThrottle, RefreshSessionThrottle, ScopedIPThrottle
+from apps.common.throttles import (
+    LoginAccountThrottle,
+    PasswordResetEmailThrottle,
+    RefreshIPThrottle,
+    RefreshSessionThrottle,
+    ScopedIPThrottle,
+)
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.exceptions import TokenError
@@ -18,6 +28,19 @@ from apps.accounts.serializers import (
     ChangePasswordSerializer,
     GoogleAuthSerializer,
     VaultSetupSerializer,
+    RecoveryKeySerializer,
+    PasswordResetCompleteSerializer,
+)
+from apps.accounts.credentials import (
+    check_sign_in_secret,
+    is_hex_256,
+    prelogin_params,
+    reset_tokens,
+    recovery_proof_matches,
+    send_password_reset_email,
+    set_auth_key,
+    user_for_reset_token,
+    uses_auth_key,
 )
 from apps.accounts.services import (
     register_user,
@@ -90,7 +113,7 @@ class RegisterView(AuthThrottleMixin, APIView):
 
         user, refresh = register_user(
             email=data["email"],
-            password=data["password"],
+            auth_key=data["auth_key"],
             full_name=data.get("full_name", ""),
             wrapped_master_key=data["wrapped_master_key"],
             kdf_salt=data["kdf_salt"],
@@ -98,6 +121,7 @@ class RegisterView(AuthThrottleMixin, APIView):
             public_key=data["public_key"],
             wrapped_private_key=data["wrapped_private_key"],
             recovery_wrapped_master_key=data["recovery_wrapped_master_key"],
+            recovery_auth_hash=data["recovery_auth_hash"],
             request=request,
         )
 
@@ -114,6 +138,20 @@ class RegisterView(AuthThrottleMixin, APIView):
         return response
 
 
+class PreloginView(APIView):
+    """KDF salt and secret scheme for an email, so the browser can derive the auth key before signing in."""
+    permission_classes = [permissions.AllowAny]
+    authentication_classes = []
+    throttle_classes = [ScopedIPThrottle]
+    throttle_scope = "prelogin"
+
+    def post(self, request):
+        email = resolve_login_email(str(request.data.get("email") or ""))
+        response = Response(prelogin_params(email))
+        response["Cache-Control"] = "no-store"
+        return response
+
+
 class LoginView(AuthThrottleMixin, APIView):
     permission_classes = [permissions.AllowAny]
     throttle_classes = [ScopedIPThrottle, LoginAccountThrottle]
@@ -122,11 +160,14 @@ class LoginView(AuthThrottleMixin, APIView):
         serializer = LoginSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         email = resolve_login_email(serializer.validated_data["email"])
-        password = serializer.validated_data["password"]
+        password = serializer.validated_data.get("password") or ""
+        auth_key = serializer.validated_data.get("auth_key") or ""
         totp_code = serializer.validated_data.get("totp_code")
 
         ensure_not_locked_out(email)
-        user = authenticate(request, username=email, password=password)
+        account = User.objects.filter(email=email).only("auth_scheme").first()
+        secret = auth_key if account is not None and uses_auth_key(account) else password
+        user = authenticate(request, username=email, password=secret) if secret else None
         if user is None:
             record_failed_auth(email)
             return Response({"error": "Invalid email or password."}, status=status.HTTP_400_BAD_REQUEST)
@@ -141,6 +182,11 @@ class LoginView(AuthThrottleMixin, APIView):
             return Response({"error": str(e.detail)}, status=status.HTTP_400_BAD_REQUEST)
 
         clear_failed_auth(email)
+        if auth_key and not uses_auth_key(user) and user.wrapped_master_key and not (user.is_staff or user.is_superuser):
+            # Last time this account sends its password: from now on only the derived key.
+            set_auth_key(user, auth_key)
+            user.save(update_fields=["password", "auth_scheme"])
+            AuditLog.objects.create(user=user, action="auth.upgraded_to_auth_key", target_type="user", target_id=str(user.id))
         refresh, _ = issue_session_tokens(user, request)
         response = Response(
             {
@@ -222,6 +268,10 @@ class MeView(APIView):
 
 
 class ChangePasswordView(AuthThrottleMixin, APIView):
+    """
+    Vault accounts send the current and new auth keys plus the master key re-wrapped in the
+    browser; accounts without a vault (staff) change a plain password.
+    """
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
@@ -230,20 +280,24 @@ class ChangePasswordView(AuthThrottleMixin, APIView):
         data = serializer.validated_data
 
         user = request.user
-        if not user.check_password(data["current_password"]):
-            return Response(
-                {"error": "Current password does not match."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        proof = {"auth_key": data.get("current_auth_key"), "password": data.get("current_password")}
+        if not check_sign_in_secret(user, proof):
+            return Response({"error": "Current password does not match."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Update password & re-wrapped master key if provided
-        user.set_password(data["new_password"])
-        if data.get("new_wrapped_master_key"):
+        if user.wrapped_master_key:
+            if not (data.get("new_auth_key") and data.get("new_wrapped_master_key") and data.get("new_kdf_salt") and data.get("new_kdf_params")):
+                return Response({"error": "Missing the re-encrypted vault key."}, status=status.HTTP_400_BAD_REQUEST)
+            set_auth_key(user, data["new_auth_key"])
             user.wrapped_master_key = data["new_wrapped_master_key"]
-        if data.get("new_kdf_salt"):
             user.kdf_salt = data["new_kdf_salt"]
-        if data.get("new_kdf_params"):
             user.kdf_params = data["new_kdf_params"]
+        else:
+            new_password = data.get("new_password") or ""
+            try:
+                validate_password(new_password, user)
+            except DjangoValidationError as e:
+                return Response({"error": " ".join(e.messages)}, status=status.HTTP_400_BAD_REQUEST)
+            user.set_password(new_password)
         user.save()
 
         # Sign out every other device that knew the old password.
@@ -257,7 +311,7 @@ class ChangePasswordView(AuthThrottleMixin, APIView):
             metadata={"sessions_revoked": revoked},
         )
 
-        return Response({"success": True, "message": "Password updated. Other devices have been signed out."})
+        return Response({"success": True, "message": "Password updated. Other devices have been signed out.", "user": UserSerializer(user).data})
 
 
 class VaultSetupView(AuthThrottleMixin, APIView):
@@ -271,14 +325,19 @@ class VaultSetupView(AuthThrottleMixin, APIView):
         user = request.user
         if user.wrapped_master_key:
             return Response({"error": "This account already has a vault."}, status=status.HTTP_400_BAD_REQUEST)
-        if not user.has_usable_password() or not user.check_password(request.data.get("password") or ""):
+        if not check_sign_in_secret(user, request.data):
             return Response({"error": "Invalid password."}, status=status.HTTP_400_BAD_REQUEST)
+        auth_key = request.data.get("auth_key")
+        if not is_hex_256(auth_key):
+            return Response({"error": "Invalid key."}, status=status.HTTP_400_BAD_REQUEST)
 
         serializer = VaultSetupSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         for field, value in serializer.validated_data.items():
             setattr(user, field, value)
-        user.save(update_fields=list(serializer.validated_data.keys()))
+        # The vault's password now signs in through the derived key.
+        set_auth_key(user, auth_key)
+        user.save(update_fields=[*serializer.validated_data.keys(), "password", "auth_scheme"])
         AuditLog.objects.create(user=user, action="vault.created", target_type="user", target_id=str(user.id))
         return Response({"success": True, "user": UserSerializer(user).data})
 
@@ -344,8 +403,7 @@ class MFADisableView(AuthThrottleMixin, APIView):
     def post(self, request):
         user = request.user
         if user.has_usable_password():
-            password = request.data.get("password")
-            if not password or not user.check_password(password):
+            if not check_sign_in_secret(user, request.data):
                 return Response({"error": "Invalid password."}, status=400)
         elif not verify_totp_code(user, request.data.get("code") or ""):
             # Google-only accounts have no password; they confirm with a current 2FA code.
@@ -449,3 +507,137 @@ class AuthConfigView(APIView):
             "google_client_id": getattr(settings, "GOOGLE_CLIENT_ID", ""),
             "payments_enabled": bool(settings.RAZORPAY_KEY_ID and settings.RAZORPAY_KEY_SECRET),
         })
+
+
+class RecoveryKeyView(AuthThrottleMixin, APIView):
+    """
+    PUT replaces the recovery key (needs the current password proof): the browser wraps the
+    unlocked master key with a new recovery key and sends the wrap plus a hash of its proof.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def put(self, request):
+        user = request.user
+        if not user.wrapped_master_key:
+            return Response({"error": "This account has no password-protected vault."}, status=status.HTTP_400_BAD_REQUEST)
+        if not check_sign_in_secret(user, request.data):
+            return Response({"error": "Invalid password."}, status=status.HTTP_400_BAD_REQUEST)
+        serializer = RecoveryKeySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user.recovery_wrapped_master_key = serializer.validated_data["recovery_wrapped_master_key"]
+        user.recovery_auth_hash = serializer.validated_data["recovery_auth_hash"]
+        user.recovery_key_confirmed_at = timezone.now()
+        user.save(update_fields=["recovery_wrapped_master_key", "recovery_auth_hash", "recovery_key_confirmed_at"])
+        AuditLog.objects.create(user=user, action="vault.recovery_key_created", target_type="user", target_id=str(user.id))
+        return Response({"success": True, "user": UserSerializer(user).data})
+
+
+class RecoveryKeyConfirmView(APIView):
+    """Marks the recovery key made at sign-up as saved, once the user has confirmed it."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        user = request.user
+        if not (user.recovery_auth_hash and user.recovery_wrapped_master_key):
+            return Response({"error": "There's no recovery key to confirm."}, status=status.HTTP_400_BAD_REQUEST)
+        if not user.recovery_key_confirmed_at:
+            user.recovery_key_confirmed_at = timezone.now()
+            user.save(update_fields=["recovery_key_confirmed_at"])
+            AuditLog.objects.create(user=user, action="vault.recovery_key_confirmed", target_type="user", target_id=str(user.id))
+        return Response({"success": True, "user": UserSerializer(user).data})
+
+
+class PasswordResetRequestView(APIView):
+    """Emails a single-use reset link. The response is the same whether or not the account exists."""
+    permission_classes = [permissions.AllowAny]
+    authentication_classes = []
+    throttle_classes = [ScopedIPThrottle, PasswordResetEmailThrottle]
+    throttle_scope = "password_reset"
+
+    def post(self, request):
+        email = str(request.data.get("email") or "").strip().lower()
+        if "@" in email:
+            send_password_reset_email(email)
+        return Response({"success": True, "message": "If an account exists for that email, we've sent a link to reset the password."})
+
+
+class PasswordResetTokenMixin:
+    permission_classes = [permissions.AllowAny]
+    authentication_classes = []
+    throttle_classes = [ScopedIPThrottle]
+    throttle_scope = "password_reset_token"
+
+    def user_or_error(self, data):
+        user = user_for_reset_token(str(data.get("uid") or ""), str(data.get("token") or ""))
+        if user is None:
+            return None, Response(
+                {"error": "This reset link has expired or was already used. Ask for a new one.", "code": "RESET_LINK_INVALID"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return user, None
+
+
+class PasswordResetCheckView(PasswordResetTokenMixin, APIView):
+    """Validates a reset link and returns the recovery-wrapped master key for the browser to unwrap."""
+
+    def post(self, request):
+        user, error = self.user_or_error(request.data)
+        if error:
+            return error
+        response = Response({
+            "email": user.email,
+            "has_recovery_key": user.has_recovery_key,
+            "recovery_wrapped_master_key": user.recovery_wrapped_master_key if user.has_recovery_key else "",
+            "has_vault": bool(user.wrapped_master_key),
+        })
+        response["Cache-Control"] = "no-store"
+        return response
+
+
+class PasswordResetCompleteView(PasswordResetTokenMixin, APIView):
+    def post(self, request):
+        user, error = self.user_or_error(request.data)
+        if error:
+            return error
+        serializer = PasswordResetCompleteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        with transaction.atomic():
+            user = User.objects.select_for_update().get(pk=user.pk)
+            # Re-checked under the row lock so two submissions can't both use one link.
+            if not reset_tokens.check_token(user, str(request.data.get("token") or "")):
+                return self.user_or_error({})[1]
+            if data["mode"] == "recovery":
+                if not recovery_proof_matches(user, data["recovery_auth"]):
+                    return Response(
+                        {"error": "That recovery key doesn't match this account.", "code": "RECOVERY_KEY_MISMATCH"},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                fields = ["wrapped_master_key", "kdf_salt", "kdf_params"]
+            else:
+                # No recovery key: a new, empty vault. Files encrypted with the old one can't be decrypted.
+                user.public_key = data["public_key"]
+                user.wrapped_private_key = data["wrapped_private_key"]
+                user.recovery_wrapped_master_key = ""
+                user.recovery_auth_hash = ""
+                user.recovery_key_confirmed_at = None
+                fields = ["wrapped_master_key", "kdf_salt", "kdf_params", "public_key", "wrapped_private_key",
+                          "recovery_wrapped_master_key", "recovery_auth_hash", "recovery_key_confirmed_at"]
+            user.wrapped_master_key = data["wrapped_master_key"]
+            user.kdf_salt = data["kdf_salt"]
+            user.kdf_params = data["kdf_params"]
+            # Changing the password hash also makes this reset link unusable.
+            set_auth_key(user, data["auth_key"])
+            user.save(update_fields=[*fields, "password", "auth_scheme"])
+
+        revoked = revoke_other_sessions(user)
+        clear_failed_auth(user.email)
+        AuditLog.objects.create(
+            user=user,
+            action="user.password_reset" if data["mode"] == "recovery" else "user.password_reset_vault_replaced",
+            target_type="user",
+            target_id=str(user.id),
+            metadata={"sessions_revoked": revoked},
+        )
+        return Response({"success": True, "message": "Password changed. Sign in with your new password."})

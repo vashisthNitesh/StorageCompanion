@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { ShieldCheck, ShieldAlert, Check, AlertTriangle, LockKeyhole, KeyRound, Smartphone, MonitorSmartphone } from "lucide-vue-next";
+import { ShieldCheck, ShieldAlert, Check, AlertTriangle, LockKeyhole, KeyRound, LifeBuoy, Smartphone, MonitorSmartphone } from "lucide-vue-next";
 import UiButton from "../../components/ui/UiButton.vue";
 import { useAuthStore } from "../../stores/auth";
 import { formatDate } from "../../lib/format";
@@ -22,6 +22,13 @@ const checks = computed(() => [
   googleOnly.value
     ? { icon: KeyRound, title: "Signed in with Google", detail: "Your Google account protects sign-in.", ok: true }
     : { icon: KeyRound, title: "Password", detail: "Also unlocks your encryption key.", ok: true, action: { label: "Change", run: () => emit("jump", "password") } },
+  ...(user.value?.wrapped_master_key
+    ? [
+        user.value.has_recovery_key
+          ? { icon: LifeBuoy, title: "Recovery key", detail: "Lets you reset your password and keep your files.", ok: true }
+          : { icon: LifeBuoy, title: "No recovery key", detail: "Forgetting your password would lock you out of your files.", ok: false, action: { label: "Set up", primary: true, run: () => emit("jump", "recovery-key") } },
+      ]
+    : []),
   user.value?.mfa_enabled
     ? { icon: Smartphone, title: "Two-step verification", detail: "A code is needed after signing in.", ok: true }
     : { icon: Smartphone, title: "Two-step verification is off", detail: "Add a code from your phone so a stolen password isn't enough.", ok: false, action: { label: "Turn on", primary: true, run: () => emit("setupTwoStep") } },
@@ -49,7 +56,7 @@ const allGood = computed(() => score.value === checks.value.length);
           <component :is="allGood ? ShieldCheck : ShieldAlert" :size="28" :stroke-width="1.75" aria-hidden="true" />
         </span>
         <div class="relative">
-          <h2 id="security-overview" class="text-lg font-semibold text-fg">{{ allGood ? "Your account is well protected" : "One step left to secure your account" }}</h2>
+          <h2 id="security-overview" class="text-lg font-semibold text-fg">{{ allGood ? "Your account is well protected" : (checks.length - score === 1 ? "One step left to secure your account" : `${checks.length - score} steps left to secure your account`) }}</h2>
           <p class="tabular mt-1 text-base text-fg-muted">{{ score }} of {{ checks.length }} protections on<template v-if="user?.created_at"> · member since {{ formatDate(user.created_at) }}</template></p>
         </div>
       </div>

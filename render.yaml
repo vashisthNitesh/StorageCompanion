@@ -47,6 +47,17 @@ services:
         value: SmartSpace
       - key: BUSINESS_ADDRESS
         sync: false
+      - key: PUBLIC_SITE_URL
+        value: https://smartspacedata.com
+      # Password reset email (SMTP)
+      - key: EMAIL_HOST
+        sync: false
+      - key: EMAIL_HOST_USER
+        sync: false
+      - key: EMAIL_HOST_PASSWORD
+        sync: false
+      - key: DEFAULT_FROM_EMAIL
+        sync: false
       # SpaceByte storage (https://spacebyte.in/api-docs)
       - key: SPACEBYTE_BASE_URL
         value: https://spacebyte.in/api/v1

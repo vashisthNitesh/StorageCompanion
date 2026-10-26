@@ -54,6 +54,18 @@ class LoginAccountThrottle(SimpleRateThrottle):
         return self.cache_format % {"scope": self.scope, "ident": _digest(email)}
 
 
+class PasswordResetEmailThrottle(SimpleRateThrottle):
+    """Password reset emails per address, whichever IP asks."""
+
+    scope = "password_reset_email"
+
+    def get_cache_key(self, request, view):
+        email = str(request.data.get("email", "") if hasattr(request.data, "get") else "").strip().lower()
+        if not email:
+            return None
+        return self.cache_format % {"scope": self.scope, "ident": _digest(email)}
+
+
 class RefreshSessionThrottle(ClientIPMixin, SimpleRateThrottle):
     """
     Token refreshes per signed-in device. The session id ("sid") is read from the refresh cookie

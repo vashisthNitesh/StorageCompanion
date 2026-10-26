@@ -162,19 +162,21 @@ def revoke_other_sessions(user: User, keep_session_id: str | None = None) -> int
 
 def register_user(
     email: str,
-    password: str,
+    auth_key: str,
     wrapped_master_key: str,
     kdf_salt: str,
     kdf_params: dict,
     public_key: str,
     wrapped_private_key: str,
     recovery_wrapped_master_key: str,
+    recovery_auth_hash: str,
     full_name: str = "",
     request=None
 ) -> tuple[User, RefreshToken]:
     user = User.objects.create_user(
         email=email,
-        password=password,
+        password=auth_key,
+        auth_scheme=User.AUTH_SCHEME_AUTH_KEY,
         full_name=full_name,
         wrapped_master_key=wrapped_master_key,
         kdf_salt=kdf_salt,
@@ -182,6 +184,8 @@ def register_user(
         public_key=public_key,
         wrapped_private_key=wrapped_private_key,
         recovery_wrapped_master_key=recovery_wrapped_master_key,
+        # Confirmed once the user has saved the key (POST /auth/recovery-key/confirm).
+        recovery_auth_hash=recovery_auth_hash,
     )
     from apps.storage.models import StorageQuota
     StorageQuota.objects.get_or_create(user=user)
