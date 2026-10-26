@@ -2,7 +2,7 @@
 import { Check } from "lucide-vue-next";
 import type { Plan } from "../../stores/billing";
 import { formatMoney } from "../../lib/format";
-import { INCLUDED_IN_ALL, storageLabel } from "./planCatalog";
+import { INCLUDED_IN_ALL, priceFor, storageLabel } from "./planCatalog";
 
 defineProps<{ plans: Plan[]; currentCode?: string | null }>();
 </script>
@@ -39,7 +39,7 @@ defineProps<{ plans: Plan[]; currentCode?: string | null }>();
         </tr>
         <tr>
           <th scope="row" class="px-4 py-3 font-normal text-fg-muted">Yearly price</th>
-          <td v-for="p in plans" :key="p.code" class="px-4 py-3 text-fg">{{ formatMoney(parseFloat(p.price_yearly)) }}</td>
+          <td v-for="p in plans" :key="p.code" class="px-4 py-3 text-fg">{{ formatMoney(priceFor(p, "yearly")) }}</td>
         </tr>
         <tr v-for="feature in INCLUDED_IN_ALL" :key="feature">
           <th scope="row" class="px-4 py-3 font-normal text-fg-muted">{{ feature }}</th>

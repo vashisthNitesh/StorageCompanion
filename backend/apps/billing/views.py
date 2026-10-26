@@ -10,7 +10,6 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.exceptions import NotFound
 
-from apps.billing.gst import GST_STATES, tax_breakdown
 from apps.billing.models import Subscription, Invoice
 from apps.billing.serializers import (
     PlanSerializer,
@@ -68,7 +67,6 @@ class CheckoutInitView(APIView):
             user=request.user,
             plan_code=data["plan_code"],
             billing_interval=data.get("billing_interval", "monthly"),
-            billing_state=data.get("billing_state", ""),
         )
         return Response(order_data, status=status.HTTP_200_OK)
 
@@ -175,30 +173,14 @@ class InvoiceDownloadView(APIView):
         invoice = get_object_or_404(Invoice, id=pk, subscription__user=request.user)
         user = request.user
         plan_name = invoice.plan_name or (invoice.subscription.plan.name if invoice.subscription.plan else "Storage plan")
-        interval = {"yearly": "Annual", "monthly": "Monthly"}.get(invoice.billing_interval, "")
-        seller_gstin = settings.BUSINESS_GSTIN
-        seller_state = settings.BUSINESS_STATE_CODE
-        taxes = tax_breakdown(Decimal(invoice.amount), seller_state, invoice.place_of_supply)
+        interval = {"yearly": "Annual (12 months)", "monthly": "Monthly (30 days)"}.get(invoice.billing_interval, "")
         number = str(invoice.id)[:8].upper()
         symbol = "₹" if invoice.currency == "INR" else f"{escape(invoice.currency)} "
 
         def money(value) -> str:
             return f"{symbol}{Decimal(value):,.2f}"
 
-        if seller_gstin:
-            title = "Tax Invoice"
-            tax_rows = "".join(
-                f"<div><span>{escape(label)}</span><span>{money(value)}</span></div>" for label, value in taxes["lines"]
-            )
-            summary = f"<div><span>Taxable value</span><span>{money(taxes['taxable'])}</span></div>{tax_rows}"
-            seller_tax = f"<div>GSTIN: {escape(seller_gstin)}</div>"
-        else:
-            title = "Payment Receipt"
-            summary = ""
-            seller_tax = ""
-
-        place = GST_STATES.get(invoice.place_of_supply, "")
-        place_line = f"<div>Place of supply: {escape(place)} ({escape(invoice.place_of_supply)})</div>" if place else ""
+        title = "Invoice"
         address = f"<div>{escape(settings.BUSINESS_ADDRESS)}</div>" if settings.BUSINESS_ADDRESS else ""
 
         html_content = f"""<!DOCTYPE html>
@@ -229,7 +211,7 @@ class InvoiceDownloadView(APIView):
   <div class="row">
     <div>
       <h1>{escape(settings.BUSINESS_NAME)}</h1>
-      <div class="muted">{address}{seller_tax}</div>
+      <div class="muted">{address}</div>
     </div>
     <div style="text-align:right">
       <span class="badge">Paid</span>
@@ -238,16 +220,16 @@ class InvoiceDownloadView(APIView):
     </div>
   </div>
   <div class="row" style="margin-top:28px">
-    <div class="muted"><strong style="color:#0f172a">Billed to</strong><br>{escape(user.full_name or "Account holder")}<br>{escape(user.email)}{place_line}</div>
+    <div class="muted"><strong style="color:#0f172a">Billed to</strong><br>{escape(user.full_name or "Account holder")}<br>{escape(user.email)}</div>
     <div class="muted" style="text-align:right"><strong style="color:#0f172a">Payment reference</strong><br>Order: {escape(invoice.provider_invoice_id)}<br>Payment: {escape(invoice.provider_payment_id)}</div>
   </div>
   <table>
     <thead><tr><th>Description</th><th class="num">Qty</th><th class="num">Amount</th></tr></thead>
-    <tbody><tr><td><strong>{escape(plan_name)}</strong> {escape(interval)} cloud storage plan</td><td class="num">1</td><td class="num">{money(taxes["taxable"] if seller_gstin else invoice.amount)}</td></tr></tbody>
+    <tbody><tr><td><strong>{escape(plan_name)}</strong> cloud storage plan<br><span class="muted">{escape(interval)}</span></td><td class="num">1</td><td class="num">{money(invoice.amount)}</td></tr></tbody>
   </table>
   <div class="summary">
-    {summary}
     <div class="total"><span>Total paid</span><span>{money(invoice.amount)}</span></div>
+    <div class="muted" style="text-align:right">Inclusive of all taxes</div>
   </div>
   <footer>Thank you for choosing {escape(settings.BUSINESS_NAME)}. This is a computer-generated document.</footer>
 </div>

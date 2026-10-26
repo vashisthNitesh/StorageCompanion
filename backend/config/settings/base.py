@@ -27,8 +27,6 @@ env = environ.Env(
     # Seller details printed on invoices. Without a GSTIN the invoice is a plain receipt.
     BUSINESS_NAME=(str, "SmartSpace"),
     BUSINESS_ADDRESS=(str, ""),
-    BUSINESS_GSTIN=(str, ""),
-    BUSINESS_STATE_CODE=(str, ""),
     # Number of reverse proxies in front of Django (Render's edge + nginx) for client-IP throttling.
     NUM_PROXIES=(int, 0),
     # Request header holding the real client IP (Cloudflare sets CF-Connecting-IP on Render).
@@ -242,8 +240,6 @@ RAZORPAY_WEBHOOK_SECRET = "" if env("RAZORPAY_WEBHOOK_SECRET") in _PLACEHOLDER_S
 # Invoice seller details
 BUSINESS_NAME = env("BUSINESS_NAME")
 BUSINESS_ADDRESS = env("BUSINESS_ADDRESS")
-BUSINESS_GSTIN = env("BUSINESS_GSTIN")
-BUSINESS_STATE_CODE = env("BUSINESS_STATE_CODE")
 
 # SpaceByte Cloud Storage Upstream Integration
 SPACEBYTE_BASE_URL = env("SPACEBYTE_BASE_URL")

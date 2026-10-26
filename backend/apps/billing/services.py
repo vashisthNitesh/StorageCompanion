@@ -12,8 +12,7 @@ from django.utils import timezone
 from rest_framework.exceptions import APIException, NotFound, ValidationError
 
 from apps.accounts.models import User
-from apps.billing.gst import GST_STATES
-from apps.billing.models import Plan, Subscription, Invoice, PaymentEvent, PaymentOrder
+from apps.billing.models import BILLING_INTERVALS, Plan, Subscription, Invoice, PaymentEvent, PaymentOrder
 from apps.storage.models import StorageQuota
 from apps.audit.models import AuditLog
 
@@ -38,11 +37,11 @@ def create_razorpay_order(
     user: User,
     plan_code: str,
     billing_interval: str = "monthly",
-    billing_state: str = "",
 ) -> dict:
     """
     Creates an order with the Razorpay Orders API and records it locally, so that the
-    plan and amount a payment buys are fixed on the server.
+    plan and amount a payment buys are fixed on the server. The amount always comes from
+    the plan (yearly = monthly x 10); prices are final, so no tax is added.
     """
     if not razorpay_configured():
         raise PaymentsNotConfigured()
@@ -50,11 +49,11 @@ def create_razorpay_order(
     plan = Plan.objects.filter(code=plan_code, is_active=True).first()
     if not plan:
         raise NotFound(f"Plan '{plan_code}' not found.")
-    if billing_state and billing_state not in GST_STATES:
-        raise ValidationError("Unknown billing state.")
+    if billing_interval not in BILLING_INTERVALS:
+        raise ValidationError("Unknown billing period.")
 
-    amount = plan.price_yearly if billing_interval == "yearly" else plan.price_monthly
-    amount_in_paise = int(amount * 100)
+    amount = plan.price_for(billing_interval)
+    amount_in_paise = int((amount * 100).to_integral_value())
 
     key_id = settings.RAZORPAY_KEY_ID
     auth_str = f"{key_id}:{settings.RAZORPAY_KEY_SECRET}"
@@ -104,7 +103,6 @@ def create_razorpay_order(
         billing_interval=billing_interval,
         amount=amount,
         currency=plan.currency,
-        billing_state=billing_state,
         provider_order_id=order_id,
     )
 
@@ -232,7 +230,6 @@ def activate_subscription(order: PaymentOrder) -> Subscription:
         issued_at=now,
         plan_name=plan.name,
         billing_interval=order.billing_interval,
-        place_of_supply=order.billing_state,
     )
 
     AuditLog.objects.create(
@@ -275,7 +272,7 @@ def process_webhook_event(payload: dict, event_id: str) -> bool:
 
     if event_type in ("payment.captured", "order.paid"):
         order = PaymentOrder.objects.filter(provider_order_id=order_id).first()
-        if order and order.status != PaymentOrder.STATUS_PAID and int(entity.get("amount", 0)) == int(order.amount * 100):
+        if order and order.status != PaymentOrder.STATUS_PAID and int(entity.get("amount", 0)) == int((order.amount * 100).to_integral_value()):
             fulfil_payment_order(order_id, payment_id)
     elif event_type == "payment.failed":
         PaymentOrder.objects.filter(provider_order_id=order_id, status=PaymentOrder.STATUS_CREATED).update(

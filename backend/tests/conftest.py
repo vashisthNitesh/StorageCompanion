@@ -25,7 +25,6 @@ def sample_plan(db):
         name="Test Personal",
         storage_bytes=100 * 1024 * 1024,  # 100 MB for fast testing
         price_monthly=199.00,
-        price_yearly=1999.00,
         currency="INR",
         max_file_size=50 * 1024 * 1024,
         is_active=True,

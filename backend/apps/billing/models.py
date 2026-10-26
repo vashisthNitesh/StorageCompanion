@@ -1,8 +1,14 @@
 import uuid
+from decimal import Decimal
 from django.conf import settings
 from django.db import models
 from django.utils import timezone
 from apps.common.models import BaseModel, TimeStampedModel
+
+
+# A yearly plan costs ten months and runs for twelve ("2 months free").
+YEARLY_PAID_MONTHS = 10
+BILLING_INTERVALS = ("monthly", "yearly")
 
 
 class Plan(BaseModel):
@@ -11,7 +17,8 @@ class Plan(BaseModel):
     description = models.TextField(blank=True, default="")
     storage_bytes = models.BigIntegerField(help_text="Storage limit in bytes")
     price_monthly = models.DecimalField(max_digits=10, decimal_places=2)
-    price_yearly = models.DecimalField(max_digits=10, decimal_places=2)
+    # Always price_monthly x YEARLY_PAID_MONTHS; kept in sync on save so it can't drift.
+    price_yearly = models.DecimalField(max_digits=10, decimal_places=2, default=0, editable=False)
     currency = models.CharField(max_length=10, default="INR")
     max_file_size = models.BigIntegerField(help_text="Max single file size in bytes")
     version_retention_days = models.IntegerField(default=30)
@@ -21,6 +28,20 @@ class Plan(BaseModel):
 
     class Meta:
         ordering = ["sort_order", "price_monthly"]
+
+    def save(self, *args, **kwargs):
+        self.price_yearly = self.yearly_price
+        if kwargs.get("update_fields") is not None and "price_monthly" in kwargs["update_fields"]:
+            kwargs["update_fields"] = {*kwargs["update_fields"], "price_yearly"}
+        super().save(*args, **kwargs)
+
+    @property
+    def yearly_price(self) -> Decimal:
+        return Decimal(self.price_monthly) * YEARLY_PAID_MONTHS
+
+    def price_for(self, billing_interval: str) -> Decimal:
+        """The amount charged for one period. Prices are final and include all taxes."""
+        return self.yearly_price if billing_interval == "yearly" else Decimal(self.price_monthly)
 
     def __str__(self):
         return f"{self.name} ({self.currency} {self.price_monthly}/mo)"
@@ -165,7 +186,7 @@ class PaymentOrder(BaseModel):
     billing_interval = models.CharField(max_length=20, default="monthly")
     amount = models.DecimalField(max_digits=10, decimal_places=2)
     currency = models.CharField(max_length=10, default="INR")
-    # Two-digit GST state code of the customer, used to pick IGST vs CGST+SGST.
+    # Legacy: GST state code of orders placed before prices became tax-inclusive. No longer written.
     billing_state = models.CharField(max_length=2, blank=True, default="")
     provider_order_id = models.CharField(max_length=255, unique=True)
     provider_payment_id = models.CharField(max_length=255, null=True, blank=True, unique=True)
@@ -194,7 +215,7 @@ class Invoice(BaseModel):
     issued_at = models.DateTimeField(default=timezone.now)
     plan_name = models.CharField(max_length=100, blank=True, default="")
     billing_interval = models.CharField(max_length=20, blank=True, default="")
-    # Customer's GST state code at purchase time ("" when unknown)
+    # Legacy: GST state code on invoices issued before prices became tax-inclusive. No longer written.
     place_of_supply = models.CharField(max_length=2, blank=True, default="")
 
     class Meta:

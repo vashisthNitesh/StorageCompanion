@@ -1,8 +1,18 @@
 from rest_framework import serializers
-from apps.billing.models import Plan, Subscription, Invoice
+from apps.billing.models import BILLING_INTERVALS, YEARLY_PAID_MONTHS, Plan, Subscription, Invoice
 
 
 class PlanSerializer(serializers.ModelSerializer):
+    # Derived from the monthly price, the same way checkout charges it.
+    price_yearly = serializers.SerializerMethodField()
+    yearly_paid_months = serializers.SerializerMethodField()
+
+    def get_price_yearly(self, plan: Plan) -> str:
+        return f"{plan.yearly_price:.2f}"
+
+    def get_yearly_paid_months(self, plan: Plan) -> int:
+        return YEARLY_PAID_MONTHS
+
     class Meta:
         model = Plan
         fields = [
@@ -13,6 +23,7 @@ class PlanSerializer(serializers.ModelSerializer):
             "storage_bytes",
             "price_monthly",
             "price_yearly",
+            "yearly_paid_months",
             "currency",
             "max_file_size",
             "version_retention_days",
@@ -66,8 +77,7 @@ class InvoiceSerializer(serializers.ModelSerializer):
 
 class CheckoutInitSerializer(serializers.Serializer):
     plan_code = serializers.CharField()
-    billing_interval = serializers.ChoiceField(choices=["monthly", "yearly"], default="monthly")
-    billing_state = serializers.CharField(required=False, allow_blank=True, max_length=2, default="")
+    billing_interval = serializers.ChoiceField(choices=BILLING_INTERVALS, default="monthly")
 
 
 class PaymentVerifySerializer(serializers.Serializer):

@@ -36,7 +36,6 @@ def mega_plan(db):
         name="Mega Test",
         storage_bytes=1000 * 1024 * 1024 * 1024,
         price_monthly=Decimal("449.00"),
-        price_yearly=Decimal("4490.00"),
         currency="INR",
         max_file_size=100 * 1024 * 1024 * 1024,
         is_active=True,
@@ -50,7 +49,6 @@ def business_plan(db):
         name="Business Plan Test",
         storage_bytes=500 * 1024 * 1024,
         price_monthly=Decimal("499.00"),
-        price_yearly=Decimal("4999.00"),
         currency="INR",
         max_file_size=100 * 1024 * 1024,
         is_active=True,
@@ -70,7 +68,7 @@ def checkout(client, plan_code: str, order_id: str, **extra):
 
 @pytest.mark.django_db
 def test_paid_order_activates_the_plan_on_the_order(auth_client, subscribed_user, business_plan):
-    checkout(auth_client, "test_business_plan", "order_biz_1", billing_state="27")
+    checkout(auth_client, "test_business_plan", "order_biz_1")
     res = auth_client.post(
         "/api/v1/subscription/verify",
         {
@@ -86,7 +84,7 @@ def test_paid_order_activates_the_plan_on_the_order(auth_client, subscribed_user
     assert subscribed_user.subscription.plan.code == "test_business_plan"
     assert StorageQuota.objects.get(user=subscribed_user).bytes_limit == 500 * 1024 * 1024
     invoice = Invoice.objects.get(provider_payment_id="pay_biz_1")
-    assert invoice.place_of_supply == "27"
+    assert invoice.amount == Decimal("499.00")
 
 
 @pytest.mark.django_db
@@ -212,11 +210,10 @@ def test_signed_webhook_is_idempotent_and_fulfils_order(api_client, auth_client,
 
 
 @pytest.mark.django_db
-@override_settings(BUSINESS_GSTIN="27ABCDE1234F1Z5", BUSINESS_STATE_CODE="27")
-def test_invoice_escapes_user_data_and_splits_tax_by_state(auth_client, subscribed_user, business_plan):
+def test_invoice_escapes_user_data_and_is_tax_inclusive(auth_client, subscribed_user, business_plan):
     subscribed_user.full_name = '<script>alert("x")</script>'
     subscribed_user.save()
-    checkout(auth_client, "test_business_plan", "order_inv_1", billing_state="29")
+    checkout(auth_client, "test_business_plan", "order_inv_1")
     auth_client.post(
         "/api/v1/subscription/verify",
         {
@@ -230,12 +227,24 @@ def test_invoice_escapes_user_data_and_splits_tax_by_state(auth_client, subscrib
     html = auth_client.get(f"/api/v1/invoices/{invoice.id}/download").content.decode()
     assert "<script>" not in html
     assert "&lt;script&gt;" in html
-    assert "IGST (18%)" in html and "CGST" not in html  # Karnataka customer, Maharashtra seller
+    assert "Inclusive of all taxes" in html
+    assert "₹499.00" in html
+    assert "GST" not in html
 
-    invoice.place_of_supply = "27"
-    invoice.save()
-    html = auth_client.get(f"/api/v1/invoices/{invoice.id}/download").content.decode()
-    assert "CGST (9%)" in html and "SGST (9%)" in html and "IGST" not in html
+
+@pytest.mark.django_db
+def test_legacy_invoice_with_place_of_supply_still_renders(auth_client, subscribed_user):
+    invoice = Invoice.objects.create(
+        subscription=subscribed_user.subscription,
+        amount=Decimal("1490.00"),
+        plan_name="Value Pack",
+        billing_interval="yearly",
+        place_of_supply="27",
+    )
+    res = auth_client.get(f"/api/v1/invoices/{invoice.id}/download")
+    assert res.status_code == 200
+    html = res.content.decode()
+    assert "₹1,490.00" in html and "Annual (12 months)" in html and "Inclusive of all taxes" in html
 
 
 @pytest.mark.django_db

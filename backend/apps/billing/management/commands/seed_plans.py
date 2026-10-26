@@ -16,7 +16,6 @@ class Command(BaseCommand):
                 "description": "Essential cloud vault for documents, tax receipts, and personal archives.",
                 "storage_bytes": 25 * 1024 * 1024 * 1024,  # 25 GB
                 "price_monthly": 39.00,
-                "price_yearly": 390.00,
                 "currency": "INR",
                 "max_file_size": 5 * 1024 * 1024 * 1024,  # 5 GB
                 "version_retention_days": 15,
@@ -40,7 +39,6 @@ class Command(BaseCommand):
                 "description": "Affordable expansion for students, creators, and personal photo libraries.",
                 "storage_bytes": 100 * 1024 * 1024 * 1024,  # 100 GB
                 "price_monthly": 89.00,
-                "price_yearly": 890.00,
                 "currency": "INR",
                 "max_file_size": 10 * 1024 * 1024 * 1024,  # 10 GB
                 "version_retention_days": 30,
@@ -64,7 +62,6 @@ class Command(BaseCommand):
                 "description": "Top-tier value for photographers, wedding cinematographers, and 4K archives.",
                 "storage_bytes": 200 * 1024 * 1024 * 1024,  # 200 GB
                 "price_monthly": 149.00,
-                "price_yearly": 1490.00,
                 "currency": "INR",
                 "max_file_size": 25 * 1024 * 1024 * 1024,  # 25 GB
                 "version_retention_days": 60,
@@ -88,7 +85,6 @@ class Command(BaseCommand):
                 "description": "High-volume secure storage for video editors, boutique studios, and agencies.",
                 "storage_bytes": 400 * 1024 * 1024 * 1024,  # 400 GB
                 "price_monthly": 249.00,
-                "price_yearly": 2490.00,
                 "currency": "INR",
                 "max_file_size": 50 * 1024 * 1024 * 1024,  # 50 GB
                 "version_retention_days": 90,
@@ -112,7 +108,6 @@ class Command(BaseCommand):
                 "description": "Maximum capacity tier for enterprise datasets and production media houses.",
                 "storage_bytes": 1000 * 1024 * 1024 * 1024,  # 1 TB (1000 GB)
                 "price_monthly": 449.00,
-                "price_yearly": 4490.00,
                 "currency": "INR",
                 "max_file_size": 100 * 1024 * 1024 * 1024,  # 100 GB
                 "version_retention_days": 365,

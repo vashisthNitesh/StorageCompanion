@@ -53,7 +53,7 @@ Login, Google sign-in, registration, MFA and password changes share a 10/minute 
 |---|---|---|
 | GET | `/plans` | Public plan list. |
 | GET | `/subscription` | Current subscription. |
-| POST | `/subscription/checkout` | `{plan_code, billing_interval, billing_state}` → Razorpay order. 503 if payments aren't configured. |
+| POST | `/subscription/checkout` | `{plan_code, billing_interval}` → Razorpay order for the plan's price (yearly = monthly × 10; the client never sends an amount). 503 if payments aren't configured. |
 | POST | `/subscription/verify` | `{razorpay_order_id, razorpay_payment_id, razorpay_signature}`. The plan comes from the server-side order; each order/payment can be used once. |
 | POST | `/subscription/cancel` | Don't renew at period end. |
 | GET | `/invoices` | Invoice list. |

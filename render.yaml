@@ -47,10 +47,6 @@ services:
         value: SmartSpace
       - key: BUSINESS_ADDRESS
         sync: false
-      - key: BUSINESS_GSTIN
-        sync: false
-      - key: BUSINESS_STATE_CODE
-        sync: false
       # SpaceByte storage (https://spacebyte.in/api-docs)
       - key: SPACEBYTE_BASE_URL
         value: https://spacebyte.in/api/v1

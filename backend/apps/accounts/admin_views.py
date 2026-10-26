@@ -81,7 +81,7 @@ class AdminKPIsView(APIView):
         for sub in active_subs:
             if sub.plan:
                 if sub.billing_interval == "yearly":
-                    monthly_revenue += (sub.plan.price_yearly / 12)
+                    monthly_revenue += (sub.plan.yearly_price / 12)
                 else:
                     monthly_revenue += sub.plan.price_monthly
 
@@ -116,7 +116,7 @@ class AdminKPIsView(APIView):
                 "percent": percent,
                 "storage_gb": round(p.storage_bytes / (1024 * 1024 * 1024)),
                 "price_monthly": float(p.price_monthly),
-                "price_yearly": float(p.price_yearly),
+                "price_yearly": float(p.yearly_price),
             })
 
         # Sort by count desc to highlight most popular
