@@ -14,7 +14,7 @@ import { useBillingStore, type Invoice } from "../../stores/billing";
 import { normalizeApiError } from "../../lib/errors";
 import { reportError } from "../../lib/reportError";
 import { formatBytes, formatDate, formatMoney } from "../../lib/format";
-import { INCLUDED_IN_ALL, priceFor, storageLabel, yearlySavingsPercent } from "./planCatalog";
+import { INCLUDED_IN_ALL, priceFor, storageLabel } from "./planCatalog";
 
 // Plan & billing overview: what you have, how long it lasts, how much space is left, how to
 // add time, and invoices. Choosing or changing a plan happens on the plans page.
@@ -33,7 +33,6 @@ const ended = computed(() => hasPlan.value && !sub.value?.can_upload);
 const plan = computed(() => billing.plans.find((p) => p.code === sub.value?.plan_code) ?? null);
 const interval = computed<"monthly" | "yearly">(() => (details.value?.billing_interval === "monthly" ? "monthly" : "yearly"));
 const daysLeft = computed(() => sub.value?.days_until_expiration ?? null);
-const savings = computed(() => yearlySavingsPercent(billing.plans));
 
 const usedPct = computed(() => (quota.value?.bytes_limit ? Math.min(100, (quota.value.bytes_used / quota.value.bytes_limit) * 100) : 0));
 const freeBytes = computed(() => Math.max(0, (quota.value?.bytes_limit ?? 0) - (quota.value?.bytes_used ?? 0)));
@@ -55,7 +54,7 @@ function newEndDate(days: number) {
 const addTimeOptions = computed(() =>
   plan.value
     ? [
-        { interval: "yearly" as const, label: "1 year", price: priceFor(plan.value, "yearly"), until: newEndDate(365), badge: savings.value ? `Save ${savings.value}%` : "" },
+        { interval: "yearly" as const, label: "1 year", price: priceFor(plan.value, "yearly"), until: newEndDate(365), badge: "2 months free" },
         { interval: "monthly" as const, label: "30 days", price: priceFor(plan.value, "monthly"), until: newEndDate(30), badge: "" },
       ]
     : []
@@ -106,7 +105,7 @@ onMounted(() => {
 
 <template>
   <div class="max-w-6xl space-y-5">
-    <UiPageHeader title="Plan & billing" description="Your plan, storage and invoices. Prices are in INR with GST included.">
+    <UiPageHeader title="Plan & billing" description="Your plan, storage and invoices. Prices are final, inclusive of all taxes.">
       <template v-if="hasPlan" #actions>
         <UiButton :to="{ name: 'plans' }">Change plan</UiButton>
       </template>
@@ -233,7 +232,7 @@ onMounted(() => {
       <UiEmptyState v-else-if="invoicesError" compact :icon="CloudOff" tone="danger" title="Couldn't load invoices" :description="normalizeApiError(invoicesError).message">
         <UiButton @click="loadInvoices">Try again</UiButton>
       </UiEmptyState>
-      <UiEmptyState v-else-if="!billing.invoices.length" compact :icon="Receipt" tone="neutral" title="No invoices yet" description="Your GST invoices appear here after each payment." />
+      <UiEmptyState v-else-if="!billing.invoices.length" compact :icon="Receipt" tone="neutral" title="No invoices yet" description="Your invoices appear here after each payment." />
       <table v-else class="tabular w-full border-t border-line text-left text-base">
         <thead class="border-b border-line bg-surface-sunken text-sm text-fg-muted">
           <tr>

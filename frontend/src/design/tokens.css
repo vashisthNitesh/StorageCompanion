@@ -7,27 +7,33 @@
 :root {
   color-scheme: light;
 
-  --bg: 248 250 252;
-  --bg-subtle: 241 245 249;
+  /* Brand: azure primary, sky highlight, saffron accent (client palette, tuned for WCAG AA). */
+  --bg: 245 249 253;
+  --bg-subtle: 235 243 251;
   --surface: 255 255 255;
   --surface-raised: 255 255 255;
-  --surface-sunken: 246 248 251;
+  --surface-sunken: 247 250 253;
   /* Neutral container for file and folder tiles (no border needed). */
-  --tile: 237 241 247;
-  --tile-hover: 228 233 242;
-  --border: 226 232 240;
+  --tile: 235 241 248;
+  --tile-hover: 226 234 244;
+  --border: 222 232 242;
   --border-strong: 128 142 163;
-  --text: 15 23 42;
-  --text-muted: 71 85 105;
+  --text: 15 30 51;
+  --text-muted: 82 98 122;
   --text-subtle: 94 109 131;
   --overlay: 15 23 42;
 
-  --primary: 47 91 234;
-  --primary-hover: 36 72 196;
+  --primary: 11 111 214;
+  --primary-hover: 10 93 181;
   --primary-fg: 255 255 255;
-  --primary-soft: 238 243 254;
-  --primary-soft-fg: 33 62 168;
-  --ring: 47 91 234;
+  --primary-soft: 230 242 254;
+  --primary-soft-fg: 10 79 156;
+  --ring: 11 111 214;
+  /* Large display text and decoration only (3:1 on white). */
+  --highlight: 26 141 255;
+  --accent: 194 65 12;
+  --accent-fg: 255 255 255;
+  --accent-soft: 255 237 213;
 
   --success: 21 128 61;
   --success-soft: 236 253 243;
@@ -43,6 +49,12 @@
   --shadow-color: 15 23 42;
   /* Logo wordmark accent only — never a UI colour. */
   --logo-accent: 5 150 105;
+  --logo-accent-inverse: 52 211 153; /* on the dark footer */
+  /* Footer: dark in both themes */
+  --footer-bg: 9 18 33;
+  --footer-fg: 236 242 250;
+  --footer-muted: 160 176 199;
+  --footer-line: 31 45 68;
   --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
   --dur-fast: 120ms;
   --dur-base: 180ms;
@@ -53,8 +65,8 @@
 [data-theme="dark"] {
   color-scheme: dark;
 
-  --bg: 10 13 20;
-  --bg-subtle: 16 20 29;
+  --bg: 8 13 22;
+  --bg-subtle: 13 20 32;
   --surface: 17 22 32;
   --surface-raised: 25 31 44;
   --surface-sunken: 13 17 25;
@@ -67,12 +79,16 @@
   --text-subtle: 132 144 165;
   --overlay: 2 4 8;
 
-  --primary: 128 158 255;
-  --primary-hover: 157 181 255;
-  --primary-fg: 8 13 32;
-  --primary-soft: 29 39 72;
-  --primary-soft-fg: 176 196 255;
-  --ring: 128 158 255;
+  --primary: 77 163 255;
+  --primary-hover: 120 186 255;
+  --primary-fg: 6 18 31;
+  --primary-soft: 16 38 66;
+  --primary-soft-fg: 150 200 255;
+  --ring: 77 163 255;
+  --highlight: 90 169 255;
+  --accent: 251 146 60;
+  --accent-fg: 40 15 2;
+  --accent-soft: 60 32 12;
 
   --success: 74 222 128;
   --success-soft: 18 44 31;
@@ -87,14 +103,16 @@
 
   --shadow-color: 0 0 0;
   --logo-accent: 52 211 153;
+  --footer-bg: 5 9 16;
+  --footer-line: 24 34 52;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
 
-    --bg: 10 13 20;
-    --bg-subtle: 16 20 29;
+    --bg: 8 13 22;
+    --bg-subtle: 13 20 32;
     --surface: 17 22 32;
     --surface-raised: 25 31 44;
     --surface-sunken: 13 17 25;
@@ -107,12 +125,16 @@
     --text-subtle: 132 144 165;
     --overlay: 2 4 8;
 
-    --primary: 128 158 255;
-    --primary-hover: 157 181 255;
-    --primary-fg: 8 13 32;
-    --primary-soft: 29 39 72;
-    --primary-soft-fg: 176 196 255;
-    --ring: 128 158 255;
+    --primary: 77 163 255;
+    --primary-hover: 120 186 255;
+    --primary-fg: 6 18 31;
+    --primary-soft: 16 38 66;
+    --primary-soft-fg: 150 200 255;
+    --ring: 77 163 255;
+    --highlight: 90 169 255;
+    --accent: 251 146 60;
+    --accent-fg: 40 15 2;
+    --accent-soft: 60 32 12;
 
     --success: 74 222 128;
     --success-soft: 18 44 31;
@@ -127,6 +149,8 @@
 
     --shadow-color: 0 0 0;
     --logo-accent: 52 211 153;
+    --footer-bg: 5 9 16;
+    --footer-line: 24 34 52;
   }
 }
 

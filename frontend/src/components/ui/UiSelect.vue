@@ -84,7 +84,7 @@ const item =
 </script>
 
 <template>
-  <!-- Searchable variant (long lists such as GST states) -->
+  <!-- Searchable variant (long lists) -->
   <ComboboxRoot
     v-if="useCombobox"
     v-model="inner"

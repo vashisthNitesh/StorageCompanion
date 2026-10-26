@@ -8,7 +8,7 @@ const rows: [string, boolean | string, boolean | string, boolean | string][] = [
   ["Download charges", "None", "Often limited", "Per-GB fees"],
   ["Original quality kept", true, "Varies", true],
   ["Encrypted before upload", true, false, false],
-  ["Priced in INR with GST invoice", true, "Varies", false],
+  ["Priced in INR, no hidden charges", true, "Varies", false],
   ["Pay with UPI", true, "Varies", false],
 ];
 </script>

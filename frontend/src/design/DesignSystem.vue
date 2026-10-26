@@ -53,7 +53,7 @@ import type { MenuEntry } from "../components/ui/menuTypes";
 import { toast } from "../lib/toast";
 import { confirmDialog } from "../lib/confirm";
 import { useThemeStore, type ThemePreference } from "../stores/theme";
-import { GST_STATES } from "../lib/gstStates";
+const CITIES = ["Bengaluru", "Chennai", "Delhi", "Hyderabad", "Kolkata", "Mumbai", "Pune"].map((c) => ({ value: c.toLowerCase(), label: c }));
 
 const theme = useThemeStore();
 const text = ref("Quarterly report");
@@ -168,8 +168,8 @@ function loadingToast() {
               ]"
             />
           </UiFormField>
-          <UiFormField label="State (searchable)" hint="Used to calculate CGST/SGST or IGST on your invoice.">
-            <UiSelect v-model="state" :options="GST_STATES.map((s) => ({ value: s.code, label: s.name }))" placeholder="Search for your state" />
+          <UiFormField label="City (searchable)" hint="Searchable select for long lists.">
+            <UiSelect v-model="state" :options="CITIES" placeholder="Search for a city" />
           </UiFormField>
         </div>
         <div class="mt-6 grid gap-5 sm:grid-cols-3">

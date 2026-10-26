@@ -36,7 +36,7 @@ onMounted(() => void billing.ensurePlans());
     <div v-else class="mt-8">
       <PlanCards :plans="billing.plans" :interval="interval" :loading="!billing.plansLoaded" public-cta="Get started" @select="choose" />
     </div>
-    <p class="mt-6 text-center text-sm text-fg-muted">Prices in INR, GST included. Pay with UPI, cards or net banking. Plans never renew automatically.</p>
+    <p class="mt-6 text-center text-sm text-fg-muted">All prices are final. No GST or hidden charges added. Pay with UPI, cards or net banking.</p>
     <details v-if="compare && billing.plans.length" class="group mt-8">
       <summary class="mx-auto flex w-fit cursor-pointer select-none items-center gap-1.5 rounded text-base font-medium text-primary hover:underline">
         Compare all plans <ChevronDown :size="16" class="transition-transform group-open:rotate-180" aria-hidden="true" />

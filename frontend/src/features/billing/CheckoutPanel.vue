@@ -3,16 +3,13 @@ import { computed, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { CheckCircle2, XCircle, ShieldCheck } from "lucide-vue-next";
 import UiButton from "../../components/ui/UiButton.vue";
-import UiFormField from "../../components/ui/UiFormField.vue";
-import UiSelect from "../../components/ui/UiSelect.vue";
 import UiAlert from "../../components/ui/UiAlert.vue";
 import UiSkeleton from "../../components/ui/UiSkeleton.vue";
 import { useAuthStore } from "../../stores/auth";
 import { useBillingStore, PaymentCancelled, PaymentFailed, type Plan } from "../../stores/billing";
-import { GST_STATES } from "../../lib/gstStates";
 import { formatBytes, formatDate, formatMoney } from "../../lib/format";
 import { normalizeApiError } from "../../lib/errors";
-import { actionFor, gstBreakdown, priceFor, storageLabel } from "./planCatalog";
+import { actionFor, priceFor, storageLabel, yearlyBreakdown } from "./planCatalog";
 
 // Order summary and payment on the checkout page. It is deliberately not a dialog:
 // Razorpay opens its own window, and a dialog underneath would trap it.
@@ -26,19 +23,9 @@ const billing = useBillingStore();
 type Phase = "idle" | "paying" | "verifying" | "success" | "failed";
 const phase = ref<Phase>("idle");
 const error = ref("");
-const stateError = ref("");
 const orderRef = ref("");
 const paidPlan = ref<Plan | null>(null);
 const paidUntil = ref("");
-const state = ref(readState());
-
-function readState() {
-  try {
-    return localStorage.getItem("sc_billing_state") || "";
-  } catch {
-    return "";
-  }
-}
 
 // A new choice starts a fresh order.
 watch(
@@ -53,7 +40,7 @@ const sub = computed(() => authStore.user?.subscription);
 const currentCode = computed(() => (sub.value?.has_active_subscription ? sub.value.plan_code : null));
 const action = computed(() => (props.plan ? actionFor(props.plan, currentCode.value, billing.plans) : "choose"));
 const total = computed(() => (props.plan ? priceFor(props.plan, interval.value) : 0));
-const breakdown = computed(() => gstBreakdown(total.value));
+const yearly = computed(() => (props.plan ? yearlyBreakdown(props.plan) : null));
 const days = computed(() => (interval.value === "yearly" ? 365 : 30));
 const validUntil = computed(() => {
   const now = Date.now();
@@ -63,24 +50,16 @@ const validUntil = computed(() => {
 });
 const tooSmall = computed(() => !!props.plan && !!props.usedBytes && props.usedBytes > props.plan.storage_bytes);
 const busy = computed(() => phase.value === "paying" || phase.value === "verifying");
-const stateOptions = GST_STATES.map((s) => ({ value: s.code, label: s.name }));
 const heading = "Order summary";
 
 async function pay() {
   if (!props.plan || busy.value) return;
-  if (!state.value) {
-    stateError.value = "Select your state so we can add the right GST to your invoice.";
-    return;
-  }
-  try {
-    localStorage.setItem("sc_billing_state", state.value);
-  } catch {}
   phase.value = "paying";
   error.value = "";
   const plan = props.plan;
   const until = validUntil.value;
   try {
-    await billing.checkout(plan.code, interval.value, state.value, { onVerifying: () => (phase.value = "verifying") });
+    await billing.checkout(plan.code, interval.value, { onVerifying: () => (phase.value = "verifying") });
     paidPlan.value = plan;
     paidUntil.value = until;
     phase.value = "success";
@@ -135,15 +114,27 @@ async function pay() {
         </div>
 
         <dl class="tabular mt-5 space-y-2 text-base">
-          <div class="flex justify-between gap-3"><dt class="text-fg-muted">{{ interval === "yearly" ? "1 year" : "30 days" }}</dt><dd class="text-fg">{{ formatMoney(breakdown.base) }}</dd></div>
-          <div class="flex justify-between gap-3"><dt class="text-fg-muted">GST (18%)</dt><dd class="text-fg">{{ formatMoney(breakdown.gst) }}</dd></div>
-          <div class="flex justify-between gap-3 border-t border-line pt-3 text-md font-semibold"><dt class="text-fg">Total</dt><dd class="text-fg">{{ formatMoney(breakdown.total) }}</dd></div>
-          <div class="flex justify-between gap-3 text-sm"><dt class="text-fg-subtle">Valid until</dt><dd class="text-fg-muted">{{ formatDate(validUntil) }}</dd></div>
+          <div class="flex justify-between gap-3">
+            <dt class="text-fg-muted">Billing period</dt>
+            <dd class="text-fg">{{ interval === "yearly" ? "12 months" : "30 days" }}</dd>
+          </div>
+          <template v-if="interval === 'yearly' && yearly">
+            <div class="flex justify-between gap-3">
+              <dt class="text-fg-muted">12 months at {{ formatMoney(yearly.full / 12) }}</dt>
+              <dd class="text-fg-subtle line-through">{{ formatMoney(yearly.full) }}</dd>
+            </div>
+            <div class="flex justify-between gap-3 text-success">
+              <dt>2 months free</dt>
+              <dd>−{{ formatMoney(yearly.saving) }}</dd>
+            </div>
+          </template>
+          <div class="flex justify-between gap-3 border-t border-line pt-3 text-md font-semibold">
+            <dt class="text-fg">Total</dt>
+            <dd class="text-fg">{{ formatMoney(total) }}</dd>
+          </div>
+          <p class="text-xs text-fg-subtle">Inclusive of all taxes. No extra charges.</p>
+          <div class="flex justify-between gap-3 pt-1 text-sm"><dt class="text-fg-subtle">Valid until</dt><dd class="text-fg-muted">{{ formatDate(validUntil) }}</dd></div>
         </dl>
-
-        <UiFormField class="mt-5" label="Your state" hint="For CGST/SGST or IGST on your invoice." :error="stateError" required>
-          <UiSelect v-model="state" :options="stateOptions" placeholder="Search for your state" @update:model-value="stateError = ''" />
-        </UiFormField>
 
         <UiAlert v-if="tooSmall" tone="warning" class="mt-4">You're using {{ formatBytes(usedBytes) }}. Pick a plan with more space, or delete files first.</UiAlert>
         <UiAlert v-else-if="!authStore.paymentsEnabled" tone="warning" class="mt-4">Online payments are unavailable right now. Please try again later.</UiAlert>

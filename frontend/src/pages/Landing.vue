@@ -1,72 +1,60 @@
 <script setup lang="ts">
 import { ref } from "vue";
-import {
-  Lock,
-  ImageIcon,
-  Download,
-  FolderTree,
-  History,
-  Smartphone,
-  ArrowRight,
-  ChevronDown,
-  Upload,
-  KeyRound,
-  CheckCircle2,
-  Check,
-  ShieldCheck,
-  FileImage,
-} from "lucide-vue-next";
+import { Lock, Share2, ImageIcon, Download, Eye, History, ArrowRight, ChevronDown, UserPlus, Upload, Globe, Check } from "lucide-vue-next";
 import SiteHeader from "./components/SiteHeader.vue";
 import SiteFooter from "./components/SiteFooter.vue";
 import PlanGrid from "./components/PlanGrid.vue";
-import ProductMock from "./components/ProductMock.vue";
 import UiButton from "../components/ui/UiButton.vue";
-import UiBadge from "../components/ui/UiBadge.vue";
 import { vReveal } from "../directives/reveal";
 import { useAuthStore } from "../stores/auth";
 import { homeFor } from "../router";
 
 const authStore = useAuthStore();
 
-const trust = ["AES-256 in your browser", "UPI, cards and net banking", "GST invoice every time"];
+const trust = ["End-to-end encrypted", "No hidden charges", "Never auto-renews"];
 
-const stats = [
-  { value: "AES-256", label: "Encrypted before upload" },
-  { value: "₹0", label: "Download or bandwidth fees" },
-  { value: "25 GB–1 TB", label: "Plans for every library" },
-  { value: "90 days", label: "To download after a plan ends" },
+const steps = [
+  { icon: UserPlus, title: "Create your account", text: "Sign up in under a minute with email or Google." },
+  { icon: Upload, title: "Upload your files", text: "Encrypted in your browser before they're uploaded." },
+  { icon: Globe, title: "Access & share anywhere", text: "Open on any device, share with a secure link." },
 ];
 
 const features = [
-  { icon: ImageIcon, title: "Original quality, always", text: "No compression. RAW photos, ProRes and 4K video come back bit-for-bit identical." },
-  { icon: Download, title: "Unmetered downloads", text: "Download your files as often as you need. No bandwidth charges, ever." },
-  { icon: FolderTree, title: "Folders that make sense", text: "Upload whole folders, keep their structure, and find anything with instant search." },
-  { icon: History, title: "Version history", text: "Upload a new copy of a file and keep earlier versions you can download anytime." },
-  { icon: Smartphone, title: "Preview anywhere", text: "Open photos, videos, PDFs and documents right in your browser, on laptop or phone." },
+  { icon: Lock, title: "Encrypted before upload", text: "Files and names are encrypted on your device. We store only data we can't read." },
+  { icon: Share2, title: "Secure sharing", text: "Share a link that expires, needs a password or limits downloads. The key never reaches us." },
+  { icon: ImageIcon, title: "Original quality", text: "No compression. Photos and 4K video come back exactly as you uploaded them." },
+  { icon: Download, title: "Unmetered downloads", text: "Download as often as you need. No bandwidth charges." },
+  { icon: Eye, title: "Preview anywhere", text: "Open photos, videos, PDFs and documents right in the browser." },
+  { icon: History, title: "Version history", text: "Upload a new copy and keep earlier versions you can download." },
 ];
 
-const steps = [
-  { icon: KeyRound, title: "Create your account", text: "Sign up with Google or email. Your encryption key is created on your device." },
-  { icon: CheckCircle2, title: "Pick a plan", text: "From 25 GB to 1 TB, paid in INR with UPI, cards or net banking." },
-  { icon: Upload, title: "Upload and relax", text: "Drag in files or folders. They're encrypted, uploaded and ready anywhere." },
-];
-
-const faqs = [
+// Ordered by what people ask first; yes/no answers lead with the answer.
+const faqs: { q: string; lead?: string; a: string }[] = [
   {
     q: "Can SmartSpace see my files?",
-    a: "If you create your account with an email and password, no. Your files and file names are encrypted in your browser with a key that only your password can unlock, so we store data we can't read. Accounts created with Google sign-in use a key we derive for you so you never need a separate password; choose email sign-up if you want the strongest privacy.",
+    lead: "No.",
+    a: "If you sign up with email and password, your files and file names are encrypted in your browser with a key that only your password can unlock. We never see your files.",
+  },
+  { q: "How does yearly billing work?", lead: "You pay for 10 months and get 12.", a: "The yearly price is the monthly price × 10, charged once for the whole year." },
+  { q: "Are there any taxes or extra charges?", lead: "No.", a: "The price you see is the price you pay. Nothing is added at checkout." },
+  {
+    q: "I forgot my password. Can I reset it?",
+    lead: "Yes, with your recovery key.",
+    a: "We give you a recovery key when you sign up. With it you can choose a new password and keep all your files. Without it you can still get back into your account, but files uploaded before can't be decrypted, because only your password or recovery key can unlock them.",
   },
   {
-    q: "What happens if I forget my password?",
-    a: "Because only your password can unlock your encryption key, we can't reset it for you, and files in a password account can't be recovered without it. Use a password manager, or sign in with Google.",
+    q: "Can I share files with people who don't have an account?",
+    lead: "Yes.",
+    a: "Create a secure link for any file. Add an expiry, a password or a download limit, and revoke it whenever you like. The decryption key is part of the link, so we can't open the file.",
   },
-  { q: "Are downloads really unlimited?", a: "Yes. We don't charge for or throttle downloads. You only pay for the storage your plan includes." },
+  { q: "Is there a limit on file size?", a: "Each plan has a per-file limit, from 5 GB on Entry to 100 GB on Mega. Storage and file limits are listed on every plan." },
   {
-    q: "What happens when my plan ends?",
-    a: "Uploads pause, but your files stay available to download for 90 days. Renew any time in that window to carry on. After 90 days the files are permanently deleted.",
+    q: "Do plans renew automatically?",
+    lead: "No.",
+    a: "Plans are prepaid for a month or a year, so there's nothing to cancel. Add more time whenever you want to keep going.",
   },
-  { q: "Do you compress my photos or videos?", a: "Never. Files are stored exactly as you upload them, so RAW photos, ProRes footage and archives keep their full quality." },
-  { q: "Do I get a GST invoice?", a: "Yes. Every payment comes with a downloadable invoice that shows GST for your state." },
+  { q: "What happens when my plan ends?", a: "Uploads pause, but your files stay available to download for 90 days. Renew in that time to carry on." },
+  { q: "Do you compress my photos or videos?", lead: "No.", a: "Files are stored exactly as you upload them, so RAW photos and 4K footage keep their full quality." },
 ];
 const openFaq = ref<number | null>(0);
 </script>
@@ -77,150 +65,106 @@ const openFaq = ref<number | null>(0);
 
     <!-- Hero -->
     <section class="relative">
-      <div class="pointer-events-none absolute inset-0 -z-0 bg-[radial-gradient(60%_50%_at_70%_0%,rgb(var(--primary)/0.14),transparent_70%)]" aria-hidden="true" />
-      <div
-        class="pointer-events-none absolute inset-0 -z-0 opacity-50 [background-image:radial-gradient(rgb(var(--border-strong)/0.35)_1px,transparent_1px)] [background-size:22px_22px] [mask-image:linear-gradient(to_bottom,black,transparent_70%)]"
-        aria-hidden="true"
-      />
-      <div class="relative mx-auto grid max-w-6xl grid-cols-[minmax(0,1fr)] items-center gap-12 px-4 pb-16 pt-10 sm:px-6 sm:pt-14 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)] lg:gap-10 lg:pb-20">
-        <div class="text-center lg:text-left">
-          <UiBadge tone="primary" class="animate-slide-up">Made in India · Priced in rupees</UiBadge>
-          <h1 class="mt-5 animate-slide-up text-4xl font-semibold tracking-tight text-fg [animation-delay:60ms] sm:text-5xl lg:text-[3.4rem] lg:leading-[1.08]">
-            Cloud storage only
-            <span class="bg-gradient-to-r from-primary to-violet-500 bg-clip-text text-transparent">you</span>
-            can read
-          </h1>
-          <p class="mx-auto mt-5 max-w-xl animate-slide-up text-lg leading-relaxed text-fg-muted [animation-delay:120ms] lg:mx-0">
-            SmartSpace encrypts your photos, videos and documents on your device before they're uploaded. Original quality, unmetered downloads, from ₹39 a month.
-          </p>
-          <div class="mt-8 flex animate-slide-up flex-col justify-center gap-3 [animation-delay:180ms] sm:flex-row lg:justify-start">
-            <UiButton v-if="authStore.isAuthenticated" variant="primary" size="lg" :icon-right="ArrowRight" :to="homeFor(authStore.isMasterAdmin)">
-              {{ authStore.isMasterAdmin ? "Open admin console" : "Open my files" }}
-            </UiButton>
-            <UiButton v-else variant="primary" size="lg" :icon-right="ArrowRight" to="/register">Get started free</UiButton>
-            <UiButton size="lg" to="/pricing">See pricing</UiButton>
-          </div>
-          <ul class="mt-6 flex animate-slide-up flex-wrap justify-center gap-x-5 gap-y-2 text-sm text-fg-muted [animation-delay:240ms] lg:justify-start">
-            <li v-for="t in trust" :key="t" class="flex items-center gap-1.5"><Check :size="15" :stroke-width="2.25" class="text-success" aria-hidden="true" />{{ t }}</li>
-          </ul>
+      <div class="pointer-events-none absolute inset-0 bg-[radial-gradient(55%_60%_at_50%_0%,rgb(var(--highlight)/0.12),transparent_70%)]" aria-hidden="true" />
+      <div class="relative mx-auto max-w-3xl px-4 pb-14 pt-14 text-center sm:px-6 sm:pb-16 sm:pt-20">
+        <h1 class="animate-slide-up text-balance text-4xl font-semibold tracking-tight text-fg sm:text-5xl lg:text-6xl">
+          Your files. <span class="text-highlight">Your key.</span><br class="hidden sm:block" />
+          <span class="whitespace-nowrap">No one else's.</span>
+        </h1>
+        <p class="mx-auto mt-5 max-w-2xl animate-slide-up text-lg leading-relaxed text-fg-muted [animation-delay:80ms]">
+          SmartSpace encrypts your files in your browser, so not even we can read them. Simple plans, no hidden charges.
+        </p>
+        <div class="mt-8 flex animate-slide-up flex-col justify-center gap-3 [animation-delay:140ms] sm:flex-row">
+          <UiButton v-if="authStore.isAuthenticated" variant="primary" size="lg" :icon-right="ArrowRight" :to="homeFor(authStore.isMasterAdmin)">
+            {{ authStore.isMasterAdmin ? "Open admin console" : "Open my files" }}
+          </UiButton>
+          <UiButton v-else variant="primary" size="lg" :icon-right="ArrowRight" to="/register">Get started</UiButton>
+          <UiButton size="lg" href="#pricing">See pricing</UiButton>
         </div>
-
-        <div class="animate-slide-up [animation-delay:200ms] lg:pl-4">
-          <ProductMock />
-        </div>
+        <ul class="mt-6 flex animate-slide-up flex-wrap justify-center gap-x-5 gap-y-2 text-sm text-fg-muted [animation-delay:200ms]">
+          <li v-for="t in trust" :key="t" class="flex items-center gap-1.5"><Check :size="15" :stroke-width="2.5" class="text-success" aria-hidden="true" />{{ t }}</li>
+        </ul>
       </div>
     </section>
 
-    <!-- Stats -->
-    <section class="border-y border-line bg-surface" aria-label="At a glance">
-      <dl class="mx-auto grid max-w-6xl grid-cols-2 divide-line px-4 sm:px-6 md:grid-cols-4 md:divide-x">
-        <div v-for="(s, i) in stats" :key="s.value" v-reveal="i * 60" class="flex flex-col px-2 py-6 text-center md:px-6">
-          <dt class="order-2 mt-1 text-sm text-fg-muted">{{ s.label }}</dt>
-          <dd class="text-2xl font-semibold tracking-tight text-fg">{{ s.value }}</dd>
+    <!-- Pricing -->
+    <section id="pricing" class="scroll-mt-20 border-t border-line bg-canvas-subtle py-14 sm:py-16" aria-labelledby="pricing-heading">
+      <div class="mx-auto max-w-6xl px-4 sm:px-6">
+        <div class="mx-auto max-w-2xl text-center">
+          <h2 id="pricing-heading" class="text-3xl font-semibold tracking-tight text-fg sm:text-4xl">
+            “Paisa vasool” <span class="text-highlight">pricing</span>
+          </h2>
+          <p class="mt-3 text-lg text-fg-muted">Pay for storage, not downloads. Pick monthly, or pay for 10 months and get 12.</p>
         </div>
-      </dl>
+        <div class="mt-8"><PlanGrid /></div>
+      </div>
     </section>
 
-    <!-- Features (bento) -->
-    <section id="features" class="scroll-mt-20 py-16 sm:py-20">
-      <div class="mx-auto max-w-6xl px-4 sm:px-6">
-        <div v-reveal class="mx-auto max-w-2xl text-center">
-          <p class="text-sm font-semibold uppercase tracking-wide text-primary">Why SmartSpace</p>
-          <h2 class="mt-2 text-3xl font-semibold tracking-tight text-fg sm:text-4xl">Everything your files need, nothing they don't</h2>
-          <p class="mt-3 text-lg text-fg-muted">Simple, private storage for creators, photographers and families.</p>
+    <!-- 3 easy steps -->
+    <section id="how-it-works" class="scroll-mt-20 py-14 sm:py-16" aria-labelledby="steps-heading">
+      <div class="mx-auto max-w-5xl px-4 sm:px-6">
+        <div class="mx-auto max-w-2xl text-center">
+          <h2 id="steps-heading" class="text-3xl font-semibold tracking-tight text-fg sm:text-4xl">Start in <span class="text-highlight">3 easy steps</span></h2>
+          <p class="mt-3 text-lg text-fg-muted">Store and share your files securely in minutes.</p>
         </div>
-
-        <div class="mt-10 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          <!-- Hero feature: encryption, with a small illustration -->
-          <article v-reveal class="group relative overflow-hidden rounded-2xl border border-line bg-surface p-6 transition-[border-color,box-shadow,transform] duration-base hover:-translate-y-0.5 hover:border-line-strong hover:shadow-lg md:col-span-2 lg:row-span-2">
-            <span class="flex h-10 w-10 items-center justify-center rounded-lg bg-primary text-primary-fg"><Lock :size="20" :stroke-width="1.75" aria-hidden="true" /></span>
-            <h3 class="mt-4 text-lg font-semibold text-fg">Encrypted before it leaves your device</h3>
-            <p class="mt-2 max-w-lg text-base leading-relaxed text-fg-muted">
-              Files and file names are encrypted in your browser with AES-256. We only ever store scrambled data, so a breach on our side reveals nothing.
-            </p>
-            <div class="mt-6 grid items-center gap-3 rounded-xl border border-line bg-canvas p-4 sm:grid-cols-[1fr_auto_1fr]" aria-hidden="true">
-              <div class="flex items-center gap-3 rounded-lg border border-line bg-surface p-3">
-                <span class="flex h-9 w-9 items-center justify-center rounded-md bg-emerald-500/10 text-emerald-600"><FileImage :size="18" /></span>
-                <div class="min-w-0">
-                  <p class="truncate text-sm font-medium text-fg">Family_trip_2026.jpg</p>
-                  <p class="text-xs text-fg-subtle">On your laptop</p>
-                </div>
-              </div>
-              <span class="mx-auto flex h-9 w-9 items-center justify-center rounded-full bg-primary-soft text-primary transition-transform duration-slow group-hover:rotate-90 max-sm:rotate-90 sm:group-hover:rotate-0">
-                <ArrowRight :size="18" />
-              </span>
-              <div class="flex items-center gap-3 rounded-lg border border-line bg-surface p-3">
-                <span class="flex h-9 w-9 items-center justify-center rounded-md bg-fg text-canvas"><ShieldCheck :size="18" /></span>
-                <div class="min-w-0">
-                  <p class="truncate font-mono text-sm text-fg">9f3a·c71e·04b2·e8d9</p>
-                  <p class="text-xs text-fg-subtle">What our servers see</p>
-                </div>
-              </div>
-            </div>
-            <router-link to="/security" class="mt-5 inline-flex items-center gap-1.5 text-base font-medium text-primary hover:underline">How encryption works <ArrowRight :size="16" /></router-link>
-          </article>
-
-          <article
-            v-for="(f, i) in features"
-            :key="f.title"
-            v-reveal="(i % 3) * 70"
-            class="group rounded-2xl border border-line bg-surface p-6 transition-[border-color,box-shadow,transform] duration-base hover:-translate-y-0.5 hover:border-line-strong hover:shadow-lg"
+        <ol class="relative mt-10 grid gap-5 md:grid-cols-3 md:gap-6">
+          <!-- connecting line: vertical on mobile, horizontal on desktop -->
+          <li aria-hidden="true" class="pointer-events-none absolute bottom-10 left-[2.15rem] top-10 w-0.5 bg-gradient-to-b from-highlight/50 to-highlight/10 md:hidden" />
+          <li aria-hidden="true" class="pointer-events-none absolute left-[16%] right-[16%] top-[2.6rem] hidden h-0.5 bg-gradient-to-r from-highlight/20 via-highlight/60 to-highlight/20 md:block" />
+          <li
+            v-for="(s, i) in steps"
+            :key="s.title"
+            v-reveal="i * 100"
+            class="relative flex gap-4 rounded-2xl border border-line bg-surface p-5 shadow-xs md:flex-col md:items-center md:text-center"
           >
-            <span class="flex h-10 w-10 items-center justify-center rounded-lg bg-primary-soft text-primary transition-colors duration-base group-hover:bg-primary group-hover:text-primary-fg">
-              <component :is="f.icon" :size="20" :stroke-width="1.75" aria-hidden="true" />
+            <span class="relative z-10 flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-highlight text-base font-semibold text-white shadow-md ring-4 ring-surface">
+              {{ i + 1 }}
             </span>
-            <h3 class="mt-4 text-md font-semibold text-fg">{{ f.title }}</h3>
-            <p class="mt-1.5 text-base leading-relaxed text-fg-muted">{{ f.text }}</p>
-          </article>
-        </div>
-      </div>
-    </section>
-
-    <!-- How it works -->
-    <section class="border-y border-line bg-canvas-subtle py-16 sm:py-20">
-      <div class="mx-auto max-w-6xl px-4 sm:px-6">
-        <div v-reveal class="mx-auto max-w-2xl text-center">
-          <p class="text-sm font-semibold uppercase tracking-wide text-primary">How it works</p>
-          <h2 class="mt-2 text-3xl font-semibold tracking-tight text-fg sm:text-4xl">Up and running in minutes</h2>
-        </div>
-        <ol class="relative mt-10 grid gap-4 md:grid-cols-3">
-          <li aria-hidden="true" class="pointer-events-none absolute left-[16%] right-[16%] top-[3.25rem] hidden border-t-2 border-dashed border-line-strong md:block" />
-          <li v-for="(s, i) in steps" :key="s.title" v-reveal="i * 90" class="relative rounded-2xl border border-line bg-surface p-6 text-center shadow-xs">
-            <span class="relative mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-fg text-canvas shadow-md">
-              <component :is="s.icon" :size="22" :stroke-width="1.75" aria-hidden="true" />
-              <span class="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-fg ring-4 ring-surface">{{ i + 1 }}</span>
-            </span>
-            <h3 class="mt-4 text-md font-semibold text-fg">{{ s.title }}</h3>
-            <p class="mx-auto mt-1.5 max-w-xs text-base text-fg-muted">{{ s.text }}</p>
+            <div>
+              <h3 class="flex items-center gap-2 text-md font-semibold text-fg md:justify-center">
+                <component :is="s.icon" :size="18" :stroke-width="1.85" class="text-primary" aria-hidden="true" />{{ s.title }}
+              </h3>
+              <p class="mt-1 text-base text-fg-muted">{{ s.text }}</p>
+            </div>
           </li>
         </ol>
       </div>
     </section>
 
-    <!-- Pricing -->
-    <section id="pricing" class="scroll-mt-20 py-16 sm:py-20">
+    <!-- Features -->
+    <section id="features" class="scroll-mt-20 border-t border-line bg-canvas-subtle py-14 sm:py-16" aria-labelledby="features-heading">
       <div class="mx-auto max-w-6xl px-4 sm:px-6">
-        <div v-reveal class="mx-auto max-w-2xl text-center">
-          <p class="text-sm font-semibold uppercase tracking-wide text-primary">Pricing</p>
-          <h2 class="mt-2 text-3xl font-semibold tracking-tight text-fg sm:text-4xl">Pay for storage, not for downloads</h2>
+        <div class="mx-auto max-w-3xl text-center">
+          <h2 id="features-heading" class="text-balance text-3xl font-semibold tracking-tight text-fg sm:text-4xl">Private by design, simple to use</h2>
+          <p class="mt-3 text-lg text-fg-muted">Everything your files need, nothing they don't.</p>
         </div>
-        <div v-reveal class="mt-10"><PlanGrid /></div>
+        <div class="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <article
+            v-for="(f, i) in features"
+            :key="f.title"
+            v-reveal="(i % 3) * 70"
+            class="group rounded-2xl border border-line bg-surface p-5 transition-[border-color,box-shadow] duration-base hover:border-line-strong hover:shadow-md"
+          >
+            <span class="flex h-10 w-10 items-center justify-center rounded-lg bg-primary-soft text-primary transition-colors duration-base group-hover:bg-primary group-hover:text-primary-fg">
+              <component :is="f.icon" :size="20" :stroke-width="1.75" aria-hidden="true" />
+            </span>
+            <h3 class="mt-4 text-md font-semibold text-fg">{{ f.title }}</h3>
+            <p class="mt-1 text-base leading-relaxed text-fg-muted">{{ f.text }}</p>
+          </article>
+        </div>
       </div>
     </section>
 
     <!-- FAQ -->
-    <section id="faq" class="scroll-mt-20 border-t border-line bg-canvas-subtle py-16 sm:py-20">
-      <div class="mx-auto grid max-w-6xl gap-8 px-4 sm:px-6 lg:grid-cols-[1fr_1.6fr] lg:gap-12">
-        <div v-reveal>
-          <p class="text-sm font-semibold uppercase tracking-wide text-primary">FAQ</p>
-          <h2 class="mt-2 text-3xl font-semibold tracking-tight text-fg">Questions, answered</h2>
-          <p class="mt-3 text-base text-fg-muted">Can't find what you're looking for? Read how we protect your files on the <router-link to="/security" class="font-medium text-primary hover:underline">security page</router-link>.</p>
-        </div>
-        <dl v-reveal class="divide-y divide-line overflow-hidden rounded-2xl border border-line bg-surface">
+    <section id="faq" class="scroll-mt-20 py-14 sm:py-16" aria-labelledby="faq-heading">
+      <div class="mx-auto max-w-3xl px-4 sm:px-6">
+        <h2 id="faq-heading" class="text-center text-3xl font-semibold tracking-tight text-fg sm:text-4xl">Questions, answered</h2>
+        <dl class="mt-8 divide-y divide-line overflow-hidden rounded-2xl border border-line bg-surface">
           <div v-for="(f, i) in faqs" :key="f.q">
             <dt>
               <button
                 :id="`faq-q-${i}`"
+                type="button"
                 class="flex w-full items-center justify-between gap-4 px-5 py-4 text-left text-md font-medium text-fg transition-colors hover:bg-canvas-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
                 :aria-expanded="openFaq === i"
                 :aria-controls="`faq-a-${i}`"
@@ -238,7 +182,9 @@ const openFaq = ref<number | null>(0);
               :class="openFaq === i ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'"
             >
               <div class="overflow-hidden">
-                <p class="px-5 pb-5 text-base leading-relaxed text-fg-muted" :inert="openFaq !== i || undefined">{{ f.a }}</p>
+                <p class="px-5 pb-5 text-base leading-relaxed text-fg-muted" :inert="openFaq !== i || undefined">
+                  <strong v-if="f.lead" class="font-semibold text-fg">{{ f.lead }}</strong> {{ f.a }}
+                </p>
               </div>
             </dd>
           </div>
@@ -246,14 +192,13 @@ const openFaq = ref<number | null>(0);
       </div>
     </section>
 
-    <!-- CTA -->
-    <section class="px-4 py-16 sm:px-6 sm:py-20">
-      <div v-reveal class="relative mx-auto max-w-6xl overflow-hidden rounded-3xl bg-primary px-6 py-12 text-center sm:px-12 sm:py-14">
-        <div class="pointer-events-none absolute inset-0 opacity-30 [background-image:radial-gradient(rgb(255_255_255/0.5)_1px,transparent_1px)] [background-size:18px_18px] [mask-image:radial-gradient(60%_80%_at_50%_0%,black,transparent)]" aria-hidden="true" />
-        <div class="pointer-events-none absolute -right-20 -top-20 h-64 w-64 rounded-full bg-white/10 blur-2xl" aria-hidden="true" />
-        <h2 class="relative text-3xl font-semibold tracking-tight text-primary-fg sm:text-4xl">Keep your files private</h2>
-        <p class="relative mx-auto mt-3 max-w-xl text-lg text-primary-fg/85">Create your account in under a minute. Choose a plan when you're ready to upload.</p>
-        <UiButton class="relative mt-7 border-transparent" size="lg" :icon-right="ArrowRight" to="/register">Get started free</UiButton>
+    <!-- Final CTA -->
+    <section class="px-4 pb-14 sm:px-6 sm:pb-16">
+      <div v-reveal class="mx-auto flex max-w-6xl flex-col items-center justify-between gap-5 rounded-2xl bg-primary px-6 py-8 text-center sm:flex-row sm:px-10 sm:text-left">
+        <p class="text-xl font-semibold tracking-tight text-primary-fg sm:text-2xl">Your files, encrypted before they leave your device.</p>
+        <UiButton class="shrink-0 border-transparent" size="lg" :icon-right="ArrowRight" :to="authStore.isAuthenticated ? homeFor(authStore.isMasterAdmin) : '/register'">
+          {{ authStore.isAuthenticated ? "Open my files" : "Get started" }}
+        </UiButton>
       </div>
     </section>
 

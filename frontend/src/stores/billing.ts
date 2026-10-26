@@ -114,12 +114,7 @@ export const useBillingStore = defineStore("billing", () => {
    * Call it with no modal dialog open: a dialog's focus trap and pointer lock would
    * make the Razorpay window unclickable.
    */
-  async function checkout(
-    planCode: string,
-    interval: "monthly" | "yearly",
-    billingState: string,
-    hooks: { onVerifying?: () => void } = {}
-  ): Promise<void> {
+  async function checkout(planCode: string, interval: "monthly" | "yearly", hooks: { onVerifying?: () => void } = {}): Promise<void> {
     const order = await apiRequest<{
       key_id: string;
       order_id: string;
@@ -129,7 +124,7 @@ export const useBillingStore = defineStore("billing", () => {
       prefill: { name: string; email: string };
     }>("/api/v1/subscription/checkout", {
       method: "POST",
-      body: JSON.stringify({ plan_code: planCode, billing_interval: interval, billing_state: billingState }),
+      body: JSON.stringify({ plan_code: planCode, billing_interval: interval }),
     });
 
     await loadRazorpay();
@@ -145,7 +140,7 @@ export const useBillingStore = defineStore("billing", () => {
         image: "/logo.png",
         order_id: order.order_id,
         prefill: order.prefill,
-        theme: { color: "#2F5BEA" },
+        theme: { color: "#0B6FD6" },
         handler: async (response: any) => {
           settled = true;
           hooks.onVerifying?.();

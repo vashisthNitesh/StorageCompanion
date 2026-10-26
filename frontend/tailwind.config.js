@@ -37,6 +37,9 @@ export default {
         surface: { DEFAULT: token("surface"), raised: token("surface-raised"), sunken: token("surface-sunken") },
         line: { DEFAULT: token("border"), strong: token("border-strong") },
         tile: { DEFAULT: token("tile"), hover: token("tile-hover") },
+        highlight: token("highlight"),
+        footer: { DEFAULT: token("footer-bg"), fg: token("footer-fg"), muted: token("footer-muted"), line: token("footer-line") },
+        accent: { DEFAULT: token("accent"), fg: token("accent-fg"), soft: token("accent-soft") },
         fg: { DEFAULT: token("text"), muted: token("text-muted"), subtle: token("text-subtle") },
         overlay: token("overlay"),
         primary: {

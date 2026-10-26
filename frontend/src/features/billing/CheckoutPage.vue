@@ -90,7 +90,7 @@ onMounted(async () => {
 
           <ul class="mt-6 grid gap-3 text-sm text-fg-muted sm:grid-cols-3">
             <li class="flex items-center gap-2"><ShieldCheck :size="16" class="shrink-0 text-fg-subtle" aria-hidden="true" /> UPI, cards and net banking via Razorpay</li>
-            <li class="flex items-center gap-2"><Receipt :size="16" class="shrink-0 text-fg-subtle" aria-hidden="true" /> GST invoice for every payment</li>
+            <li class="flex items-center gap-2"><Receipt :size="16" class="shrink-0 text-fg-subtle" aria-hidden="true" /> Invoice for every payment</li>
             <li class="flex items-center gap-2"><CalendarClock :size="16" class="shrink-0 text-fg-subtle" aria-hidden="true" /> Never renews automatically</li>
           </ul>
         </section>

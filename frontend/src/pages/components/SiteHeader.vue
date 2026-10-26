@@ -12,9 +12,9 @@ const route = useRoute();
 const authStore = useAuthStore();
 const open = ref(false);
 const links = [
+  { to: "/#how-it-works", label: "How it works" },
+  { to: "/#pricing", label: "Pricing" },
   { to: "/#features", label: "Features" },
-  { to: "/pricing", label: "Pricing" },
-  { to: "/security", label: "Security" },
   { to: "/#faq", label: "FAQ" },
 ];
 watch(() => route.fullPath, () => (open.value = false));
@@ -22,10 +22,10 @@ watch(() => route.fullPath, () => (open.value = false));
 
 <template>
   <header class="sticky top-0 z-40 border-b border-line/70 bg-canvas/85 backdrop-blur">
-    <div class="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
+    <div class="mx-auto flex h-14 max-w-6xl items-center justify-between px-4 sm:px-6">
       <router-link to="/" aria-label="SmartSpace home"><AppLogo /></router-link>
-      <nav class="hidden items-center gap-8 text-base font-medium text-fg-muted md:flex" aria-label="Main">
-        <router-link v-for="l in links" :key="l.to" :to="l.to" class="hover:text-fg">{{ l.label }}</router-link>
+      <nav class="hidden items-center gap-7 text-base font-medium text-fg-muted md:flex" aria-label="Main">
+        <router-link v-for="l in links" :key="l.to" :to="l.to" class="transition-colors hover:text-fg">{{ l.label }}</router-link>
       </nav>
       <div class="hidden items-center gap-2 md:flex">
         <ThemeToggle />
@@ -33,7 +33,7 @@ watch(() => route.fullPath, () => (open.value = false));
           {{ authStore.isMasterAdmin ? "Open admin console" : "Open my files" }}
         </UiButton>
         <template v-else>
-          <UiButton variant="ghost" to="/login">Sign in</UiButton>
+          <UiButton variant="ghost" to="/login">Log in</UiButton>
           <UiButton variant="primary" to="/register">Get started</UiButton>
         </template>
       </div>
@@ -62,7 +62,7 @@ watch(() => route.fullPath, () => (open.value = false));
         </UiButton>
         <template v-else>
           <UiButton variant="primary" size="lg" block to="/register">Get started</UiButton>
-          <UiButton size="lg" block to="/login">Sign in</UiButton>
+          <UiButton size="lg" block to="/login">Log in</UiButton>
         </template>
       </div>
     </div>

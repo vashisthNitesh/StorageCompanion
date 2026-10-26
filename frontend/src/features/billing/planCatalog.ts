@@ -30,14 +30,24 @@ export function audienceFor(plan: Plan): string {
   return AUDIENCE[plan.code] ?? plan.description.split(/[.,]/)[0];
 }
 
-export function priceFor(plan: Plan, interval: "monthly" | "yearly"): number {
-  return parseFloat(interval === "yearly" ? plan.price_yearly : plan.price_monthly);
+/** Months charged for a year: yearly plans are 12 months for the price of 10. */
+export const YEARLY_PAID_MONTHS = 10;
+
+export function monthlyPrice(plan: Plan): number {
+  return parseFloat(plan.price_monthly);
 }
 
-export function yearlySavingsPercent(plans: Plan[]): number {
-  const savings = plans.map((p) => 1 - parseFloat(p.price_yearly) / (parseFloat(p.price_monthly) * 12)).filter((s) => s > 0);
-  return savings.length ? Math.round(Math.min(...savings) * 100) : 0;
+/** What the period costs. The server computes the actual charge the same way (monthly × 10 for a year). */
+export function priceFor(plan: Plan, interval: "monthly" | "yearly"): number {
+  return interval === "yearly" ? monthlyPrice(plan) * YEARLY_PAID_MONTHS : monthlyPrice(plan);
 }
+
+/** Yearly figures for display: the full 12-month price (struck through), the effective monthly price and the saving. */
+export function yearlyBreakdown(plan: Plan) {
+  const m = monthlyPrice(plan);
+  return { full: m * 12, price: m * YEARLY_PAID_MONTHS, perMonth: Math.round((m * YEARLY_PAID_MONTHS) / 12), saving: m * (12 - YEARLY_PAID_MONTHS) };
+}
+
 
 export type PlanAction = "extend" | "upgrade" | "switch" | "choose";
 
@@ -49,11 +59,6 @@ export function actionFor(plan: Plan, currentCode: string | null | undefined, pl
   return parseFloat(plan.price_monthly) > parseFloat(current.price_monthly) ? "upgrade" : "switch";
 }
 
-export const GST_RATE = 0.18;
-export function gstBreakdown(total: number) {
-  const base = Math.round((total / (1 + GST_RATE)) * 100) / 100;
-  return { base, gst: Math.round((total - base) * 100) / 100, total };
-}
 
 /** What a plan card lists: its own limits first, then what every plan gets. */
 export function planFeatures(plan: Plan): string[] {
@@ -66,10 +71,6 @@ export function planFeatures(plan: Plan): string[] {
   ];
 }
 
-/** Price per month for display: yearly plans are shown as their monthly equivalent. */
-export function monthlyEquivalent(plan: Plan, interval: "monthly" | "yearly"): number {
-  return interval === "yearly" ? Math.round(priceFor(plan, "yearly") / 12) : priceFor(plan, "monthly");
-}
 
 /** Button label on a plan card, relative to the person's current plan. */
 export function ctaLabel(plan: Plan, action: PlanAction): string {

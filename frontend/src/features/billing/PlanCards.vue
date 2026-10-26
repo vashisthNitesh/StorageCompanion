@@ -6,7 +6,7 @@ import UiBadge from "../../components/ui/UiBadge.vue";
 import UiSkeleton from "../../components/ui/UiSkeleton.vue";
 import type { Plan } from "../../stores/billing";
 import { formatBytes, formatMoney } from "../../lib/format";
-import { RECOMMENDED_CODE, actionFor, audienceFor, ctaLabel, monthlyEquivalent, planFeatures, priceFor, storageLabel } from "./planCatalog";
+import { RECOMMENDED_CODE, actionFor, audienceFor, ctaLabel, monthlyPrice, planFeatures, priceFor, storageLabel, yearlyBreakdown } from "./planCatalog";
 
 // Plan cards used on the plans page and the public pricing page, so they never disagree.
 const props = withDefaults(
@@ -33,7 +33,8 @@ const cards = computed(() =>
       action,
       current: plan.code === props.currentCode,
       recommended: plan.code === RECOMMENDED_CODE,
-      perMonth: monthlyEquivalent(plan, props.interval),
+      monthly: monthlyPrice(plan),
+      yearly: yearlyBreakdown(plan),
       total: priceFor(plan, props.interval),
       label: props.publicCta ?? ctaLabel(plan, action),
       tooSmall,
@@ -78,11 +79,33 @@ const cards = computed(() =>
       </header>
 
       <p class="tabular mt-4 text-3xl font-semibold tracking-tight text-fg">{{ storageLabel(c.plan.storage_bytes) }}</p>
-      <p class="tabular mt-1 flex items-baseline gap-1">
-        <span class="text-lg font-semibold text-fg">{{ formatMoney(c.perMonth) }}</span>
-        <span class="text-sm text-fg-subtle">/ month</span>
-      </p>
-      <p class="tabular text-xs text-fg-subtle">{{ interval === "yearly" ? `${formatMoney(c.total)} billed yearly` : "Billed monthly" }}</p>
+      <!-- Fixed height so switching Monthly / Yearly never shifts the layout -->
+      <div class="relative mt-2 h-[84px]">
+        <Transition
+          enter-active-class="transition-opacity duration-base ease-out"
+          leave-active-class="absolute inset-x-0 top-0 transition-opacity duration-fast ease-in"
+          enter-from-class="opacity-0"
+          leave-to-class="opacity-0"
+        >
+          <div v-if="interval === 'yearly'" key="yearly" class="tabular">
+            <p class="text-sm text-fg-subtle"><s aria-label="Full price">{{ formatMoney(c.yearly.full) }}</s></p>
+            <p class="flex items-baseline gap-x-1.5 whitespace-nowrap">
+              <span class="text-2xl font-semibold tracking-tight text-fg">{{ formatMoney(c.yearly.price) }}</span>
+              <span class="text-sm text-fg-subtle">/ year</span>
+            </p>
+            <p class="mt-0.5 text-xs text-fg-muted">Effectively {{ formatMoney(c.yearly.perMonth) }}/month</p>
+            <p class="text-xs font-medium text-success">You save {{ formatMoney(c.yearly.saving) }}</p>
+          </div>
+          <div v-else key="monthly" class="tabular">
+            <p class="text-sm text-transparent" aria-hidden="true">&nbsp;</p>
+            <p class="flex items-baseline gap-x-1.5 whitespace-nowrap">
+              <span class="text-2xl font-semibold tracking-tight text-fg">{{ formatMoney(c.monthly) }}</span>
+              <span class="text-sm text-fg-subtle">/ month</span>
+            </p>
+            <p class="mt-0.5 text-xs text-fg-muted">Billed every month</p>
+          </div>
+        </Transition>
+      </div>
 
       <UiButton
         class="mt-5"

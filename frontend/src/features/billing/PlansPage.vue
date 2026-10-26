@@ -32,7 +32,7 @@ const included = [
   { icon: Download, title: "Unmetered downloads", text: "No bandwidth limits or fees." },
   { icon: Eye, title: "Previews everywhere", text: "Photos, videos, PDFs and documents in the browser." },
   { icon: ShieldCheck, title: "Two-step verification", text: "Protect sign-in with an authenticator app." },
-  { icon: Receipt, title: "GST invoices", text: "Every payment comes with a downloadable invoice." },
+  { icon: Receipt, title: "Simple invoices", text: "Download an invoice for every payment." },
 ];
 
 const faqs = [
@@ -40,7 +40,8 @@ const faqs = [
   { q: "Can I change plans later?", a: "Yes. Upgrading or switching starts the new plan as soon as you pay. Time left on the old plan isn't carried over, so it's best to switch close to your renewal date." },
   { q: "What does “Add more time” do?", a: "It buys another month or year of the plan you already have. The new time starts when your current period ends, so you don't lose any days." },
   { q: "What happens if my plan ends?", a: "Uploads pause, but your files stay available to download for 90 days. Renew any time in that window to carry on." },
-  { q: "Is GST included?", a: "Yes. Prices include 18% GST, and your invoice shows CGST/SGST or IGST for your state." },
+  { q: "How does yearly billing work?", a: "You pay for 10 months and get 12. The yearly price is the monthly price × 10, charged once." },
+  { q: "Are there any taxes or extra charges?", a: "No. The price you see is the price you pay." },
 ];
 const openFaq = ref<number | null>(null);
 
@@ -56,7 +57,7 @@ onMounted(() => {
 
     <header class="mx-auto mt-2 max-w-2xl text-center">
       <h1 class="text-2xl font-semibold tracking-tight text-fg sm:text-3xl">{{ currentCode ? "Change your plan" : "Choose your plan" }}</h1>
-      <p class="mt-2 text-base text-fg-muted">Prepaid in rupees, GST included. Plans never renew automatically.</p>
+      <p class="mt-2 text-base text-fg-muted">All prices are final. No GST or hidden charges added. Plans never renew automatically.</p>
       <div class="mt-5 flex justify-center"><IntervalToggle v-model="interval" /></div>
     </header>
 
